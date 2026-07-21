@@ -1,0 +1,3765 @@
+[
+  {
+    "name": "Basic 1",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 1,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 1,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.67,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 1,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 1,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 1,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.64,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 1,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.66,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1,
+        "semitoneFromRoot": 11,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1,
+        "semitoneFromRoot": 2,
+        "octaveOffset": 1,
+        "velocity": 0.69,
+        "voice": "chord"
+      }
+    ]
+  },
+  {
+    "name": "Basic 2",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 1,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 2,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1.97,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 1,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      }
+    ]
+  },
+  {
+    "name": "Bossa Nova 1",
+    "totalBeats": 4,
+    "bpm": 120,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 1.46,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.25,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.25,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.64,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.25,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.66,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.64,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1.46,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.66,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.67,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.59,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 1.96,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 11,
+        "octaveOffset": 0,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 2,
+        "octaveOffset": 1,
+        "velocity": 0.61,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.54,
+        "voice": "chord"
+      }
+    ]
+  },
+  {
+    "name": "Country 1",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 1.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.67,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.67,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.67,
+        "durationBeats": 0.3,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1.67,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.62,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.67,
+        "durationBeats": 0.3,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      }
+    ]
+  },
+  {
+    "name": "Country 2",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.67,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 2,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.64,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 2,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.67,
+        "durationBeats": 1,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1.97,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2.67,
+        "durationBeats": 1,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 9,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.63,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.67,
+        "durationBeats": 0.3,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      }
+    ]
+  },
+  {
+    "name": "Cumbia",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.66,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.57,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.23,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 0.45,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.56,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.23,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.68,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.66,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      }
+    ]
+  },
+  {
+    "name": "Dance 1",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 1,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.66,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 1,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0.75,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.75,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.75,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.67,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2.25,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.25,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.25,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.61,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 1,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.63,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.67,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3.75,
+        "durationBeats": 0.22,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.75,
+        "durationBeats": 0.22,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.75,
+        "durationBeats": 0.22,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.6,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 11,
+        "octaveOffset": 0,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 2,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.58,
+        "voice": "chord"
+      }
+    ]
+  },
+  {
+    "name": "Dance 2",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 1,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.61,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1.25,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.25,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.25,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.61,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.75,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.64,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.59,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 1.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2.75,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.75,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.75,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.58,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.25,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.63,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.75,
+        "durationBeats": 0.22,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      }
+    ]
+  },
+  {
+    "name": "Jazz Waltz",
+    "totalBeats": 4,
+    "bpm": 120,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0.67,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.67,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.68,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.67,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.63,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.67,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 0.63,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 0.63,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 0.63,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.67,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 11,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3.67,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.67,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 11,
+        "octaveOffset": 0,
+        "velocity": 0.67,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.67,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 2,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.67,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.53,
+        "voice": "chord"
+      }
+    ]
+  },
+  {
+    "name": "Melodic 1",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 3,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 2,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 2,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1,
+        "semitoneFromRoot": 2,
+        "octaveOffset": 2,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 2,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1.97,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 1.47,
+        "semitoneFromRoot": 2,
+        "octaveOffset": 2,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 2,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      }
+    ]
+  },
+  {
+    "name": "Melodic 2",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 3.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 1.47,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      }
+    ]
+  },
+  {
+    "name": "Melodic 3",
+    "totalBeats": 4,
+    "bpm": 80,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0.25,
+        "durationBeats": 1.75,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.75,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.25,
+        "durationBeats": 1,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.75,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.25,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 1.25,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.75,
+        "durationBeats": 1.22,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.25,
+        "durationBeats": 0.72,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.75,
+        "durationBeats": 0.22,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      }
+    ]
+  },
+  {
+    "name": "Melodic 4",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 2.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 2,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 1.47,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.64,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.64,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.57,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      }
+    ]
+  },
+  {
+    "name": "Melodic 5",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": -1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 3,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 2,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 1.47,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": -1,
+        "velocity": 0.7,
+        "voice": "chord"
+      }
+    ]
+  },
+  {
+    "name": "Melodic 6",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 1,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.68,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 1.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1,
+        "semitoneFromRoot": 11,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 3,
+        "semitoneFromRoot": 2,
+        "octaveOffset": 1,
+        "velocity": 0.64,
+        "voice": "chord"
+      }
+    ]
+  },
+  {
+    "name": "Melodic 7",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 3,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 3,
+        "velocity": 0.68,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 4,
+        "velocity": 0.59,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.68,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 2,
+        "velocity": 0.61,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 3.47,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 2,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 3.47,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 3,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 3,
+        "velocity": 0.64,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 3,
+        "velocity": 0.65,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 2.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 3,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.57,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 2.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 3,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.25,
+        "durationBeats": 0.72,
+        "semitoneFromRoot": 5,
+        "octaveOffset": 3,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3.25,
+        "durationBeats": 0.72,
+        "semitoneFromRoot": 5,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 3,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      }
+    ]
+  },
+  {
+    "name": "Melodic 8",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.47,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 1,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 2.47,
+        "semitoneFromRoot": 5,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1.47,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 9,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 2,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 3.47,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      }
+    ]
+  },
+  {
+    "name": "Polyrhythm",
+    "totalBeats": 4,
+    "bpm": 80,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 1,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 1,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.75,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 1,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.25,
+        "durationBeats": 0.72,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 1,
+        "semitoneFromRoot": 2,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 1,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.75,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 11,
+        "octaveOffset": 1,
+        "velocity": 0.66,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1,
+        "semitoneFromRoot": 2,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      }
+    ]
+  },
+  {
+    "name": "Reggaeton",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0.75,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.75,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.75,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.61,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.45,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.64,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.63,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 0.45,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2.75,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.75,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.68,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.75,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.45,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.66,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.67,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      }
+    ]
+  },
+  {
+    "name": "Rock 1",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 2.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 2.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 2.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.58,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.63,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.61,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3.25,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.25,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.25,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.66,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 2.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 2.5,
+        "semitoneFromRoot": 11,
+        "octaveOffset": 0,
+        "velocity": 0.68,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 2.5,
+        "semitoneFromRoot": 2,
+        "octaveOffset": 1,
+        "velocity": 0.56,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 2.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.69,
+        "voice": "chord"
+      }
+    ]
+  },
+  {
+    "name": "Rock 2",
+    "totalBeats": 4,
+    "bpm": 120,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.96,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.59,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.45,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.46,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.45,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.23,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.23,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.23,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.61,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 0.96,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 11,
+        "octaveOffset": 0,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 2,
+        "octaveOffset": 1,
+        "velocity": 0.58,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.67,
+        "voice": "chord"
+      }
+    ]
+  },
+  {
+    "name": "Rock 3",
+    "totalBeats": 4,
+    "bpm": 120,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.75,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 1.25,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 1.25,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.68,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.75,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.25,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.25,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.45,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.45,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.66,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.45,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.75,
+        "durationBeats": 0.21,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.75,
+        "durationBeats": 0.21,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.66,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      }
+    ]
+  },
+  {
+    "name": "Salsa 1",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.72,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.66,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.25,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.75,
+        "durationBeats": 0.72,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.64,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0.75,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.75,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.25,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.25,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.63,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1.22,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1.75,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.75,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.64,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.25,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.25,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.67,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.75,
+        "durationBeats": 0.72,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2.75,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.75,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.25,
+        "durationBeats": 0.22,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.25,
+        "durationBeats": 0.22,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 1.22,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3.75,
+        "durationBeats": 0.25,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.75,
+        "durationBeats": 0.25,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.63,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.68,
+        "voice": "chord"
+      }
+    ]
+  },
+  {
+    "name": "Salsa 2",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.72,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.75,
+        "durationBeats": 0.72,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.63,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0.75,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.67,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.25,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 1.22,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1.75,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.48,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.25,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.75,
+        "durationBeats": 0.72,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.63,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2.75,
+        "durationBeats": 0.4,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.25,
+        "durationBeats": 0.22,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 1.22,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 3.75,
+        "durationBeats": 0.25,
+        "semitoneFromRoot": 2,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 11,
+        "octaveOffset": 0,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.51,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 2,
+        "octaveOffset": 1,
+        "velocity": 0.68,
+        "voice": "chord"
+      }
+    ]
+  },
+  {
+    "name": "Samba",
+    "totalBeats": 4,
+    "bpm": 120,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 1.96,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.25,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.25,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.64,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 0.25,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.68,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.45,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.45,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 0.45,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1.46,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.67,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.64,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.62,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 11,
+        "octaveOffset": 0,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 2,
+        "octaveOffset": 1,
+        "velocity": 0.61,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.2,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.68,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1.96,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      }
+    ]
+  },
+  {
+    "name": "Straddle Run",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.66,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 0.5,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.67,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 2.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1.5,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 2,
+        "velocity": 0.65,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 1.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2.5,
+        "durationBeats": 0.5,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 2,
+        "velocity": 0.67,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3.5,
+        "durationBeats": 0.47,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 2,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1.5,
+        "semitoneFromRoot": 11,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 3.97,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 2,
+        "velocity": 0.65,
+        "voice": "chord"
+      }
+    ]
+  },
+  {
+    "name": "Waltz",
+    "totalBeats": 4,
+    "bpm": 100,
+    "hasBass": true,
+    "hasChords": true,
+    "notes": [
+      {
+        "beatOffset": 0,
+        "durationBeats": 2.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 1,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 1,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.67,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 1,
+        "durationBeats": 1,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.61,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 0,
+        "octaveOffset": 1,
+        "velocity": 0.63,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 2,
+        "durationBeats": 0.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.64,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 3,
+        "durationBeats": 2.97,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.7,
+        "voice": "bass"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1,
+        "semitoneFromRoot": 7,
+        "octaveOffset": 0,
+        "velocity": 0.7,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1,
+        "semitoneFromRoot": 11,
+        "octaveOffset": 0,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1,
+        "semitoneFromRoot": 2,
+        "octaveOffset": 1,
+        "velocity": 0.69,
+        "voice": "chord"
+      },
+      {
+        "beatOffset": 4,
+        "durationBeats": 1,
+        "semitoneFromRoot": 4,
+        "octaveOffset": 1,
+        "velocity": 0.54,
+        "voice": "chord"
+      }
+    ]
+  }
+]

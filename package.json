@@ -1,0 +1,36 @@
+{
+  "name": "composer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/processPatterns.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/processPatterns.mjs",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "patterns": "node scripts/processPatterns.mjs"
+  },
+  "dependencies": {
+    "@tonejs/midi": "^2.0.28",
+    "@tonejs/piano": "^0.2.1",
+    "events": "^3.3.0",
+    "lucide-react": "^1.23.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tone": "^15.1.22",
+    "webmidi": "^2.5.3",
+    "zundo": "^2.3.0",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "oxlint": "^1.71.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1"
+  }
+}
