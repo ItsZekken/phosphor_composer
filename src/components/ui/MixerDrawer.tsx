@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useSongStore } from '../../store/songStore';
 import { useShallow } from 'zustand/react/shallow';
-import { X, Sliders, Volume2, VolumeX, Radio, Music, Plus, RotateCcw } from 'lucide-react';
+import { X, Sliders, Music, Plus } from 'lucide-react';
 import type { ChannelConfig, ChannelInstrument } from '../../utils/typeDefinitions';
 
 const INSTRUMENT_LABELS: Record<ChannelInstrument, string> = {
@@ -15,7 +15,6 @@ export const MixerDrawer: React.FC = () => {
     isMixerOpen,
     setMixerOpen,
     channels,
-    updateChannel,
     toggleMute,
     toggleSolo,
     setChannelVolume,

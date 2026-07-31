@@ -43,7 +43,6 @@ export const Header = () => {
     setSettingsOpen,
     setSynthModalOpen,
     instrumentType,
-    setInstrumentType,
     timeSignature,
     setTimeSignature,
     pattern,

@@ -104,7 +104,6 @@ class ToneEngine {
   private activePressedNotesList: string[] = [];
 
   // --- Caché de estado del store para el hot path de audio (evita getState() en keyDown/keyUp) ---
-  private cachedInstrumentType: 'synth' | 'piano' = 'piano';
   private cachedIsKeyboardMelodyEnabled = true;
   private cachedIsKeyboardChromatic = false;
   private cachedKey = 'C';
@@ -242,7 +241,6 @@ class ToneEngine {
 
     // Inicializar caché con el estado actual
     const initialState = useSongStore.getState();
-    this.cachedInstrumentType = initialState.instrumentType;
     this.cachedIsKeyboardMelodyEnabled = initialState.isKeyboardMelodyEnabled;
     this.cachedIsKeyboardChromatic = initialState.isKeyboardChromatic;
     this.cachedKey = initialState.key;
@@ -268,7 +266,6 @@ class ToneEngine {
 
     useSongStore.subscribe((state) => {
       // --- Actualizar caché de hot path ---
-      this.cachedInstrumentType = state.instrumentType;
       this.cachedIsKeyboardMelodyEnabled = state.isKeyboardMelodyEnabled;
       this.cachedIsKeyboardChromatic = state.isKeyboardChromatic;
       this.cachedKey = state.key;
