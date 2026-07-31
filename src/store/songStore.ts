@@ -55,6 +55,7 @@ interface SongStore {
   metroSubdivision: '4n' | '8n' | '16n';
   metroVolume: number;
   isAudioLoading: boolean;
+  isEngineReady: boolean;
   instrumentType: 'synth' | 'piano';
   draggingChord: string | null;
   timeSignature: '4/4' | '3/4' | '6/8';
@@ -131,6 +132,7 @@ interface SongStore {
   setMetroSubdivision: (subdivision: '4n' | '8n' | '16n') => void;
   setMetroVolume: (volume: number) => void;
   setIsAudioLoading: (loading: boolean) => void;
+  setIsEngineReady: (ready: boolean) => void;
   setInstrumentType: (type: 'synth' | 'piano') => void;
   setDraggingChord: (chord: string | null) => void;
   setTimeSignature: (timeSignature: '4/4' | '3/4' | '6/8') => void;
@@ -228,6 +230,7 @@ export const useSongStore = create<SongStore>()(
   metroSubdivision: '4n',
   metroVolume: 50,
   isAudioLoading: false,
+  isEngineReady: false,
   instrumentType: 'piano',
   timeSignature: '4/4',
   pattern: 'hold',
@@ -344,6 +347,7 @@ export const useSongStore = create<SongStore>()(
   setMetroSubdivision: (metroSubdivision) => set({ metroSubdivision }),
   setMetroVolume: (metroVolume) => set({ metroVolume }),
   setIsAudioLoading: (isAudioLoading) => set({ isAudioLoading }),
+  setIsEngineReady: (isEngineReady) => set({ isEngineReady }),
   setInstrumentType: (instrumentType) => {
     set({ instrumentType });
     toneEngine.setInstrument(instrumentType);

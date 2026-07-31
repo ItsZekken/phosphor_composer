@@ -217,10 +217,11 @@ export default function App() {
   };
 
   return (
-    <div className={`crt-bezel ${isCrtEnabled ? '' : 'disabled'}`}>
-      <div className="crt-chassis">
-        <GlobalLoader />
-        <div id="crt-root" className={isCrtEnabled ? 'enabled' : ''}>
+    <>
+      <GlobalLoader />
+      <div className={`crt-bezel ${isCrtEnabled ? '' : 'disabled'}`}>
+        <div className="crt-chassis">
+          <div id="crt-root" className={isCrtEnabled ? 'enabled' : ''}>
           <CRTOverlay />
           <MixerDrawer />
           
@@ -295,6 +296,7 @@ export default function App() {
         </div>
       </div>
     </div>
+    </>
   );
 
 }
