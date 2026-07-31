@@ -1,5 +1,6 @@
 import type { MelodyNote, GhostNote, NoteClass, ScaleType, ChordBlock } from '../utils/typeDefinitions';
 import { noteToMod12, mod12ToNote } from '../engine/scaleDefinitions';
+import { useSongStore } from '../store/songStore';
 
 // Declaración para el objeto global mm de Magenta
 declare const mm: any;
@@ -13,6 +14,7 @@ class MelodyPredictor {
   public async init() {
     if (this.isLoaded || this.isLoading) return;
     this.isLoading = true;
+    useSongStore.getState().setIsAudioLoading(true);
 
     try {
       if (typeof mm !== 'undefined') {
@@ -27,6 +29,7 @@ class MelodyPredictor {
       console.error('Error cargando Magenta MelodyRNN:', e);
     } finally {
       this.isLoading = false;
+      useSongStore.getState().setIsAudioLoading(false);
     }
   }
 

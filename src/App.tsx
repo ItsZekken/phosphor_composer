@@ -13,6 +13,7 @@ import { SettingsPanel } from './components/ui/SettingsPanel';
 import { SynthConfigModal } from './components/ui/SynthConfigModal';
 import { ContextMenuContainer } from './components/ui/ContextMenuContainer';
 import { MixerDrawer } from './components/ui/MixerDrawer';
+import { GlobalLoader } from './components/ui/GlobalLoader';
 
 export default function App() {
   const activeView = useSongStore(state => state.activeView);
@@ -218,6 +219,7 @@ export default function App() {
   return (
     <div className={`crt-bezel ${isCrtEnabled ? '' : 'disabled'}`}>
       <div className="crt-chassis">
+        <GlobalLoader />
         <div id="crt-root" className={isCrtEnabled ? 'enabled' : ''}>
           <CRTOverlay />
           <MixerDrawer />
