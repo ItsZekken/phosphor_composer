@@ -4,7 +4,8 @@ import { useShallow } from 'zustand/react/shallow';
 import { toneEngine } from '../../audio/toneEngine';
 import { NOTE_CLASSES, SCALE_INTERVALS } from '../../engine/scaleDefinitions';
 import type { NoteClass, ScaleType } from '../../utils/typeDefinitions';
-import { Play, Square, Trash2, Music, RefreshCw, Bell, Settings as SettingsIcon } from 'lucide-react';
+import { Play, Square, Trash2, Music, RefreshCw, Bell, Settings as SettingsIcon, Sliders } from 'lucide-react';
+
 import { exportSessionToMidi, importMidiToSession } from '../../utils/midiService';
 
 const BeatDisplay = () => {
@@ -40,7 +41,6 @@ export const Header = () => {
     isAudioLoading,
     isSettingsOpen,
     setSettingsOpen,
-    isSynthModalOpen,
     setSynthModalOpen,
     instrumentType,
     setInstrumentType,
@@ -55,7 +55,12 @@ export const Header = () => {
     setSustain,
     chordOctaveShift,
     setChordOctaveShift,
-    refreshPatterns
+    refreshPatterns,
+    isMixerOpen,
+    setMixerOpen,
+    channels,
+    activeView,
+    setChannelInstrument
   } = useSongStore(useShallow(state => ({
     bpm: state.bpm,
     setBpm: state.setBpm,
@@ -79,7 +84,6 @@ export const Header = () => {
     isAudioLoading: state.isAudioLoading,
     isSettingsOpen: state.isSettingsOpen,
     setSettingsOpen: state.setSettingsOpen,
-    isSynthModalOpen: state.isSynthModalOpen,
     setSynthModalOpen: state.setSynthModalOpen,
     instrumentType: state.instrumentType,
     setInstrumentType: state.setInstrumentType,
@@ -94,8 +98,15 @@ export const Header = () => {
     setSustain: state.setSustain,
     chordOctaveShift: state.chordOctaveShift,
     setChordOctaveShift: state.setChordOctaveShift,
-    refreshPatterns: state.refreshPatterns
+    refreshPatterns: state.refreshPatterns,
+    isMixerOpen: state.isMixerOpen,
+    setMixerOpen: state.setMixerOpen,
+    channels: state.channels,
+    activeView: state.activeView,
+    setChannelInstrument: state.setChannelInstrument
   })));
+
+
 
   // Estado local del BPM — solo escribe al store en onBlur/Enter
   const [bpmInput, setBpmInput] = useState(String(bpm));
@@ -512,44 +523,60 @@ export const Header = () => {
                   </div>
                 )}
 
-                {styleTab === 'sounds' && (
-                  <div className="styles-tab-view">
-                    <div className="style-list-group" ref={soundsListRef}>
-                      <div className={`style-item-row ${instrumentType === 'synth' ? 'active' : ''}`} onClick={() => setInstrumentType('synth')}>
-                        <span className="style-name">Sintetizador Virtual</span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <button
-                            className="synth-config-gear-btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSynthModalOpen(true);
-                              setStyleMenuOpen(false);
-                            }}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: 'var(--text-secondary)',
-                              cursor: 'pointer',
-                              padding: '2px',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              marginRight: '2px'
-                            }}
-                            title="Configurar Sonido Sintetizador"
-                          >
-                            <SettingsIcon size={12} />
-                          </button>
-                          {instrumentType === 'synth' && <span className="style-led active" />}
+                {styleTab === 'sounds' && (() => {
+                  const currentChannelId = activeView === 'chord' ? 'chords' : 'melody';
+                  const currentChannel = channels[currentChannelId];
+                  const currentInst = currentChannel?.instrument || 'synth';
+
+                  return (
+                    <div className="styles-tab-view">
+                      <span style={{ fontSize: '0.68rem', color: 'var(--accent)', marginBottom: '8px', display: 'block', textTransform: 'uppercase', fontFamily: "'Share Tech Mono', monospace" }}>
+                        Pista actual: {currentChannelId === 'chords' ? 'Armonía (Acordes)' : 'Melodía'}
+                      </span>
+                      <div className="style-list-group" ref={soundsListRef}>
+                        <div 
+                          className={`style-item-row ${currentInst === 'synth' ? 'active' : ''}`} 
+                          onClick={() => setChannelInstrument(currentChannelId, 'synth')}
+                        >
+                          <span className="style-name">Sintetizador Virtual</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <button
+                              className="synth-config-gear-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSynthModalOpen(true);
+                                setStyleMenuOpen(false);
+                              }}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--text-secondary)',
+                                cursor: 'pointer',
+                                padding: '2px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                marginRight: '2px'
+                              }}
+                              title="Configurar Sonido Sintetizador"
+                            >
+                              <SettingsIcon size={12} />
+                            </button>
+                            {currentInst === 'synth' && <span className="style-led active" />}
+                          </div>
+                        </div>
+                        <div 
+                          className={`style-item-row ${currentInst === 'piano' ? 'active' : ''}`} 
+                          onClick={() => setChannelInstrument(currentChannelId, 'piano')}
+                        >
+                          <span className="style-name">Piano de Cola</span>
+                          {currentInst === 'piano' && <span className="style-led active" />}
                         </div>
                       </div>
-                      <div className={`style-item-row ${instrumentType === 'piano' ? 'active' : ''}`} onClick={() => setInstrumentType('piano')}>
-                        <span className="style-name">Piano de Cola</span>
-                        {instrumentType === 'piano' && <span className="style-led active" />}
-                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
+
 
                 {styleTab === 'config' && (
                   <div className="config-tab-view">
@@ -700,6 +727,16 @@ export const Header = () => {
 
         <div className="mock-sep" style={{ width: '1px', height: '24px', backgroundColor: 'var(--border-color)', margin: '0 4px' }}></div>
 
+        {/* Botón de Mezclador de Audio */}
+        <button
+          className={`control-btn ${isMixerOpen ? 'active' : ''}`}
+          onClick={() => setMixerOpen(!isMixerOpen)}
+          title="Mezclador de Audio (Shift+M)"
+          style={{ width: '36px', height: '36px' }}
+        >
+          <Sliders size={16} />
+        </button>
+
         {/* Botón de Configuración lateral */}
         <button
           className={`control-btn ${isSettingsOpen ? 'active' : ''}`}
@@ -709,6 +746,7 @@ export const Header = () => {
         >
           <SettingsIcon size={16} />
         </button>
+
       </div>
     </header>
   );

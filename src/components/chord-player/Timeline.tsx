@@ -8,6 +8,8 @@ import { getChordRole } from './ChordPalette';
 import { ChordPropertiesPanel } from './ChordPropertiesPanel';
 import { Undo2, Redo2 } from 'lucide-react';
 import { toneEngine } from '../../audio/toneEngine';
+import { ChannelQuickControl } from '../ui/ChannelQuickControl';
+
 
 const TimelinePlayhead: React.FC<{ beatWidth: number }> = ({ beatWidth }) => {
   const currentBeat = useSongStore(state => state.currentBeat);
@@ -38,7 +40,6 @@ export const Timeline: React.FC = () => {
     updateChordBlock,
     removeChordBlock,
     addChordBlock,
-    setCurrentBeat,
     key,
     scale,
     timeSignature,
@@ -51,7 +52,6 @@ export const Timeline: React.FC = () => {
     updateChordBlock: state.updateChordBlock,
     removeChordBlock: state.removeChordBlock,
     addChordBlock: state.addChordBlock,
-    setCurrentBeat: state.setCurrentBeat,
     key: state.key,
     scale: state.scale,
     timeSignature: state.timeSignature,
@@ -270,8 +270,10 @@ export const Timeline: React.FC = () => {
             </button>
           </div>
         </div>
+        <ChannelQuickControl channelId="chords" />
         <span className="ux-tip">Arrastra para mover • Estira el borde derecho para cambiar duración • Click derecho para editar</span>
       </div>
+
       
       <div 
         className="timeline-viewport" 

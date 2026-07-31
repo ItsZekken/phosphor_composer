@@ -6,7 +6,11 @@ import { NOTE_CLASSES } from '../../engine/scaleDefinitions';
 import { melodyPredictor } from '../../magenta/melodyPredictor';
 import { autoCorrelate, hzToMidi } from '../../utils/pitchDetector';
 import type { MelodyNote } from '../../utils/typeDefinitions';
-import { Mic, Trash, Sparkles } from 'lucide-react';
+import { Mic, Trash, Sparkles, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Copy, Trash2, Search, ChevronRight } from 'lucide-react';
+import { ContextMenuContainer } from '../ui/ContextMenuContainer';
+import { ScaleFinderSection } from './ScaleFinderSection';
+import { ChannelQuickControl } from '../ui/ChannelQuickControl';
+
 
 const MIN_MIDI = 24; // C1
 const MAX_MIDI = 96; // C7
@@ -94,7 +98,9 @@ const PianoRollRuler: React.FC<{
     const clickX = e.clientX - rect.left;
     const clickBeat = clickX / beatWidth;
     const snappedBeat = Math.round(clickBeat / 0.25) * 0.25;
-    toneEngine.seekToBeat(Math.max(0, Math.min(TOTAL_BEATS, snappedBeat)));
+    const targetBeat = Math.max(0, Math.min(TOTAL_BEATS, snappedBeat));
+    setCurrentBeat(targetBeat);
+    toneEngine.seekToBeat(targetBeat);
   };
 
   return (
@@ -398,6 +404,8 @@ export const PianoRollView = () => {
     bpm,
     key,
     scale,
+    setKey,
+    setScale,
     chordBlocks,
     activeNotes,
     activeMelodyNotes,
@@ -417,6 +425,8 @@ export const PianoRollView = () => {
     bpm: state.bpm,
     key: state.key,
     scale: state.scale,
+    setKey: state.setKey,
+    setScale: state.setScale,
     chordBlocks: state.chordBlocks,
     activeNotes: state.activeNotes,
     activeMelodyNotes: state.activeMelodyNotes,
@@ -443,6 +453,7 @@ export const PianoRollView = () => {
 
   // Menú contextual flotante del Piano Roll
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [isScaleFinderOpen, setIsScaleFinderOpen] = useState(false);
 
   // Referencias para la grabación de audio
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -1082,7 +1093,10 @@ export const PianoRollView = () => {
     <div className="piano-roll-view">
       {/* Barra de herramientas */}
       <div className="piano-roll-toolbar">
+        <ChannelQuickControl channelId="melody" />
+
         {/* Segmento de Duración de Nota por Defecto (5 Estados sin texto) */}
+
         <div className="toolbar-group note-length-segment">
           <button 
             className={`segment-btn ${selectedNoteLength === 4 ? 'active' : ''}`}
@@ -1259,39 +1273,111 @@ export const PianoRollView = () => {
 
       {/* Menú Contextual Local del Piano Roll */}
       {contextMenu && (
-        <div 
-          className="custom-context-menu"
-          style={{ 
-            top: `${contextMenu.y}px`, 
-            left: `${contextMenu.x}px`,
-            position: 'fixed'
-          }}
-          onClick={e => e.stopPropagation()}
-        >
+        <ContextMenuContainer x={contextMenu.x} y={contextMenu.y}>
           <div className="menu-header">Edición de Notas ({selectedNoteIds.length} sel)</div>
-          <button onClick={() => handleContextAction('transpose', 1)} disabled={selectedNoteIds.length === 0}>
-            Transponer +1 Semitono
+          
+          {/* Barra de Acciones Rápidas estilo Windows 11 */}
+          <div className="menu-quick-actions">
+            <button
+              type="button"
+              className="quick-action-btn"
+              title="Transponer -1 Semitono"
+              onClick={() => handleContextAction('transpose', -1)}
+              disabled={selectedNoteIds.length === 0}
+            >
+              <ArrowDown size={14} />
+              <span className="btn-subtext">-1</span>
+            </button>
+            <button
+              type="button"
+              className="quick-action-btn"
+              title="Transponer +1 Semitono"
+              onClick={() => handleContextAction('transpose', 1)}
+              disabled={selectedNoteIds.length === 0}
+            >
+              <ArrowUp size={14} />
+              <span className="btn-subtext">+1</span>
+            </button>
+            <button
+              type="button"
+              className="quick-action-btn"
+              title="Bajar 1 Octava (-12)"
+              onClick={() => handleContextAction('transpose', -12)}
+              disabled={selectedNoteIds.length === 0}
+            >
+              <ChevronsDown size={14} />
+              <span className="btn-subtext">-12</span>
+            </button>
+            <button
+              type="button"
+              className="quick-action-btn"
+              title="Subir 1 Octava (+12)"
+              onClick={() => handleContextAction('transpose', 12)}
+              disabled={selectedNoteIds.length === 0}
+            >
+              <ChevronsUp size={14} />
+              <span className="btn-subtext">+12</span>
+            </button>
+            <button
+              type="button"
+              className="quick-action-btn"
+              title="Duplicar notas seleccionadas"
+              onClick={() => handleContextAction('duplicate')}
+              disabled={selectedNoteIds.length === 0}
+            >
+              <Copy size={14} />
+            </button>
+            <button
+              type="button"
+              className="quick-action-btn danger"
+              title="Eliminar selección"
+              onClick={() => handleContextAction('delete')}
+              disabled={selectedNoteIds.length === 0}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+
+          <hr className="menu-separator" />
+
+          {/* Opción desplegable del Scale Finder */}
+          <button
+            type="button"
+            className="menu-item-expandable"
+            onClick={() => setIsScaleFinderOpen(!isScaleFinderOpen)}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Search size={14} />
+              <span>Scale Finder</span>
+            </div>
+            <ChevronRight size={14} className={`chevron-icon ${isScaleFinderOpen ? 'open' : ''}`} />
           </button>
-          <button onClick={() => handleContextAction('transpose', -1)} disabled={selectedNoteIds.length === 0}>
-            Transponer -1 Semitono
-          </button>
-          <button onClick={() => handleContextAction('transpose', 12)} disabled={selectedNoteIds.length === 0}>
-            Subir 1 Octava (+12)
-          </button>
-          <button onClick={() => handleContextAction('transpose', -12)} disabled={selectedNoteIds.length === 0}>
-            Bajar 1 Octava (-12)
-          </button>
-          <button onClick={() => handleContextAction('duplicate')} disabled={selectedNoteIds.length === 0}>
-            Duplicar notas
-          </button>
-          <button onClick={() => handleContextAction('deselect')} disabled={selectedNoteIds.length === 0}>
+
+          {isScaleFinderOpen && (
+            <ScaleFinderSection
+              selectedNoteIds={selectedNoteIds}
+              melodyNotes={melodyNotes}
+              currentKey={key}
+              currentScale={scale}
+              onSelectScale={(newKey, newScale) => {
+                setKey(newKey);
+                setScale(newScale);
+                setContextMenu(null);
+                setIsScaleFinderOpen(false);
+              }}
+            />
+          )}
+
+          <hr className="menu-separator" />
+
+          <button
+            type="button"
+            onClick={() => handleContextAction('deselect')}
+            disabled={selectedNoteIds.length === 0}
+          >
             Deseleccionar todo
           </button>
-          <hr className="menu-separator" />
-          <button onClick={() => handleContextAction('delete')} className="menu-danger" disabled={selectedNoteIds.length === 0}>
-            Eliminar selección
-          </button>
-        </div>
+        </ContextMenuContainer>
       )}
     </div>
   );

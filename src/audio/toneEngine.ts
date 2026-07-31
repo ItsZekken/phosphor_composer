@@ -74,9 +74,13 @@ class ToneEngine {
   private chordSynth: Tone.PolySynth;
   private melodySynth: Tone.Synth;
   private metroSynth: Tone.Synth; // Synth dedicado para el metrónomo
-  private piano: Piano | null = null;
+  private chordsPiano: Piano | null = null;
+  private melodyPiano: Piano | null = null;
   private synthFilter: Tone.Filter;
   private isInitialized = false;
+
+  private channelNodes = new Map<string, { volumeNode: Tone.Volume; pannerNode: Tone.Panner }>();
+  private cachedChannels: Record<string, any> | null = null;
   private scheduledEvents: number[] = [];
   private metroEventId: number | null = null;
   private activePreviewChord: string | null = null;
@@ -118,18 +122,38 @@ class ToneEngine {
   private synthSettingsVersion = 0;
   private lastAppliedSynthSettingsVersion = -1;
 
+  public _getInternalDebugState() {
+    return [this.playheadRafId, this.pendingNoteAfterInit, this.lastAppliedSynthSettingsVersion];
+  }
+
   // syncTimeline con debounce para evitar reconstrucciones excesivas durante edición
   private syncTimelineDebounced: () => void;
+
+  private getChannelNode(id: string) {
+    let node = this.channelNodes.get(id);
+    if (!node) {
+      const volumeNode = new Tone.Volume(0);
+      const pannerNode = new Tone.Panner(0);
+      volumeNode.connect(pannerNode);
+      pannerNode.toDestination();
+      node = { volumeNode, pannerNode };
+      this.channelNodes.set(id, node);
+    }
+    return node;
+  }
 
   constructor() {
     // Inicializar syncTimelineDebounced antes de cualquier uso
     this.syncTimelineDebounced = debounce(() => this.syncTimeline(), 50);
 
+    const chordsChannelNode = this.getChannelNode('chords');
+    const melodyChannelNode = this.getChannelNode('melody');
+
     this.synthFilter = new Tone.Filter({
       frequency: 20000,
       type: 'lowpass',
       Q: 1
-    }).toDestination();
+    }).connect(chordsChannelNode.volumeNode);
 
     // Sintetizadores originales por defecto para evitar descargas pesadas
     this.chordSynth = new Tone.PolySynth(Tone.Synth, {
@@ -153,8 +177,9 @@ class ToneEngine {
         release: 0.4
       }
     });
-    this.melodySynth.connect(this.synthFilter);
+    this.melodySynth.connect(melodyChannelNode.volumeNode);
     this.melodySynth.volume.value = -6;
+
 
     // Metrónomo click con envolvente muy corta percusiva (tipo woodblock)
     this.metroSynth = new Tone.Synth({
@@ -320,12 +345,50 @@ class ToneEngine {
       }
     });
 
-    // Cargar configuraciones iniciales del sintetizador y pre-cargar piano si es el default
+    // Cargar configuraciones iniciales del sintetizador y canales
     this.updateSynthSettings(useSongStore.getState().synthSettings);
+    this.syncChannels(useSongStore.getState().channels);
     const defaultInstrument = useSongStore.getState().instrumentType;
     if (defaultInstrument === 'piano') {
       this.setInstrument('piano');
     }
+  }
+
+  public syncChannels(channels: Record<string, any>) {
+    if (!channels) return;
+    this.cachedChannels = channels;
+    const channelList = Object.values(channels);
+    const anySolo = channelList.some((ch: any) => ch.solo);
+
+    for (const ch of channelList as any[]) {
+      const node = this.getChannelNode(ch.id);
+      const isSilenced = ch.muted || (anySolo && !ch.solo);
+      node.volumeNode.mute = isSilenced;
+
+      if (!isSilenced) {
+        if (ch.volume <= 0) {
+          node.volumeNode.volume.value = -Infinity;
+        } else {
+          const db = ((ch.volume - 80) / 80) * 30;
+          node.volumeNode.volume.value = Math.max(-60, Math.min(6, db));
+        }
+      }
+      node.pannerNode.pan.value = Math.max(-1, Math.min(1, ch.pan));
+
+      if (ch.instrument === 'piano' && (!this.chordsPiano || !this.melodyPiano)) {
+        this.setInstrument('piano');
+      }
+    }
+  }
+
+  private isChordPianoActive(): boolean {
+    const chordsInst = this.cachedChannels?.chords?.instrument || 'piano';
+    return chordsInst === 'piano' && !!this.chordsPiano && this.chordsPiano.loaded;
+  }
+
+  private isMelodyPianoActive(): boolean {
+    const melodyInst = this.cachedChannels?.melody?.instrument || 'synth';
+    return melodyInst === 'piano' && !!this.melodyPiano && this.melodyPiano.loaded;
   }
 
   /**
@@ -387,21 +450,23 @@ class ToneEngine {
   public async setInstrument(type: 'synth' | 'piano') {
     if (!this.isInitialized) await this.init();
 
-    if (type === 'piano' && !this.piano) {
+    if (type === 'piano' && (!this.chordsPiano || !this.melodyPiano)) {
       useSongStore.getState().setIsAudioLoading(true);
       
       try {
-        this.piano = new Piano({
-          velocities: 5,
-          url: '/piano/'
-        }).toDestination();
+        const chordsNode = this.getChannelNode('chords');
+        const melodyNode = this.getChannelNode('melody');
 
-        // Deshabilitar releases y harmonics para optimizar a la mitad los requests simultáneos
-        if ((this.piano as any)._keybed) {
-          (this.piano as any)._keybed._internalLoad = () => Promise.resolve();
+        if (!this.chordsPiano) {
+          this.chordsPiano = new Piano({ velocities: 5, url: '/piano/' }).connect(chordsNode.volumeNode);
+          if ((this.chordsPiano as any)._keybed) (this.chordsPiano as any)._keybed._internalLoad = () => Promise.resolve();
+          if ((this.chordsPiano as any)._harmonics) (this.chordsPiano as any)._harmonics._internalLoad = () => Promise.resolve();
         }
-        if ((this.piano as any)._harmonics) {
-          (this.piano as any)._harmonics._internalLoad = () => Promise.resolve();
+
+        if (!this.melodyPiano) {
+          this.melodyPiano = new Piano({ velocities: 5, url: '/piano/' }).connect(melodyNode.volumeNode);
+          if ((this.melodyPiano as any)._keybed) (this.melodyPiano as any)._keybed._internalLoad = () => Promise.resolve();
+          if ((this.melodyPiano as any)._harmonics) (this.melodyPiano as any)._harmonics._internalLoad = () => Promise.resolve();
         }
 
         const timeoutPromise = new Promise((resolve) => {
@@ -412,7 +477,7 @@ class ToneEngine {
         });
 
         await Promise.race([
-          this.piano.load(),
+          Promise.all([this.chordsPiano.load(), this.melodyPiano.load()]),
           timeoutPromise
         ]);
       } catch (e) {
@@ -425,6 +490,7 @@ class ToneEngine {
     this.syncTimeline();
   }
 
+
   /**
    * Silencia de forma limpia todas las voces activas
    */
@@ -435,9 +501,14 @@ class ToneEngine {
     try {
       this.melodySynth.triggerRelease();
     } catch (_) {}
-    if (this.piano) {
+    if (this.chordsPiano) {
       try {
-        this.piano.stopAll();
+        this.chordsPiano.stopAll();
+      } catch (_) {}
+    }
+    if (this.melodyPiano) {
+      try {
+        this.melodyPiano.stopAll();
       } catch (_) {}
     }
     try {
@@ -445,10 +516,12 @@ class ToneEngine {
     } catch (_) {}
   }
 
+
   public playChordPreview(chordName: string) {
     if (!this.isInitialized) this.init();
     const state = useSongStore.getState();
     const chordOctaveShift = state.chordOctaveShift || 0;
+    const usePiano = this.isChordPianoActive();
     
     try {
       let notes = getChordNotes(chordName, 4);
@@ -456,11 +529,11 @@ class ToneEngine {
         notes = notes.map(note => shiftNoteOctave(note, chordOctaveShift));
       }
       if (notes.length > 0) {
-        if (state.instrumentType === 'piano' && this.piano && this.piano.loaded) {
+        if (usePiano && this.chordsPiano && this.chordsPiano.loaded) {
           const now = Tone.now();
           notes.forEach(note => {
-            this.piano!.keyDown({ note, time: now, velocity: 0.7 });
-            this.piano!.keyUp({ note, time: now + 1.0 });
+            this.chordsPiano!.keyDown({ note, time: now, velocity: 0.7 });
+            this.chordsPiano!.keyUp({ note, time: now + 1.0 });
           });
         } else {
           this.chordSynth.triggerAttackRelease(notes, '2n');
@@ -505,7 +578,7 @@ class ToneEngine {
     this.previewStep = 0;
     const bpm = state.bpm;
     const beatDurationMs = (60 / bpm) * 1000;
-    const usePiano = state.instrumentType === 'piano' && this.piano && this.piano.loaded;
+    const usePiano = this.isChordPianoActive();
 
     const playNoteImmediate = (note: string, durationMs: number, velocity = 0.6) => {
       const now = Tone.now();
@@ -513,10 +586,10 @@ class ToneEngine {
       if (!this.activePreviewNotes.includes(note)) {
         this.activePreviewNotes.push(note);
       }
-      if (usePiano) {
+      if (usePiano && this.chordsPiano && this.chordsPiano.loaded) {
         try {
-          this.piano!.keyDown({ note, time: now, velocity });
-          this.piano!.keyUp({ note, time: now + durSec });
+          this.chordsPiano.keyDown({ note, time: now, velocity });
+          this.chordsPiano.keyUp({ note, time: now + durSec });
         } catch (e) { console.error(e); }
       } else {
         try {
@@ -525,6 +598,7 @@ class ToneEngine {
       }
       this.trackNote(note, durSec, undefined, 'harmony');
     };
+
 
     const playChordImmediate = (durationMs: number, velocity = 0.6) => {
       // Leer siempre this.previewNotes para tener las notas actualizadas del acorde actual
@@ -678,11 +752,11 @@ class ToneEngine {
     
     // Apagar selectivamente únicamente las notas de preescucha
     const now = Tone.now();
-    const usePiano = this.piano && this.piano.loaded;
+    const usePiano = this.isChordPianoActive();
     this.activePreviewNotes.forEach(note => {
       try {
         if (usePiano) {
-          this.piano!.keyUp({ note, time: now });
+          this.chordsPiano!.keyUp({ note, time: now });
         } else {
           this.chordSynth.triggerRelease(note, now);
         }
@@ -702,13 +776,13 @@ class ToneEngine {
 
   public playNotePreview(noteName: string) {
     if (!this.isInitialized) this.init();
-    const state = useSongStore.getState();
+    const usePiano = this.isMelodyPianoActive();
     
     try {
-      if (state.instrumentType === 'piano' && this.piano && this.piano.loaded) {
+      if (usePiano && this.melodyPiano && this.melodyPiano.loaded) {
         const now = Tone.now();
-        this.piano.keyDown({ note: noteName, time: now, velocity: 0.8 });
-        this.piano.keyUp({ note: noteName, time: now + 0.3 });
+        this.melodyPiano.keyDown({ note: noteName, time: now, velocity: 0.8 });
+        this.melodyPiano.keyUp({ note: noteName, time: now + 0.3 });
       } else {
         this.melodySynth.triggerAttackRelease(noteName, '8n');
       }
@@ -764,10 +838,8 @@ class ToneEngine {
   }
 
   public startNote(noteName: string) {
-    // P1: Si el AudioContext no está listo, inicializarlo y reintentar
     if (!this.isInitialized) {
       this.init().then(() => {
-        // Reintentar tras init — el contexto ya estará activo
         this.startNote(noteName);
       });
       return;
@@ -778,9 +850,9 @@ class ToneEngine {
       this.activePressedNotesList = this.activePressedNotesList.filter(n => n !== noteName);
       this.activePressedNotesList.push(noteName);
 
-      // S4: Usar caché en lugar de getState() en el hot path de audio
-      if (this.cachedInstrumentType === 'piano' && this.piano && this.piano.loaded) {
-        this.piano.keyDown({ note: noteName, time: Tone.now(), velocity: 0.8 });
+      const usePiano = this.isMelodyPianoActive();
+      if (usePiano && this.melodyPiano && this.melodyPiano.loaded) {
+        this.melodyPiano.keyDown({ note: noteName, time: Tone.now(), velocity: 0.8 });
       } else {
         this.melodySynth.triggerAttack(noteName, Tone.now());
       }
@@ -797,9 +869,9 @@ class ToneEngine {
       this.activePressedNotes.delete(noteName);
       this.activePressedNotesList = this.activePressedNotesList.filter(n => n !== noteName);
 
-      // S4: Usar caché en lugar de getState() en el hot path de audio
-      if (this.cachedInstrumentType === 'piano' && this.piano && this.piano.loaded) {
-        this.piano.keyUp({ note: noteName, time: Tone.now() });
+      const usePiano = this.isMelodyPianoActive();
+      if (usePiano && this.melodyPiano && this.melodyPiano.loaded) {
+        this.melodyPiano.keyUp({ note: noteName, time: Tone.now() });
       } else {
         if (this.activePressedNotes.size === 0) {
           this.melodySynth.triggerRelease(Tone.now());
@@ -813,6 +885,7 @@ class ToneEngine {
       console.warn('Error stopping note:', e);
     }
   }
+
 
   private trackNoteStart(note: string) {
     const state = useSongStore.getState();
@@ -898,7 +971,7 @@ class ToneEngine {
 
   private getDiatonicNoteName(key: string, scaleType: string, index: number): string {
     const rootVal = NOTE_CLASSES.indexOf(key as any);
-    const intervals = SCALE_INTERVALS[scaleType as any] || SCALE_INTERVALS.major;
+    const intervals = (SCALE_INTERVALS as Record<string, number[]>)[scaleType] || SCALE_INTERVALS.major;
     const scaleLength = intervals.length;
     
     const scaleIndex = index % scaleLength;
@@ -952,7 +1025,7 @@ class ToneEngine {
 
     const relativeBeat = tickBeat - block.startBeat;
     const pattern = state.pattern || 'hold';
-    const usePiano = state.instrumentType === 'piano' && this.piano && this.piano.loaded;
+    const usePiano = this.isChordPianoActive();
     const beatDuration = 60 / bpm;
 
     const notes = this.getBlockNotes(block, state.chordOctaveShift || 0);
@@ -966,9 +1039,9 @@ class ToneEngine {
 
     if (hasChordChanged) {
       // Liberar notas activas anteriores para evitar amontonamiento
-      if (usePiano && this.piano && this.piano.loaded) {
+      if (usePiano && this.chordsPiano && this.chordsPiano.loaded) {
         try {
-          this.piano.stopAll();
+          this.chordsPiano.stopAll();
         } catch (_) {}
       } else {
         try {
@@ -983,12 +1056,13 @@ class ToneEngine {
 
     const playNote = (note: string, durBeats: number, velocity = 0.6) => {
       const durSec = durBeats * beatDuration;
-      if (usePiano) {
+      if (usePiano && this.chordsPiano && this.chordsPiano.loaded) {
         try {
-          this.piano!.keyDown({ note, time, velocity });
-          this.piano!.keyUp({ note, time: time + durSec });
+          this.chordsPiano.keyDown({ note, time, velocity });
+          this.chordsPiano.keyUp({ note, time: time + durSec });
         } catch (e) { console.error(e); }
       } else {
+
         try {
           this.chordSynth.triggerAttackRelease(note, durSec, time, velocity);
         } catch (e) { console.error(e); }
@@ -1065,8 +1139,8 @@ class ToneEngine {
 
             if (usePiano) {
               try {
-                this.piano!.keyDown({ note, time: noteTime, velocity: 0.6 - index * 0.05 });
-                this.piano!.keyUp({ note, time: noteTime + noteDur });
+                this.chordsPiano!.keyDown({ note, time: noteTime, velocity: 0.6 - index * 0.05 });
+                this.chordsPiano!.keyUp({ note, time: noteTime + noteDur });
               } catch (e) {
                 console.error(e);
               }
@@ -1206,8 +1280,8 @@ class ToneEngine {
 
       if (usePiano) {
         try {
-          this.piano!.keyDown({ note: noteName, time, velocity: pn.velocity });
-          this.piano!.keyUp({ note: noteName, time: time + durSec });
+          this.chordsPiano!.keyDown({ note: noteName, time, velocity: pn.velocity });
+          this.chordsPiano!.keyUp({ note: noteName, time: time + durSec });
         } catch (e) { console.error(e); }
       } else {
         try {
@@ -1273,7 +1347,7 @@ class ToneEngine {
     });
     this.scheduledEvents = [];
 
-    const usePiano = state.instrumentType === 'piano' && this.piano && this.piano.loaded;
+    const usePiano = this.isMelodyPianoActive();
 
     // --- LIBERAR NOTAS DE MELODÍA O ARMONÍA ELIMINADAS O LIMPIADAS ---
     const currentBeat = state.currentBeat;
@@ -1289,8 +1363,8 @@ class ToneEngine {
     Array.from(this.activeMelodyNotesSet).forEach(note => {
       if (!stillActiveMelodyNotes.has(note)) {
         try {
-          if (usePiano) {
-            this.piano!.keyUp({ note, time: now });
+          if (usePiano && this.melodyPiano && this.melodyPiano.loaded) {
+            this.melodyPiano.keyUp({ note, time: now });
           }
         } catch (_) {}
         this.activeMelodyNotesSet.delete(note);
@@ -1316,15 +1390,13 @@ class ToneEngine {
     if (!activeBlock || state.chordBlocks.length === 0) {
       Array.from(this.activeNotesSet).forEach(note => {
         try {
-          if (usePiano) {
-            this.piano!.keyUp({ note, time: now });
+          if (this.chordsPiano && this.chordsPiano.loaded) {
+            this.chordsPiano.keyUp({ note, time: now });
           }
         } catch (_) {}
       });
       try {
-        if (!usePiano) {
-          this.chordSynth.releaseAll();
-        }
+        this.chordSynth.releaseAll();
       } catch (_) {}
       this.activeNotesSet.clear();
       this.noteActiveTimers.forEach(t => clearTimeout(t));
@@ -1339,12 +1411,12 @@ class ToneEngine {
       const startTimeSeconds = note.startBeat * beatDuration;
       const durationSeconds = note.durationBeats * beatDuration;
 
-      if (usePiano) {
+      if (usePiano && this.melodyPiano && this.melodyPiano.loaded) {
         // Melodía con piano (apagado programado de forma segura en Web Audio)
-      const id = Tone.Transport.schedule((time) => {
+        const id = Tone.Transport.schedule((time) => {
           try {
-            this.piano!.keyDown({ note: note.note, time, velocity: note.velocity });
-            this.piano!.keyUp({ note: note.note, time: time + durationSeconds });
+            this.melodyPiano!.keyDown({ note: note.note, time, velocity: note.velocity });
+            this.melodyPiano!.keyUp({ note: note.note, time: time + durationSeconds });
           } catch (e) {
             console.error('Error tocando nota de melodía con piano:', e);
           }
@@ -1364,6 +1436,7 @@ class ToneEngine {
         this.scheduledEvents.push(id);
       }
     });
+
 
     // 3. Programar clicks del metrónomo de forma aislada y sample-accurate
     if (this.metroEventId !== null) {
@@ -1480,18 +1553,21 @@ class ToneEngine {
     this.chordSynth.set({
       envelope: { release: releaseTime }
     });
-    if (this.piano) {
-      try {
-        if (sustain) {
-          this.piano.pedalDown();
-        } else {
-          this.piano.pedalUp();
+    [this.chordsPiano, this.melodyPiano].forEach(piano => {
+      if (piano) {
+        try {
+          if (sustain) {
+            piano.pedalDown();
+          } else {
+            piano.pedalUp();
+          }
+        } catch (e) {
+          console.error('Error al aplicar pedal de sustain en el piano:', e);
         }
-      } catch (e) {
-        console.error('Error al aplicar pedal de sustain en el piano:', e);
       }
-    }
+    });
   }
+
 }
 
 export const toneEngine = new ToneEngine();

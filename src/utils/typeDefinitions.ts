@@ -38,3 +38,19 @@ export interface ChordSuggestion {
 }
 
 export type ActiveView = 'chord' | 'piano-roll';
+
+export type ChannelInstrument = 'synth' | 'piano';
+
+
+export interface ChannelConfig {
+  id: string; // Ej: 'chords', 'melody', 'drums'
+  name: string; // Ej: 'Armonía', 'Melodía'
+  type: 'chord' | 'melody' | 'drums' | 'bass';
+  instrument: ChannelInstrument;
+  volume: number; // 0 a 100
+  pan: number; // -1.0 (L) a +1.0 (R)
+  muted: boolean;
+  solo: boolean;
+  color: string;
+}
+

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { temporal } from 'zundo';
-import type { NoteClass, ScaleType, ChordBlock, MelodyNote, GhostNote, ChordSuggestion, ActiveView } from '../utils/typeDefinitions';
+import type { NoteClass, ScaleType, ChordBlock, MelodyNote, GhostNote, ChordSuggestion, ActiveView, ChannelConfig, ChannelInstrument } from '../utils/typeDefinitions';
+
 import { getHarmonicSuggestions } from '../engine/harmonyEngine';
 import { detectKey } from '../engine/keyDetector';
 import { toneEngine } from '../audio/toneEngine';
@@ -105,7 +106,19 @@ interface SongStore {
     saturation: number;
   };
 
+  // Estado del Mezclador (Mixer)
+  isMixerOpen: boolean;
+  channels: Record<string, ChannelConfig>;
+  setMixerOpen: (open: boolean) => void;
+  updateChannel: (id: string, updates: Partial<ChannelConfig>) => void;
+  toggleMute: (id: string) => void;
+  toggleSolo: (id: string) => void;
+  setChannelVolume: (id: string, volume: number) => void;
+  setChannelPan: (id: string, pan: number) => void;
+  setChannelInstrument: (id: string, instrument: ChannelInstrument) => void;
+
   setBpm: (bpm: number) => void;
+
   setKey: (key: NoteClass) => void;
   setScale: (scale: ScaleType) => void;
   setIsAutoKey: (auto: boolean) => void;
@@ -164,8 +177,34 @@ interface SongStore {
     melodyNotes: MelodyNote[];
     isAutoKey?: boolean;
     chordOctaveShift?: number;
+    channels?: Record<string, ChannelConfig>;
   }) => void;
 }
+
+export const DEFAULT_CHANNELS: Record<string, ChannelConfig> = {
+  chords: {
+    id: 'chords',
+    name: 'Armonía',
+    type: 'chord',
+    instrument: 'piano',
+    volume: 80,
+    pan: 0,
+    muted: false,
+    solo: false,
+    color: '#00ffcc'
+  },
+  melody: {
+    id: 'melody',
+    name: 'Melodía',
+    type: 'melody',
+    instrument: 'synth',
+    volume: 85,
+    pan: 0,
+    muted: false,
+    solo: false,
+    color: '#ff00aa'
+  }
+};
 
 export const useSongStore = create<SongStore>()(
   temporal(
@@ -202,6 +241,29 @@ export const useSongStore = create<SongStore>()(
   isKeyboardChromatic: false,
   isSynthModalOpen: false,
   isAutoSuggestions: false,
+  isMixerOpen: false,
+  channels: DEFAULT_CHANNELS,
+
+  setMixerOpen: (isMixerOpen) => set({ isMixerOpen }),
+  updateChannel: (id, updates) => set((state) => {
+    const existing = state.channels[id];
+    if (!existing) return state;
+    const updatedChannel = { ...existing, ...updates };
+    const newChannels = { ...state.channels, [id]: updatedChannel };
+    toneEngine.syncChannels(newChannels);
+    return { channels: newChannels };
+  }),
+  toggleMute: (id) => get().updateChannel(id, { muted: !get().channels[id]?.muted }),
+  toggleSolo: (id) => get().updateChannel(id, { solo: !get().channels[id]?.solo }),
+  setChannelVolume: (id, volume) => get().updateChannel(id, { volume }),
+  setChannelPan: (id, pan) => get().updateChannel(id, { pan }),
+  setChannelInstrument: (id, instrument) => {
+    get().updateChannel(id, { instrument });
+    if (id === 'chords' && (instrument === 'piano' || instrument === 'synth')) {
+      set({ instrumentType: instrument });
+    }
+  },
+
   synthSettings: {
     waveType: 'triangle',
     envelope: {
@@ -488,6 +550,7 @@ export const useSongStore = create<SongStore>()(
 
   importSong: (session) => {
     toneEngine.stop();
+    const loadedChannels = session.channels || get().channels;
     set({
       bpm: session.bpm,
       key: session.key,
@@ -501,8 +564,10 @@ export const useSongStore = create<SongStore>()(
       selectedChordId: null,
       currentBeat: 0,
       isPlaying: false,
-      chordOctaveShift: session.chordOctaveShift ?? 0
+      chordOctaveShift: session.chordOctaveShift ?? 0,
+      channels: loadedChannels
     });
+    toneEngine.syncChannels(loadedChannels);
     get().updateSuggestions();
   }
 }),
@@ -517,7 +582,9 @@ export const useSongStore = create<SongStore>()(
     pattern: state.pattern,
     chordOctaveShift: state.chordOctaveShift,
     synthSettings: state.synthSettings,
+    channels: state.channels,
   }),
 }
 )
 );
+

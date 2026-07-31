@@ -227,7 +227,7 @@ export const SynthConfigModal = () => {
                       min="0.001"
                       max="2.0"
                       step="0.01"
-                      orient="vertical"
+                      {...({ orient: 'vertical' } as any)}
                       value={synthSettings.envelope.attack}
                       onChange={(e) => handleEnvelopeChange('attack', parseFloat(e.target.value))}
                       className="synth-slider vertical-slider"
@@ -246,7 +246,7 @@ export const SynthConfigModal = () => {
                       min="0.05"
                       max="2.0"
                       step="0.01"
-                      orient="vertical"
+                      {...({ orient: 'vertical' } as any)}
                       value={synthSettings.envelope.decay}
                       onChange={(e) => handleEnvelopeChange('decay', parseFloat(e.target.value))}
                       className="synth-slider vertical-slider"
@@ -265,7 +265,7 @@ export const SynthConfigModal = () => {
                       min="0"
                       max="1"
                       step="0.01"
-                      orient="vertical"
+                      {...({ orient: 'vertical' } as any)}
                       value={synthSettings.envelope.sustain}
                       onChange={(e) => handleEnvelopeChange('sustain', parseFloat(e.target.value))}
                       className="synth-slider vertical-slider"
@@ -284,7 +284,7 @@ export const SynthConfigModal = () => {
                       min="0.05"
                       max="4.0"
                       step="0.01"
-                      orient="vertical"
+                      {...({ orient: 'vertical' } as any)}
                       value={synthSettings.envelope.release}
                       onChange={(e) => handleEnvelopeChange('release', parseFloat(e.target.value))}
                       className="synth-slider vertical-slider"

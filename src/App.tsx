@@ -5,12 +5,14 @@ import { ChordPlayerView } from './components/chord-player/ChordPlayerView';
 import { PianoRollView } from './components/piano-roll/PianoRollView';
 import { useSongStore } from './store/songStore';
 import { toneEngine } from './audio/toneEngine';
-import { ArrowUp, ArrowDown, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, RefreshCw, Trash2 } from 'lucide-react';
 import { loadCustomPatterns } from './patterns/patternLoader';
 import { PianoVisualizer } from './components/piano-roll/PianoVisualizer';
 import { CRTOverlay } from './components/ui/CRTOverlay';
 import { SettingsPanel } from './components/ui/SettingsPanel';
 import { SynthConfigModal } from './components/ui/SynthConfigModal';
+import { ContextMenuContainer } from './components/ui/ContextMenuContainer';
+import { MixerDrawer } from './components/ui/MixerDrawer';
 
 export default function App() {
   const activeView = useSongStore(state => state.activeView);
@@ -61,6 +63,7 @@ export default function App() {
         isCrtEnabled: state.isCrtEnabled,
         crtParams: state.crtParams,
         synthSettings: state.synthSettings,
+        channels: state.channels,
         isKeyboardMelodyEnabled: state.isKeyboardMelodyEnabled,
         isKeyboardChromatic: state.isKeyboardChromatic,
         isAutoSuggestions: state.isAutoSuggestions
@@ -82,6 +85,13 @@ export default function App() {
       }
 
       const store = useSongStore.getState();
+
+      if (e.shiftKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        store.setMixerOpen(!store.isMixerOpen);
+        return;
+      }
+
 
       if (e.key === ' ') {
         e.preventDefault();
@@ -210,6 +220,7 @@ export default function App() {
       <div className="crt-chassis">
         <div id="crt-root" className={isCrtEnabled ? 'enabled' : ''}>
           <CRTOverlay />
+          <MixerDrawer />
           
           <div className="crt-screen-content">
             <PianoVisualizer />
@@ -221,36 +232,59 @@ export default function App() {
 
             {/* Menú Contextual Flotante Personalizado */}
             {contextMenu.visible && (
-              <div 
-                className="custom-context-menu"
-                style={{ 
-                  top: `${contextMenu.y}px`, 
-                  left: `${contextMenu.x}px`,
-                  position: 'fixed'
-                }}
-                onClick={e => e.stopPropagation()}
-              >
+              <ContextMenuContainer x={contextMenu.x} y={contextMenu.y}>
                 <div className="menu-header">Herramientas del DAW</div>
-                <button onClick={() => handleContextTranspose(1)}>
-                  <ArrowUp size={14} /> Transponer +1 Semitono
-                </button>
-                <button onClick={() => handleContextTranspose(-1)}>
-                  <ArrowDown size={14} /> Transponer -1 Semitono
-                </button>
-                <button onClick={() => handleContextTranspose(12)}>
-                  <ArrowUp size={14} /> Subir 1 Octava (+12)
-                </button>
-                <button onClick={() => handleContextTranspose(-12)}>
-                  <ArrowDown size={14} /> Bajar 1 Octava (-12)
-                </button>
-                <button onClick={() => setLooping(!isLooping)}>
+                
+                {/* Barra de Acciones Rápidas estilo Windows 11 */}
+                <div className="menu-quick-actions">
+                  <button
+                    type="button"
+                    className="quick-action-btn"
+                    title="Transponer -1 Semitono"
+                    onClick={() => handleContextTranspose(-1)}
+                  >
+                    <ArrowDown size={14} />
+                    <span className="btn-subtext">-1</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="quick-action-btn"
+                    title="Transponer +1 Semitono"
+                    onClick={() => handleContextTranspose(1)}
+                  >
+                    <ArrowUp size={14} />
+                    <span className="btn-subtext">+1</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="quick-action-btn"
+                    title="Bajar 1 Octava (-12)"
+                    onClick={() => handleContextTranspose(-12)}
+                  >
+                    <ChevronsDown size={14} />
+                    <span className="btn-subtext">-12</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="quick-action-btn"
+                    title="Subir 1 Octava (+12)"
+                    onClick={() => handleContextTranspose(12)}
+                  >
+                    <ChevronsUp size={14} />
+                    <span className="btn-subtext">+12</span>
+                  </button>
+                </div>
+
+                <hr className="menu-separator" />
+
+                <button type="button" onClick={() => setLooping(!isLooping)}>
                   <RefreshCw size={14} /> Repeat / Loop: {isLooping ? 'ON' : 'OFF'}
                 </button>
                 <hr className="menu-separator" />
-                <button className="menu-danger" onClick={handleContextClear}>
+                <button type="button" className="menu-danger" onClick={handleContextClear}>
                   <Trash2 size={14} /> Limpiar Todo
                 </button>
-              </div>
+              </ContextMenuContainer>
             )}
           </div>
 
@@ -260,4 +294,5 @@ export default function App() {
       </div>
     </div>
   );
+
 }

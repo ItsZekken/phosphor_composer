@@ -7,7 +7,7 @@ const processPatternsPlugin = () => ({
   configureServer(server: any) {
     server.middlewares.use((req: any, res: any, next: any) => {
       if (req.url === '/api/process-patterns') {
-        exec('node scripts/processPatterns.mjs', (error, stdout, stderr) => {
+        exec('node scripts/processPatterns.mjs', (error, stdout, _stderr) => {
           if (error) {
             console.error(`Error running processPatterns.mjs: ${error.message}`);
             res.statusCode = 500;
