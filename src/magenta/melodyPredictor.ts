@@ -19,7 +19,10 @@ class MelodyPredictor {
     try {
       if (typeof mm !== 'undefined') {
         this.model = new mm.MusicRNN(this.checkpointUrl);
-        await this.model.initialize();
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout de Magenta RNN')), 5000)
+        );
+        await Promise.race([this.model.initialize(), timeoutPromise]);
         this.isLoaded = true;
         console.log('Magenta MelodyRNN cargado correctamente.');
       } else {

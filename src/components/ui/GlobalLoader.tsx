@@ -11,10 +11,13 @@ export const GlobalLoader: React.FC = () => {
   const setIsEngineReady = useSongStore(state => state.setIsEngineReady);
   const instrumentType = useSongStore(state => state.instrumentType);
 
+  const [isInitializing, setIsInitializing] = useState(false);
   const [loadingStep, setLoadingStep] = useState<string>('Iniciando...');
 
   const handleStartStudio = async () => {
+    setIsInitializing(true);
     setIsAudioLoading(true);
+
     try {
       setLoadingStep('Activando Web Audio API...');
       await toneEngine.init();
@@ -25,17 +28,17 @@ export const GlobalLoader: React.FC = () => {
       setLoadingStep('Inicializando modelo IA MelodyRNN (Magenta)...');
       await melodyPredictor.init();
 
-      setLoadingStep('¡Todo listo!');
-      setIsEngineReady(true);
+      setLoadingStep('¡Estudio preparado!');
     } catch (e) {
       console.error('Error al inicializar el estudio:', e);
-      setIsEngineReady(true); // Permitir entrada en caso de fallo parcial
     } finally {
+      setIsEngineReady(true);
       setIsAudioLoading(false);
+      setIsInitializing(false);
     }
   };
 
-  // Si el motor ya está listo y no hay nada cargando, no mostrar overlay
+  // Si el estudio está listo y no hay carga activa en segundo plano, ocultar overlay
   if (isEngineReady && !isAudioLoading) {
     return null;
   }
@@ -50,7 +53,7 @@ export const GlobalLoader: React.FC = () => {
           <span className="logo-tag">DAW v2.0</span>
         </div>
 
-        {!isEngineReady && !isAudioLoading ? (
+        {!isEngineReady && !isInitializing ? (
           /* PANTALLA INICIAL DE BIENVENIDA / CLICK TO START */
           <div className="loader-start-content">
             <h2>Estudio de Composición Armónica</h2>
@@ -96,8 +99,10 @@ export const GlobalLoader: React.FC = () => {
             </div>
 
             <div className="loader-status-block">
-              <h3>Cargando Estudio</h3>
-              <p className="step-text">{loadingStep || 'Preparando sintetizadores...'}</p>
+              <h3>{isInitializing ? 'Inicializando Estudio' : 'Cargando Recurso'}</h3>
+              <p className="step-text">
+                {isInitializing ? loadingStep : 'Cargando muestras de instrumentos...'}
+              </p>
             </div>
 
             <div className="loader-progress-bar-track">

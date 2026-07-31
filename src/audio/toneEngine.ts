@@ -199,9 +199,16 @@ class ToneEngine {
     if (this.isInitialized) return;
     // Evitar inicializaciones concurrentes (P1: garantía de single-init)
     if (this.initPromise) return this.initPromise;
-    this.initPromise = Tone.start();
+    this.initPromise = (async () => {
+      try {
+        const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 3000));
+        await Promise.race([Tone.start(), timeoutPromise]);
+      } catch (e) {
+        console.warn('Advertencia al iniciar Tone.start():', e);
+      }
+      this.isInitialized = true;
+    })();
     await this.initPromise;
-    this.isInitialized = true;
 
     // P2: Loop de loop/stop en el audio thread — NO llama setCurrentBeat aquí
     // Solo gestiona el reinicio del loop y la parada. La UI del playhead va por rAF.
