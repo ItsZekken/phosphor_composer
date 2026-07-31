@@ -29,7 +29,7 @@ const processPatternsPlugin = () => ({
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/phosphor_composer/',
+  base: '/',
   plugins: [react(), processPatternsPlugin()],
 })
 
