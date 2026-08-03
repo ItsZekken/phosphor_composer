@@ -254,6 +254,12 @@ class ToneEngine {
     this.cachedScale = initialState.scale;
     this.cachedBpm = initialState.bpm;
 
+    // Recalcular cachedMaxBeat inicial para canciones persistidas o precargadas
+    let initialMax = 4;
+    initialState.chordBlocks.forEach(b => { initialMax = Math.max(initialMax, b.startBeat + b.durationBeats); });
+    initialState.melodyNotes.forEach(n => { initialMax = Math.max(initialMax, n.startBeat + n.durationBeats); });
+    this.cachedMaxBeat = initialMax;
+
     // Suscripción manual a los cambios del store
     let prevBpm = initialState.bpm;
     let prevIsPlaying = initialState.isPlaying;
