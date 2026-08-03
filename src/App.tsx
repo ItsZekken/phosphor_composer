@@ -246,7 +246,14 @@ export default function App() {
             <Header />
             <ViewToggle />
             <main className="app-main">
-              {activeView === 'chord' ? <ChordPlayerView /> : <PianoRollView />}
+              {activeView === 'chord' && <ChordPlayerView />}
+              {activeView === 'piano-roll' && <PianoRollView />}
+              {activeView === 'sequencer' && (
+                <div style={{ padding: '2rem', color: '#fff' }}>
+                  <h2>Drum Sequencer (Próximamente)</h2>
+                  <p>La vista está en construcción.</p>
+                </div>
+              )}
             </main>
 
             {/* Menú Contextual Flotante Personalizado */}

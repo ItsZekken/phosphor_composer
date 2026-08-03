@@ -43,6 +43,23 @@ export const ViewToggle = () => {
         }}></span>
         PIANO ROLL
       </button>
+      <button
+        className={`toggle-btn ${activeView === 'sequencer' ? 'active' : ''}`}
+        onClick={() => setActiveView('sequencer')}
+      >
+        <span style={{ 
+          display: 'inline-block', 
+          width: '6px', 
+          height: '6px', 
+          borderRadius: '50%', 
+          backgroundColor: activeView === 'sequencer' ? '#82a5f5' : '#3a324a', 
+          marginRight: '8px',
+          boxShadow: activeView === 'sequencer' ? '0 0 6px #82a5f5, 0 0 10px #82a5f5' : 'none',
+          verticalAlign: 'middle',
+          transition: 'background-color 0.15s'
+        }}></span>
+        DRUM SEQUENCER
+      </button>
     </div>
   );
 };

@@ -37,7 +37,7 @@ export interface ChordSuggestion {
   category: 'reposo' | 'tensión' | 'spicy' | 'subdominante' | 'exotic';
 }
 
-export type ActiveView = 'chord' | 'piano-roll';
+export type ActiveView = 'chord' | 'piano-roll' | 'sequencer';
 
 export type ChannelInstrument = 'synth' | 'piano';
 

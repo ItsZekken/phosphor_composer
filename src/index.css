@@ -1573,6 +1573,7 @@ select:focus {
   height: 100%;
   display: flex;
   flex-direction: column;
+  padding-bottom: 4px;
 }
 
 .matrix-grid {

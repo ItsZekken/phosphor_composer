@@ -10,7 +10,8 @@ import { Mic, Trash, Sparkles, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Cop
 import { ContextMenuContainer } from '../ui/ContextMenuContainer';
 import { ScaleFinderSection } from './ScaleFinderSection';
 import { ChannelQuickControl } from '../ui/ChannelQuickControl';
-
+import { useGridZoom } from '../../hooks/useGridZoom';
+import { SharedTimelineRuler } from '../shared/SharedTimelineRuler';
 
 const MIN_MIDI = 24; // C1
 const MAX_MIDI = 96; // C7
@@ -85,116 +86,6 @@ const PianoSidebar: React.FC<{
     </div>
   );
 });
-
-const PianoRollRuler: React.FC<{
-  TOTAL_BEATS: number;
-  beatWidth: number;
-  canvasWidth: number;
-  chordBlocks: any[];
-  setCurrentBeat: (beat: number) => void;
-}> = React.memo(({ TOTAL_BEATS, beatWidth, canvasWidth, chordBlocks, setCurrentBeat }) => {
-  const handleRulerClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const clickBeat = clickX / beatWidth;
-    const snappedBeat = Math.round(clickBeat / 0.25) * 0.25;
-    const targetBeat = Math.max(0, Math.min(TOTAL_BEATS, snappedBeat));
-    setCurrentBeat(targetBeat);
-    toneEngine.seekToBeat(targetBeat);
-  };
-
-  return (
-    <div 
-      className="piano-roll-ruler" 
-      style={{ 
-        width: `${canvasWidth}px`, 
-        height: '42px', 
-        position: 'sticky', 
-        top: 0, 
-        zIndex: 10,
-        backgroundColor: '#121614',
-        borderBottom: '2px solid var(--border-color)',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        userSelect: 'none',
-        pointerEvents: 'auto',
-        cursor: 'pointer',
-        flexShrink: 0
-      }}
-      onClick={handleRulerClick}
-    >
-      <div className="ruler-chords-layer" style={{ height: '18px', position: 'relative', width: '100%', borderBottom: '1px dashed rgba(0, 229, 255, 0.1)', overflow: 'hidden' }}>
-        {chordBlocks.map((block) => (
-          <div
-            key={block.id}
-            className="ruler-chord-block"
-            style={{
-              position: 'absolute',
-              left: `${block.startBeat * beatWidth}px`,
-              width: `${block.durationBeats * beatWidth}px`,
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: 'rgba(0, 229, 255, 0.04)',
-              borderRight: '1px solid rgba(0, 229, 255, 0.15)',
-              fontFamily: "'Share Tech Mono', monospace",
-              fontSize: '0.68rem',
-              color: 'var(--accent)',
-              textShadow: '0 0 4px rgba(0, 229, 255, 0.3)',
-              fontWeight: 'bold'
-            }}
-            title={`Acorde: ${block.chord}`}
-          >
-            {block.chord}
-          </div>
-        ))}
-      </div>
-
-      <div className="ruler-beats-layer" style={{ height: '24px', position: 'relative', width: '100%' }}>
-        {Array.from({ length: TOTAL_BEATS }).map((_, b) => {
-          const isMeasureStart = b % 4 === 0;
-          const measureNumber = Math.floor(b / 4) + 1;
-          return (
-            <div
-              key={b}
-              style={{
-                position: 'absolute',
-                left: `${b * beatWidth}px`,
-                width: `${beatWidth}px`,
-                height: '100%',
-                borderLeft: isMeasureStart ? '1px solid rgba(0, 229, 255, 0.3)' : '1px solid rgba(255,255,255,0.05)',
-                paddingLeft: '6px',
-                paddingTop: '3px',
-                display: 'flex',
-                alignItems: 'baseline',
-                gap: '4px',
-                boxSizing: 'border-box'
-              }}
-            >
-              {isMeasureStart ? (
-                <>
-                  <span style={{ fontSize: '0.72rem', fontWeight: 'bold', fontFamily: "'Share Tech Mono', monospace", color: 'var(--text-primary)' }}>
-                    c.{measureNumber}
-                  </span>
-                  <span style={{ fontSize: '0.55rem', color: 'var(--text-secondary)', fontFamily: "'Share Tech Mono', monospace" }}>
-                    (b.{b})
-                  </span>
-                </>
-              ) : (
-                <span style={{ fontSize: '0.55rem', color: 'var(--text-secondary)', fontFamily: "'Share Tech Mono', monospace" }}>
-                  {b}
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-});
-
 const PianoRollCanvas: React.FC<{
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   beatWidth: number;
@@ -409,8 +300,6 @@ export const PianoRollView = () => {
     chordBlocks,
     activeNotes,
     activeMelodyNotes,
-    timeSignature,
-    coarseBeat,
     isAutoSuggestions
   } = useSongStore(useShallow(state => ({
     melodyNotes: state.melodyNotes,
@@ -430,8 +319,6 @@ export const PianoRollView = () => {
     chordBlocks: state.chordBlocks,
     activeNotes: state.activeNotes,
     activeMelodyNotes: state.activeMelodyNotes,
-    timeSignature: state.timeSignature,
-    coarseBeat: Math.floor(state.currentBeat / 4) * 4,
     isAutoSuggestions: state.isAutoSuggestions
   })));
 
@@ -462,22 +349,9 @@ export const PianoRollView = () => {
   const recordedPitchesRef = useRef<{ midi: number; time: number }[]>([]);
   const recordingStartTimeRef = useRef<number>(0);
 
-  // Dimensiones de cuadrícula reactivas para Zoom
-  const [rowHeight, setRowHeight] = useState(24);
-  const [beatWidth, setBeatWidth] = useState(96);
+  // Reemplazando lógica de zoom por el custom hook
+  const { rowHeight, beatWidth, setRowHeight, setBeatWidth, TOTAL_BEATS } = useGridZoom();
   const GRID_SNAP = 0.25; // Semicorcheas
-
-  // Determinar la duración del compás en beats
-  const beatsPerMeasure = timeSignature === '3/4' ? 3 : timeSignature === '6/8' ? 6 : 4;
-
-  // Calcular de forma dinámica el total de beats necesarios (infinito)
-  const maxMelodyBeat = melodyNotes.reduce((max, note) => Math.max(max, note.startBeat + note.durationBeats), 0);
-  const maxChordBeat = chordBlocks.reduce((max, block) => Math.max(max, block.startBeat + block.durationBeats), 0);
-  const maxContentBeat = Math.max(maxMelodyBeat, maxChordBeat);
-
-  // Dar siempre al menos 16 beats vacíos a la derecha del contenido o del playhead
-  const rawBeatsNeeded = Math.max(32, maxContentBeat + 16, coarseBeat + 8);
-  const TOTAL_BEATS = Math.ceil(rawBeatsNeeded / beatsPerMeasure) * beatsPerMeasure;
 
   const canvasWidth = TOTAL_BEATS * beatWidth;
   const canvasHeight = NOTE_COUNT * rowHeight;
@@ -1208,10 +1082,14 @@ export const PianoRollView = () => {
           <div 
             className="piano-sidebar" 
             ref={pianoRef} 
+            onWheel={(e) => {
+              if (containerRef.current) {
+                containerRef.current.scrollTop += e.deltaY;
+              }
+            }}
             style={{ 
               height: '100%', 
-              overflowY: 'scroll', 
-              scrollbarWidth: 'none',
+              overflowY: 'hidden', 
               position: 'relative'
             }}
           >
@@ -1245,7 +1123,7 @@ export const PianoRollView = () => {
           onScroll={handleScroll}
           style={{ position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'auto' }}
         >
-          <PianoRollRuler
+          <SharedTimelineRuler
             TOTAL_BEATS={TOTAL_BEATS}
             beatWidth={beatWidth}
             canvasWidth={canvasWidth}
