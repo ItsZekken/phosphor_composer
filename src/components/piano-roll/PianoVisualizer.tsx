@@ -17,6 +17,33 @@ function normalizeNote(n: string): string {
     .replace('AB', 'G#').replace('BB', 'A#');
 }
 
+const PianoKey = React.memo(({ 
+  keyDef, 
+  isMelody, 
+  isHarmony, 
+  style 
+}: { 
+  keyDef: KeyDef, 
+  isMelody: boolean, 
+  isHarmony: boolean, 
+  style?: React.CSSProperties 
+}) => {
+  const activeClass = isMelody ? 'active-melody' : isHarmony ? 'active' : '';
+  const isBlack = keyDef.isBlack;
+  const className = `top-piano-key ${isBlack ? 'black' : 'white'} ${activeClass}`;
+  
+  return (
+    <div
+      className={className}
+      style={style}
+      title={keyDef.noteName}
+    >
+      {!isBlack && keyDef.label && <span className="key-label">{keyDef.label}</span>}
+      <div className={`key-led ${isMelody ? 'active melody' : isHarmony ? 'active' : ''}`} />
+    </div>
+  );
+});
+
 export const PianoVisualizer: React.FC = () => {
   const activeNotes = useSongStore(state => state.activeNotes);
   const activeMelodyNotes = useSongStore(state => state.activeMelodyNotes);
@@ -51,17 +78,14 @@ export const PianoVisualizer: React.FC = () => {
             const normalized = normalizeNote(key.noteName);
             const isMelody = melodySet.has(normalized);
             const isHarmony = harmonySet.has(normalized);
-            // La melodía tiene prioridad de color
-            const activeClass = isMelody ? 'active-melody' : isHarmony ? 'active' : '';
+            
             return (
-              <div
+              <PianoKey 
                 key={key.midi}
-                className={`top-piano-key white ${activeClass}`}
-                title={key.noteName}
-              >
-                {key.label && <span className="key-label">{key.label}</span>}
-                <div className={`key-led ${isMelody ? 'active melody' : isHarmony ? 'active' : ''}`} />
-              </div>
+                keyDef={key}
+                isMelody={isMelody}
+                isHarmony={isHarmony}
+              />
             );
           })}
 
@@ -82,7 +106,6 @@ export const PianoVisualizer: React.FC = () => {
             const normalized = normalizeNote(key.noteName);
             const isMelody = melodySet.has(normalized);
             const isHarmony = harmonySet.has(normalized);
-            const activeClass = isMelody ? 'active-melody' : isHarmony ? 'active' : '';
 
             // Ajuste fino para centrar la tecla negra
             const style = {
@@ -91,14 +114,13 @@ export const PianoVisualizer: React.FC = () => {
             };
 
             return (
-              <div
+              <PianoKey 
                 key={key.midi}
-                className={`top-piano-key black ${activeClass}`}
+                keyDef={key}
+                isMelody={isMelody}
+                isHarmony={isHarmony}
                 style={style}
-                title={key.noteName}
-              >
-                <div className={`key-led ${isMelody ? 'active melody' : isHarmony ? 'active' : ''}`} />
-              </div>
+              />
             );
           })}
         </div>

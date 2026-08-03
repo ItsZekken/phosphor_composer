@@ -49,29 +49,36 @@ export default function App() {
     });
   }, [setCustomPatterns]);
 
-  // Guardar estado reactivamente en localStorage
+  // Guardar estado reactivamente en localStorage con debounce
   useEffect(() => {
     if (!isLoaded) return;
+    let timeoutId: number;
     const unsubscribe = useSongStore.subscribe((state) => {
-      const sessionToSave = {
-        bpm: state.bpm,
-        key: state.key,
-        scale: state.scale,
-        chordBlocks: state.chordBlocks,
-        melodyNotes: state.melodyNotes,
-        timeSignature: state.timeSignature,
-        pattern: state.pattern,
-        isCrtEnabled: state.isCrtEnabled,
-        crtParams: state.crtParams,
-        synthSettings: state.synthSettings,
-        channels: state.channels,
-        isKeyboardMelodyEnabled: state.isKeyboardMelodyEnabled,
-        isKeyboardChromatic: state.isKeyboardChromatic,
-        isAutoSuggestions: state.isAutoSuggestions
-      };
-      localStorage.setItem('phosphor_session', JSON.stringify(sessionToSave));
+      clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => {
+        const sessionToSave = {
+          bpm: state.bpm,
+          key: state.key,
+          scale: state.scale,
+          chordBlocks: state.chordBlocks,
+          melodyNotes: state.melodyNotes,
+          timeSignature: state.timeSignature,
+          pattern: state.pattern,
+          isCrtEnabled: state.isCrtEnabled,
+          crtParams: state.crtParams,
+          synthSettings: state.synthSettings,
+          channels: state.channels,
+          isKeyboardMelodyEnabled: state.isKeyboardMelodyEnabled,
+          isKeyboardChromatic: state.isKeyboardChromatic,
+          isAutoSuggestions: state.isAutoSuggestions
+        };
+        localStorage.setItem('phosphor_session', JSON.stringify(sessionToSave));
+      }, 1000);
     });
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      clearTimeout(timeoutId);
+    };
   }, [isLoaded]);
 
   // 1. Atajos de teclado estilo DAW
@@ -87,21 +94,30 @@ export default function App() {
 
       const store = useSongStore.getState();
 
+      const isUndoRedo = (e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y');
+      const isSystemModifier = (e.ctrlKey || e.metaKey || e.altKey) && !isUndoRedo;
+
+      if (isSystemModifier) {
+        return; // Permitir que el navegador maneje atajos nativos como Ctrl+R
+      }
+
       if (e.shiftKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
         store.setMixerOpen(!store.isMixerOpen);
         return;
       }
 
-
       if (e.key === ' ') {
         e.preventDefault();
-        toneEngine.init();
-        store.setPlaying(!store.isPlaying);
+        toneEngine.init().then(() => {
+          // Obtener el estado fresco dentro de la promesa
+          const currentStore = useSongStore.getState();
+          currentStore.setPlaying(!currentStore.isPlaying);
+        });
         return;
       }
 
-      if (e.key.toLowerCase() === 'w') {
+      if (e.key.toLowerCase() === 'w' && !e.shiftKey) {
         // En modo teclado melódico + cromático, W es Do#4, así que se desactiva como parada de reproducción
         if (store.isKeyboardMelodyEnabled && store.isKeyboardChromatic) {
           // Dejar pasar al trigger de la nota
@@ -113,13 +129,13 @@ export default function App() {
       }
 
       // Atajo alternativo para detener/reiniciar (Q) cuando W está ocupado por la nota Do#
-      if (e.key.toLowerCase() === 'q' && store.isKeyboardMelodyEnabled && store.isKeyboardChromatic) {
+      if (e.key.toLowerCase() === 'q' && store.isKeyboardMelodyEnabled && store.isKeyboardChromatic && !e.shiftKey) {
         e.preventDefault();
         toneEngine.stop();
         return;
       }
 
-      if (e.key.toLowerCase() === 'r') {
+      if (e.key.toLowerCase() === 'r' && !e.shiftKey) {
         e.preventDefault();
         store.setLooping(!store.isLooping);
         return;
