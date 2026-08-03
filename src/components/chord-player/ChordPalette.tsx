@@ -170,8 +170,10 @@ const MatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggestions }) => 
 
   return (
     <div className="matrix-view">
-      {/* Cabeceras de grado */}
-      <div className="matrix-grid" style={{ gridTemplateColumns: `80px repeat(${diatonic.length}, 1fr)` }}>
+      <div className="matrix-grid" style={{ 
+        gridTemplateColumns: `80px repeat(${diatonic.length}, 1fr)`,
+        gridTemplateRows: `auto repeat(${rows.length}, 1fr)`
+      }}>
         <div className="matrix-row-label" />
         {diatonic.map((_, idx) => (
           <div key={idx} className="matrix-degree-header">

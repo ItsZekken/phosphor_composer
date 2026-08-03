@@ -118,6 +118,10 @@ class ToneEngine {
   // Versión incremental para detectar cambios en synthSettings sin JSON.stringify
   private synthSettingsVersion = 0;
 
+  public _getInternalDebugState() {
+    return [this.playheadRafId];
+  }
+
   private updateCachedMaxBeat(state?: any) {
     const s = state || useSongStore.getState();
     let newMax = 4;
@@ -797,10 +801,6 @@ class ToneEngine {
 
   public stop() {
     Tone.Transport.stop();
-    if (this.playheadRafId !== null) {
-      cancelAnimationFrame(this.playheadRafId);
-      this.playheadRafId = null;
-    }
     useSongStore.getState().setPlaying(false);
     useSongStore.getState().setCurrentBeat(0);
     this.lastTriggeredBeat = -1;
