@@ -113,13 +113,10 @@ class ToneEngine {
   private cachedMaxBeat = 4;
   // rAF handle para el update de UI del playhead
   private playheadRafId: number | null = null;
-  // P1: nota pendiente mientras init() está en progreso (AsyncContext no listo aún)
-  private pendingNoteAfterInit: string | null = null;
   private initPromise: Promise<void> | null = null;
 
   // Versión incremental para detectar cambios en synthSettings sin JSON.stringify
   private synthSettingsVersion = 0;
-  private lastAppliedSynthSettingsVersion = -1;
 
   private updateCachedMaxBeat(state?: any) {
     const s = state || useSongStore.getState();
@@ -800,6 +797,10 @@ class ToneEngine {
 
   public stop() {
     Tone.Transport.stop();
+    if (this.playheadRafId !== null) {
+      cancelAnimationFrame(this.playheadRafId);
+      this.playheadRafId = null;
+    }
     useSongStore.getState().setPlaying(false);
     useSongStore.getState().setCurrentBeat(0);
     this.lastTriggeredBeat = -1;
