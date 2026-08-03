@@ -121,8 +121,13 @@ class ToneEngine {
   private synthSettingsVersion = 0;
   private lastAppliedSynthSettingsVersion = -1;
 
-  public _getInternalDebugState() {
-    return [this.playheadRafId, this.pendingNoteAfterInit, this.lastAppliedSynthSettingsVersion];
+  private updateCachedMaxBeat(state?: any) {
+    const s = state || useSongStore.getState();
+    let newMax = 4;
+    (s.chordBlocks || []).forEach((b: any) => { newMax = Math.max(newMax, b.startBeat + b.durationBeats); });
+    (s.melodyNotes || []).forEach((n: any) => { newMax = Math.max(newMax, n.startBeat + n.durationBeats); });
+    this.cachedMaxBeat = newMax;
+    return newMax;
   }
 
   // syncTimeline con debounce para evitar reconstrucciones excesivas durante edición
@@ -253,12 +258,7 @@ class ToneEngine {
     this.cachedKey = initialState.key;
     this.cachedScale = initialState.scale;
     this.cachedBpm = initialState.bpm;
-
-    // Recalcular cachedMaxBeat inicial para canciones persistidas o precargadas
-    let initialMax = 4;
-    initialState.chordBlocks.forEach(b => { initialMax = Math.max(initialMax, b.startBeat + b.durationBeats); });
-    initialState.melodyNotes.forEach(n => { initialMax = Math.max(initialMax, n.startBeat + n.durationBeats); });
-    this.cachedMaxBeat = initialMax;
+    this.updateCachedMaxBeat(initialState);
 
     // Suscripción manual a los cambios del store
     let prevBpm = initialState.bpm;
@@ -341,11 +341,7 @@ class ToneEngine {
       if (state.chordBlocks !== prevChordBlocks || state.melodyNotes !== prevMelodyNotes) {
         prevChordBlocks = state.chordBlocks;
         prevMelodyNotes = state.melodyNotes;
-        // P2: Recalcular cachedMaxBeat aquí (no en cada tick del audio thread)
-        let newMax = 4;
-        state.chordBlocks.forEach(b => { newMax = Math.max(newMax, b.startBeat + b.durationBeats); });
-        state.melodyNotes.forEach(n => { newMax = Math.max(newMax, n.startBeat + n.durationBeats); });
-        this.cachedMaxBeat = newMax;
+        this.updateCachedMaxBeat(state);
         this.syncTimelineDebounced();
       }
       // S7: Comparar versión incremental en lugar de JSON.stringify
@@ -1488,13 +1484,7 @@ class ToneEngine {
     }
 
     // 4. Calcular la duración total de la canción para el bucle
-    let maxBeat = 16;
-    state.chordBlocks.forEach(b => {
-      maxBeat = Math.max(maxBeat, b.startBeat + b.durationBeats);
-    });
-    state.melodyNotes.forEach(n => {
-      maxBeat = Math.max(maxBeat, n.startBeat + n.durationBeats);
-    });
+    const maxBeat = this.updateCachedMaxBeat(state);
 
     const loopEndSeconds = maxBeat * beatDuration;
 
