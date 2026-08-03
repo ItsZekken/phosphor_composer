@@ -47,6 +47,7 @@ interface SongStore {
   melodyNotes: MelodyNote[];
   isPlaying: boolean;
   currentBeat: number;
+  playbackStep: number;
   selectedChordId: string | null;
   chordSuggestions: ChordSuggestion[];
   ghostNotes: GhostNote[];
@@ -107,6 +108,15 @@ interface SongStore {
     saturation: number;
   };
 
+  // Estado del Secuenciador de Batería
+  drumChannels: import('../utils/typeDefinitions').DrumChannel[];
+  currentDrumPatternEdit: number;
+  setCurrentDrumPatternEdit: (pattern: number) => void;
+  addDrumChannel: (channel: import('../utils/typeDefinitions').DrumChannel) => void;
+  updateDrumChannel: (id: string, updates: Partial<import('../utils/typeDefinitions').DrumChannel>) => void;
+  toggleDrumStep: (channelId: string, stepIndex: number, patternIndex: number, forceState?: boolean) => void;
+  setDrumStepVelocity: (channelId: string, stepIndex: number, patternIndex: number, velocity: number) => void;
+
   // Estado del Mezclador (Mixer)
   isMixerOpen: boolean;
   channels: Record<string, ChannelConfig>;
@@ -127,6 +137,7 @@ interface SongStore {
   setActiveView: (view: ActiveView) => void;
   setPlaying: (isPlaying: boolean) => void;
   setCurrentBeat: (beat: number) => void;
+  setPlaybackStep: (step: number) => void;
   setLooping: (isLooping: boolean) => void;
   setMetronomeActive: (isActive: boolean) => void;
   setMetroSubdivision: (subdivision: '4n' | '8n' | '16n') => void;
@@ -180,6 +191,7 @@ interface SongStore {
     isAutoKey?: boolean;
     chordOctaveShift?: number;
     channels?: Record<string, ChannelConfig>;
+    drumChannels?: import('../utils/typeDefinitions').DrumChannel[];
   }) => void;
 }
 
@@ -205,8 +217,31 @@ export const DEFAULT_CHANNELS: Record<string, ChannelConfig> = {
     muted: false,
     solo: false,
     color: '#ff00aa'
+  },
+  drums: {
+    id: 'drums',
+    name: 'Batería',
+    type: 'drums',
+    instrument: 'synth',
+    volume: 80,
+    pan: 0,
+    muted: false,
+    solo: false,
+    color: '#00ffcc'
   }
 };
+
+const createEmptyPatterns = (numPatterns = 8, length = 16) => 
+  Array.from({ length: numPatterns }).map(() => 
+    Array.from({ length }).map(() => ({ isActive: false, velocity: 0.8 }))
+  );
+
+export const DEFAULT_DRUM_CHANNELS: import('../utils/typeDefinitions').DrumChannel[] = [
+  { id: 'kick_1', name: 'Kick', sampleUrl: 'kick1.mp3', patterns: createEmptyPatterns(), volume: 80, pan: 0, muted: false, solo: false },
+  { id: 'snare_1', name: 'Snare', sampleUrl: 'snare1.mp3', patterns: createEmptyPatterns(), volume: 80, pan: 0, muted: false, solo: false },
+  { id: 'hihat_closed', name: 'HiHat (C)', sampleUrl: 'hihat_closed1.mp3', patterns: createEmptyPatterns(), volume: 70, pan: 0, muted: false, solo: false },
+  { id: 'hihat_open', name: 'HiHat (O)', sampleUrl: 'hihat_open1.mp3', patterns: createEmptyPatterns(), volume: 70, pan: 0, muted: false, solo: false }
+];
 
 export const useSongStore = create<SongStore>()(
   temporal(
@@ -222,6 +257,7 @@ export const useSongStore = create<SongStore>()(
   melodyNotes: [],
   isPlaying: false,
   currentBeat: 0,
+  playbackStep: 0,
   selectedChordId: null,
   chordSuggestions: [],
   ghostNotes: [],
@@ -246,6 +282,52 @@ export const useSongStore = create<SongStore>()(
   isAutoSuggestions: false,
   isMixerOpen: false,
   channels: DEFAULT_CHANNELS,
+  drumChannels: DEFAULT_DRUM_CHANNELS,
+  currentDrumPatternEdit: 0,
+
+  addDrumChannel: (channel) => set((state) => ({ drumChannels: [...state.drumChannels, channel] })),
+  
+  updateDrumChannel: (id, updates) => set((state) => {
+    const nextChannels = state.drumChannels.map(ch => ch.id === id ? { ...ch, ...updates } : ch);
+    return { drumChannels: nextChannels };
+  }),
+
+  setCurrentDrumPatternEdit: (pattern: number) => set({ currentDrumPatternEdit: pattern }),
+
+  toggleDrumStep: (channelId, stepIndex, patternIndex, forceState) => set((state) => {
+    const nextChannels = state.drumChannels.map(ch => {
+      if (ch.id === channelId) {
+        const nextPatterns = [...ch.patterns];
+        const nextSteps = [...nextPatterns[patternIndex]];
+        if (nextSteps[stepIndex]) {
+          nextSteps[stepIndex] = {
+            ...nextSteps[stepIndex],
+            isActive: forceState !== undefined ? forceState : !nextSteps[stepIndex].isActive
+          };
+        }
+        nextPatterns[patternIndex] = nextSteps;
+        return { ...ch, patterns: nextPatterns };
+      }
+      return ch;
+    });
+    return { drumChannels: nextChannels };
+  }),
+
+  setDrumStepVelocity: (channelId, stepIndex, patternIndex, velocity) => set((state) => {
+    const nextChannels = state.drumChannels.map(ch => {
+      if (ch.id === channelId) {
+        const nextPatterns = [...ch.patterns];
+        const nextSteps = [...nextPatterns[patternIndex]];
+        if (nextSteps[stepIndex]) {
+          nextSteps[stepIndex] = { ...nextSteps[stepIndex], velocity };
+        }
+        nextPatterns[patternIndex] = nextSteps;
+        return { ...ch, patterns: nextPatterns };
+      }
+      return ch;
+    });
+    return { drumChannels: nextChannels };
+  }),
 
   setMixerOpen: (isMixerOpen) => set({ isMixerOpen }),
   updateChannel: (id, updates) => set((state) => {
@@ -342,6 +424,7 @@ export const useSongStore = create<SongStore>()(
       }
     }
   },
+  setPlaybackStep: (step: number) => set({ playbackStep: step }),
   setLooping: (isLooping) => set({ isLooping }),
   setMetronomeActive: (isMetronomeActive) => set({ isMetronomeActive }),
   setMetroSubdivision: (metroSubdivision) => set({ metroSubdivision }),
@@ -569,7 +652,8 @@ export const useSongStore = create<SongStore>()(
       currentBeat: 0,
       isPlaying: false,
       chordOctaveShift: session.chordOctaveShift ?? 0,
-      channels: loadedChannels
+      channels: loadedChannels,
+      ...(session.drumChannels && { drumChannels: session.drumChannels })
     });
     toneEngine.syncChannels(loadedChannels);
     get().updateSuggestions();

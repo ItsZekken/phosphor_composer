@@ -54,3 +54,18 @@ export interface ChannelConfig {
   color: string;
 }
 
+export interface DrumStep {
+  isActive: boolean;
+  velocity: number;
+}
+
+export interface DrumChannel {
+  id: string;
+  name: string;
+  sampleUrl: string;
+  patterns: DrumStep[][]; // Array de hasta 8 patrones, cada uno con 16 pasos
+  volume: number; // 0 a 100
+  pan: number; // -1.0 a 1.0
+  muted: boolean;
+  solo: boolean;
+}

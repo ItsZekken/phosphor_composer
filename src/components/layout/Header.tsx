@@ -242,7 +242,9 @@ export const Header = () => {
       alert('La canción está vacía. Agrega notas o acordes primero.');
       return;
     }
-    const midiArray = exportSessionToMidi({
+    const state = useSongStore.getState();
+    const projectData = {
+      version: '1.0',
       bpm,
       key,
       scale,
@@ -251,10 +253,20 @@ export const Header = () => {
       instrumentType,
       chordBlocks,
       melodyNotes,
-      customPatterns
-    }, 'project');
-
-    downloadMidiFile(midiArray, `phosphor_project_${key}_${scale}_${bpm}bpm.mid`);
+      channels: state.channels,
+      drumChannels: state.drumChannels,
+      chordOctaveShift: state.chordOctaveShift,
+    };
+    
+    const jsonString = JSON.stringify(projectData, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `phosphor_project_${key}_${scale}_${bpm}bpm.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const downloadMidiFile = (midiArray: Uint8Array, fileName: string) => {
@@ -268,38 +280,67 @@ export const Header = () => {
     document.body.removeChild(link);
   };
 
-  const handleImportMIDI = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const arrayBuffer = event.target?.result as ArrayBuffer;
-      if (!arrayBuffer) return;
-
-      try {
-        const result = importMidiToSession(arrayBuffer, customPatterns);
-        if (result.success) {
+    if (file.name.endsWith('.json')) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const jsonStr = event.target?.result as string;
+          const data = JSON.parse(jsonStr);
           importSong({
-            bpm: result.bpm,
-            key: result.key as any,
-            scale: result.scale as any,
-            pattern: result.pattern,
-            timeSignature: result.timeSignature,
-            chordBlocks: result.chordBlocks,
-            melodyNotes: result.melodyNotes,
-            isAutoKey: !result.isProject
+            bpm: data.bpm || 120,
+            key: data.key || 'C',
+            scale: data.scale || 'major',
+            pattern: data.pattern || 'hold',
+            timeSignature: data.timeSignature || '4/4',
+            chordBlocks: data.chordBlocks || [],
+            melodyNotes: data.melodyNotes || [],
+            channels: data.channels,
+            drumChannels: data.drumChannels,
+            chordOctaveShift: data.chordOctaveShift,
           });
-          alert(result.message);
-        } else {
-          alert('Error: ' + result.message);
+        } catch (err) {
+          alert('Error leyendo proyecto JSON.');
         }
-      } catch (err) {
-        console.error(err);
-        alert('Ocurrió un error al procesar el archivo MIDI. Verifica que sea un formato MIDI válido.');
-      }
-    };
-    reader.readAsArrayBuffer(file);
+      };
+      reader.readAsText(file);
+    } else {
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const arrayBuffer = event.target?.result as ArrayBuffer;
+        if (!arrayBuffer) return;
+
+        try {
+          const result = importMidiToSession(arrayBuffer, customPatterns);
+          if (result.success) {
+            importSong({
+              bpm: result.bpm,
+              key: result.key as any,
+              scale: result.scale as any,
+              pattern: result.pattern,
+              timeSignature: result.timeSignature,
+              chordBlocks: result.chordBlocks,
+              melodyNotes: result.melodyNotes,
+              isAutoKey: true,
+              chordOctaveShift: result.chordOctaveShift
+            });
+            setIsAutoKey(true);
+            setKey(result.key as any);
+            setScale(result.scale as any);
+          } else {
+            alert('Error importando MIDI: ' + result.error);
+          }
+        } catch (err) {
+          alert('Error al leer archivo MIDI.');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+    
+    // Limpiar input
     e.target.value = '';
   };
 
@@ -663,25 +704,14 @@ export const Header = () => {
       <div className="header-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
         <input
           type="file"
-          accept=".mid,.midi"
+          id="import-midi"
+          accept=".mid,.midi,.json"
           style={{ display: 'none' }}
-          id="midi-import-input"
-          onChange={handleImportMIDI}
+          onChange={handleImportFile}
         />
-        <label
-          htmlFor={isAudioLoading ? undefined : 'midi-import-input'}
-          className={`action-btn import`}
-          style={{
-            opacity: isAudioLoading ? 0.5 : 1,
-            cursor: isAudioLoading ? 'not-allowed' : 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            margin: 0
-          }}
-          title="Importar archivo MIDI"
-        >
-          <Music size={16} style={{ marginRight: '6px' }} />
-          Importar
+        <label htmlFor="import-midi" className="action-btn">
+          <span className="icon">🎵</span>
+          <span>Importar</span>
         </label>
 
         <div className="export-dropdown-container" style={{ position: 'relative' }}>
@@ -698,23 +728,12 @@ export const Header = () => {
             Exportar
           </button>
           {exportDropdownOpen && (
-            <div
-              className="custom-context-menu"
-              style={{
-                position: 'absolute',
-                top: '100%',
-                right: 0,
-                marginTop: '8px',
-                minWidth: '220px',
-                zIndex: 1000
-              }}
-            >
-              <div className="menu-header">Opciones de Exportación</div>
-              <button onClick={handleExportNormal}>
-                🎹 MIDI Estándar (con Ritmo)
+            <div className="export-dropdown-menu">
+              <button className="export-dropdown-item" onClick={handleExportNormal}>
+                Exportar Render (.mid)
               </button>
-              <button onClick={handleExportProject}>
-                💾 MIDI de Proyecto (Completo)
+              <button className="export-dropdown-item" onClick={handleExportProject}>
+                Guardar Proyecto (.json)
               </button>
             </div>
           )}

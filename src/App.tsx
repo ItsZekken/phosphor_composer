@@ -3,6 +3,7 @@ import { Header } from './components/layout/Header';
 import { ViewToggle } from './components/layout/ViewToggle';
 import { ChordPlayerView } from './components/chord-player/ChordPlayerView';
 import { PianoRollView } from './components/piano-roll/PianoRollView';
+import { DrumSequencerView } from './components/sequencer/DrumSequencerView';
 import { useSongStore } from './store/songStore';
 import { toneEngine } from './audio/toneEngine';
 import { ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, RefreshCw, Trash2 } from 'lucide-react';
@@ -248,12 +249,7 @@ export default function App() {
             <main className="app-main">
               {activeView === 'chord' && <ChordPlayerView />}
               {activeView === 'piano-roll' && <PianoRollView />}
-              {activeView === 'sequencer' && (
-                <div style={{ padding: '2rem', color: '#fff' }}>
-                  <h2>Drum Sequencer (Próximamente)</h2>
-                  <p>La vista está en construcción.</p>
-                </div>
-              )}
+              {activeView === 'sequencer' && <DrumSequencerView />}
             </main>
 
             {/* Menú Contextual Flotante Personalizado */}

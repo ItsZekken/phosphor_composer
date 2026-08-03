@@ -3,8 +3,8 @@ import { Sparkles, Trash2 } from 'lucide-react';
 
 interface EditorToolbarProps {
   children?: React.ReactNode;
-  onClear: () => void;
-  onGenerate: () => void;
+  onClear?: () => void;
+  onGenerate?: () => void;
   isGenerating?: boolean;
 }
 
@@ -23,23 +23,27 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
       
       <div className="header-right">
         {/* Controles comunes */}
-        <button 
-          className={`ghost-generate-btn ${isGenerating ? 'loading' : ''}`}
-          onClick={onGenerate}
-          disabled={isGenerating}
-          title="Autocompletar melodía con IA (Shift + Space)"
-        >
-          <Sparkles size={14} />
-          <span>Generar</span>
-        </button>
-        <button 
-          className="clear-btn" 
-          onClick={onClear} 
-          title="Borrar todas las notas (Delete)"
-        >
-          <Trash2 size={14} />
-          <span>Limpiar</span>
-        </button>
+        {onGenerate && (
+          <button 
+            className={`ghost-generate-btn ${isGenerating ? 'loading' : ''}`}
+            onClick={onGenerate}
+            disabled={isGenerating}
+            title="Autocompletar melodía con IA (Shift + Space)"
+          >
+            <Sparkles size={14} />
+            <span>Generar</span>
+          </button>
+        )}
+        {onClear && (
+          <button 
+            className="clear-btn" 
+            onClick={onClear} 
+            title="Borrar todas las notas (Delete)"
+          >
+            <Trash2 size={14} />
+            <span>Limpiar</span>
+          </button>
+        )}
       </div>
     </div>
   );
