@@ -69,3 +69,9 @@ export interface DrumChannel {
   muted: boolean;
   solo: boolean;
 }
+
+export interface PatternChainItem {
+  id: string;
+  patternIndex: number; // 0 a 7
+  repeatCount: number;  // 1 a 64
+}

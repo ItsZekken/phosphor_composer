@@ -80,6 +80,7 @@ class ToneEngine {
   private isInitialized = false;
 
   private drumSynths = new Map<string, Tone.MembraneSynth | Tone.NoiseSynth | Tone.MetalSynth>();
+  private drumPlayers = new Map<string, Tone.Player>();
 
   private channelNodes = new Map<string, { volumeNode: Tone.Volume; pannerNode: Tone.Panner }>();
   private cachedChannels: Record<string, any> | null = null;
@@ -115,6 +116,7 @@ class ToneEngine {
   private cachedMaxBeat = 4;
   // rAF handle para el update de UI del playhead
   private playheadRafId: number | null = null;
+  private unsubscribeStore: (() => void) | null = null;
   private initPromise: Promise<void> | null = null;
 
   // Versión incremental para detectar cambios en synthSettings sin JSON.stringify
@@ -210,10 +212,10 @@ class ToneEngine {
       envelope: { attack: 0.005, decay: 0.2, sustain: 0, release: 0.2 }
     }).connect(drumsChannelNode.volumeNode));
     this.drumSynths.set('hihat_closed1.mp3', new Tone.MetalSynth({
-      frequency: 200, envelope: { attack: 0.001, decay: 0.1, release: 0.01 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5
+      envelope: { attack: 0.001, decay: 0.1, release: 0.01 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5
     }).connect(drumsChannelNode.volumeNode));
     this.drumSynths.set('hihat_open1.mp3', new Tone.MetalSynth({
-      frequency: 200, envelope: { attack: 0.001, decay: 0.5, release: 0.1 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5
+      envelope: { attack: 0.001, decay: 0.5, release: 0.1 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5
     }).connect(drumsChannelNode.volumeNode));
   }
 
@@ -232,26 +234,19 @@ class ToneEngine {
     })();
     await this.initPromise;
 
-    // P2: Loop de loop/stop en el audio thread — NO llama setCurrentBeat aquí
-    // Solo gestiona el reinicio del loop y la parada. La UI del playhead va por rAF.
+    // P1: Limpiar cualquier evento residual en el Transport debido a HMR (Hot Module Replacement)
+    Tone.Transport.cancel(0);
+
     Tone.Transport.scheduleRepeat(() => {
       const maxBeat = this.cachedMaxBeat;
       const currentBeat = Tone.Transport.seconds * this.cachedBpm / 60;
-
       if (currentBeat >= maxBeat) {
         const state = useSongStore.getState();
-        if (state.isLooping) {
-          Tone.Transport.seconds = 0;
-          // Notificar reset de beat de forma síncrona (UI tolerará un frame de delay)
-          state.setCurrentBeat(0);
-          this.lastTriggeredBeat = -1;
-          this.lastTriggeredChordId = '';
-          this.lastTriggeredChordName = '';
-        } else {
+        if (!state.isLooping) {
           this.stop();
         }
       }
-    }, '8n'); // Reducido a 8n — suficiente para detectar fin de canción
+    }, '8n');
 
     // P2: Update de UI del playhead vía requestAnimationFrame — fuera del audio thread
     const updatePlayheadUI = () => {
@@ -295,7 +290,7 @@ class ToneEngine {
     // (synthSettingsVersion se incrementa desde setSynthSettings en el store)
     let prevSynthSettingsVersion = this.synthSettingsVersion;
 
-    useSongStore.subscribe((state) => {
+    this.unsubscribeStore = useSongStore.subscribe((state) => {
       // --- Actualizar caché de hot path ---
       this.cachedIsKeyboardMelodyEnabled = state.isKeyboardMelodyEnabled;
       this.cachedIsKeyboardChromatic = state.isKeyboardChromatic;
@@ -310,7 +305,7 @@ class ToneEngine {
       }
       if (state.isLooping !== prevIsLooping) {
         prevIsLooping = state.isLooping;
-        Tone.Transport.loop = false; // Bucle manual manejado por nosotros
+        Tone.Transport.loop = state.isLooping;
         this.syncTimelineDebounced();
       }
       if (state.isMetronomeActive !== prevIsMetronomeActive || state.metroSubdivision !== prevMetroSubdivision) {
@@ -1025,6 +1020,76 @@ class ToneEngine {
   private lastTriggeredDrumStep = -1;
   private lastTriggeredDrumBeat = -1;
 
+  private getOrCreateDrumPlayer(sampleUrl: string): Tone.Player | null {
+    if (this.drumPlayers.has(sampleUrl)) {
+      return this.drumPlayers.get(sampleUrl) || null;
+    }
+
+    if (sampleUrl.startsWith('/') || sampleUrl.endsWith('.wav') || sampleUrl.endsWith('.mp3')) {
+      const drumsChannelNode = this.getChannelNode('drums');
+      const player = new Tone.Player({
+        url: sampleUrl,
+        autostart: false,
+        onerror: (err) => {
+          console.warn(`[ToneEngine] Error cargando sample de batería: ${sampleUrl}`, err);
+        }
+      }).connect(drumsChannelNode.volumeNode);
+
+      this.drumPlayers.set(sampleUrl, player);
+      return player;
+    }
+
+    return null;
+  }
+
+  private triggerDrumSound(sampleUrl: string, volDb: number, time?: number) {
+    const player = this.getOrCreateDrumPlayer(sampleUrl);
+    if (player && player.loaded) {
+      player.volume.value = volDb;
+      if (time !== undefined) {
+        player.start(time);
+      } else {
+        player.start();
+      }
+      return;
+    }
+
+    // Fallback sintético si el sample está cargando o no se pudo cargar
+    let synth = this.drumSynths.get(sampleUrl);
+    if (!synth) {
+      const urlLower = sampleUrl.toLowerCase();
+      if (urlLower.includes('snare') || urlLower.includes('clap')) {
+        synth = this.drumSynths.get('snare1.mp3');
+      } else if (urlLower.includes('hihat') || urlLower.includes('crash')) {
+        synth = this.drumSynths.get('hihat_closed1.mp3');
+      } else {
+        synth = this.drumSynths.get('kick1.mp3');
+      }
+    }
+
+    if (synth) {
+      if (time !== undefined) {
+        synth.volume.setValueAtTime(volDb, time);
+        if (synth instanceof Tone.MembraneSynth) {
+          synth.triggerAttackRelease('C1', '8n', time);
+        } else if (synth instanceof Tone.NoiseSynth) {
+          (synth as any).triggerAttackRelease('16n', time);
+        } else if (synth instanceof Tone.MetalSynth) {
+          (synth as any).triggerAttackRelease('16n', time);
+        }
+      } else {
+        synth.volume.value = volDb;
+        if (synth instanceof Tone.MembraneSynth) {
+          synth.triggerAttackRelease('C1', '8n');
+        } else if (synth instanceof Tone.NoiseSynth) {
+          (synth as any).triggerAttackRelease('16n');
+        } else if (synth instanceof Tone.MetalSynth) {
+          (synth as any).triggerAttackRelease('16n');
+        }
+      }
+    }
+  }
+
   public playDrumPreview(channelId: string, customVelocity?: number) {
     const state = useSongStore.getState();
     const channel = state.drumChannels.find(c => c.id === channelId);
@@ -1033,17 +1098,7 @@ class ToneEngine {
     const velocity = customVelocity !== undefined ? customVelocity : 0.8;
     const volDb = Tone.gainToDb((channel.volume / 100) * velocity);
 
-    const synth = this.drumSynths.get(channel.sampleUrl);
-    if (synth) {
-      synth.volume.value = volDb;
-      if (synth instanceof Tone.MembraneSynth) {
-        synth.triggerAttackRelease('C1', '8n');
-      } else if (synth instanceof Tone.NoiseSynth) {
-        (synth as any).triggerAttackRelease('16n');
-      } else if (synth instanceof Tone.MetalSynth) {
-        (synth as any).triggerAttackRelease('16n');
-      }
-    }
+    this.triggerDrumSound(channel.sampleUrl, volDb);
   }
 
   private triggerDrumTick(time: number) {
@@ -1052,21 +1107,41 @@ class ToneEngine {
 
     const bpm = Tone.Transport.bpm.value;
     const beat = Tone.Transport.getSecondsAtTime(time) * (bpm / 60);
-    
-    let maxPatternIndex = 0;
-    state.drumChannels.forEach(channel => {
-      if (!channel.patterns) return;
-      channel.patterns.forEach((pattern, pIdx) => {
-        if (pattern.some(step => step.isActive)) {
-          maxPatternIndex = Math.max(maxPatternIndex, pIdx);
-        }
-      });
-    });
 
-    const sequenceLength = (maxPatternIndex + 1) * 16;
-    const globalStepIndex = Math.round(beat / 0.25) % sequenceLength;
-    const patternIndex = Math.floor(globalStepIndex / 16);
-    const localStepIndex = globalStepIndex % 16;
+    let patternIndex = state.currentDrumPatternEdit;
+    let localStepIndex = 0;
+    let currentChainIdx = 0;
+    let globalStepIndex = 0;
+
+    if (state.isChainModeActive && state.patternChain && state.patternChain.length > 0) {
+      // Calcular total de 16-steps de toda la cadena
+      let totalChainSteps = 0;
+      state.patternChain.forEach(item => {
+        totalChainSteps += item.repeatCount * 16;
+      });
+
+      if (totalChainSteps > 0) {
+        globalStepIndex = Math.round(beat / 0.25) % totalChainSteps;
+        let accumulated = 0;
+
+        for (let i = 0; i < state.patternChain.length; i++) {
+          const item = state.patternChain[i];
+          const itemSteps = item.repeatCount * 16;
+          if (accumulated + itemSteps > globalStepIndex) {
+            currentChainIdx = i;
+            patternIndex = item.patternIndex;
+            localStepIndex = (globalStepIndex - accumulated) % 16;
+            break;
+          }
+          accumulated += itemSteps;
+        }
+      }
+    } else {
+      // Modo Normal: Bucle de 16 pasos del patrón actualmente seleccionado
+      globalStepIndex = Math.round(beat / 0.25) % 16;
+      patternIndex = state.currentDrumPatternEdit;
+      localStepIndex = globalStepIndex;
+    }
     
     if (this.lastTriggeredDrumStep === globalStepIndex && Math.abs(beat - this.lastTriggeredDrumBeat) < 0.1) {
       return; 
@@ -1085,27 +1160,18 @@ class ToneEngine {
       const step = channel.patterns[patternIndex][localStepIndex];
       if (step && step.isActive) {
         const volDb = Tone.gainToDb((channel.volume / 100) * step.velocity);
-        const synth = this.drumSynths.get(channel.sampleUrl);
-        if (synth) {
-          synth.volume.setValueAtTime(volDb, time);
-          if (synth instanceof Tone.MembraneSynth) {
-            synth.triggerAttackRelease('C1', '8n', time);
-          } else if (synth instanceof Tone.NoiseSynth) {
-            (synth as any).triggerAttackRelease('16n', time);
-          } else if (synth instanceof Tone.MetalSynth) {
-            (synth as any).triggerAttackRelease('16n', time);
-          }
-        }
+        this.triggerDrumSound(channel.sampleUrl, volDb, time);
       }
     });
 
     Tone.Draw.schedule(() => {
       const currentState = useSongStore.getState();
+      if (currentState.isChainModeActive) {
+        currentState.setCurrentChainItemIndex(currentChainIdx);
+      }
       if (currentState.currentDrumPatternEdit === patternIndex) {
         currentState.setPlaybackStep(localStepIndex);
       } else {
-        // Si el usuario está viendo otro patrón, ocultar la luz o mantenerla inactiva (playbackStep = -1 si existiera)
-        // Por ahora, seteamos un valor fuera de rango para que no brille en el grid si no estamos viendo ese patrón.
         currentState.setPlaybackStep(-1);
       }
     }, time);
@@ -1124,6 +1190,8 @@ class ToneEngine {
     // Si retrocedemos en loop, reseteamos la última marca
     if (tickBeat < this.lastTriggeredBeat) {
       this.lastTriggeredBeat = -1;
+      this.lastTriggeredChordId = '';
+      this.lastTriggeredChordName = '';
     }
 
     if (tickBeat === this.lastTriggeredBeat) return;
@@ -1594,7 +1662,7 @@ class ToneEngine {
 
     const loopEndSeconds = maxBeat * beatDuration;
 
-    Tone.Transport.loop = false; // Desactivar bucle nativo
+    Tone.Transport.loop = state.isLooping; // Enable native loop for seamless looping
     Tone.Transport.loopStart = 0;
     Tone.Transport.loopEnd = loopEndSeconds;
 
@@ -1674,6 +1742,21 @@ class ToneEngine {
     });
   }
 
+  public dispose() {
+    this.stop();
+    Tone.Transport.cancel(0);
+    if (this.unsubscribeStore) {
+      this.unsubscribeStore();
+      this.unsubscribeStore = null;
+    }
+  }
+
 }
 
 export const toneEngine = new ToneEngine();
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    toneEngine.dispose();
+  });
+}

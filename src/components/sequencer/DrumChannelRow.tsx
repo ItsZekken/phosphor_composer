@@ -3,6 +3,8 @@ import { useSongStore } from '../../store/songStore';
 import { toneEngine } from '../../audio/toneEngine';
 import type { DrumChannel } from '../../utils/typeDefinitions';
 import { Knob } from '../ui/Knob';
+import { AVAILABLE_DRUM_SAMPLES, getSamplesByCategory } from '../../constants/drumSamples';
+import { inferCategoryFromChannel } from '../../constants/drumKits';
 
 interface Props {
   channel: DrumChannel;
@@ -36,7 +38,6 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
     if (isDrawing && drawAction !== null) {
       if (currentlyActive !== drawAction) {
         toggleDrumStep(channel.id, index, currentDrumPatternEdit, drawAction);
-        // No preview sound on drag according to spec
       }
     }
   };
@@ -60,6 +61,14 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
   const handleVolumeDouble = () => updateDrumChannel(channel.id, { volume: 80 });
   const handlePanDouble = () => updateDrumChannel(channel.id, { pan: 0 });
 
+  const handleSampleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newSampleUrl = e.target.value;
+    updateDrumChannel(channel.id, { sampleUrl: newSampleUrl });
+    setTimeout(() => {
+      toneEngine.playDrumPreview(channel.id);
+    }, 50);
+  };
+
   // Velocity Draw Logic
   const handleVelocityDraw = (e: React.MouseEvent | React.TouchEvent, forceDraw = false) => {
     if (!forceDraw && !isDrawingVelocity) return;
@@ -69,12 +78,10 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
     const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
     
-    // Find which step index we are over based on X coordinate
     const stepWidth = rect.width / 16;
     const stepIndex = Math.floor((clientX - rect.left) / stepWidth);
     
     if (stepIndex >= 0 && stepIndex < 16) {
-      // Calculate velocity based on Y coordinate (inverted: top is 1, bottom is 0)
       const relativeY = Math.max(0, Math.min(rect.height, clientY - rect.top));
       const newVelocity = 1 - (relativeY / rect.height);
       setDrumStepVelocity(channel.id, stepIndex, currentDrumPatternEdit, newVelocity);
@@ -89,14 +96,38 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
   const activePattern = channel.patterns[currentDrumPatternEdit];
   const isPlayingActiveStep = isPlaying && activePattern && activePattern[playbackStep]?.isActive;
 
+  // Cargar lista de muestras según la categoría del canal
+  const category = inferCategoryFromChannel(channel);
+  const categorySamples = getSamplesByCategory(category);
+  const availableOptions = categorySamples.length > 0 ? categorySamples : AVAILABLE_DRUM_SAMPLES;
+
   return (
     <div className={`drum-channel-container ${isExpanded ? 'expanded' : ''}`}>
       <div className="drum-channel-row">
         {/* Panel Izquierdo: Controles */}
-        <div className="drum-controls" onDoubleClick={onToggleExpand}>
-          <div className="drum-title">
+        <div className="drum-controls">
+          <div 
+            className="drum-title" 
+            onClick={onToggleExpand}
+            style={{ cursor: 'pointer' }}
+          >
             <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
-            {channel.name}
+            <span className="channel-name-text">{channel.name}</span>
+          </div>
+
+          <div className="drum-sample-selector">
+            <select 
+              className="channel-sample-select"
+              value={channel.sampleUrl}
+              onChange={handleSampleChange}
+              title={`Sample: ${channel.sampleUrl}`}
+            >
+              {availableOptions.map(sample => (
+                <option key={sample.id} value={sample.path}>
+                  {sample.name}
+                </option>
+              ))}
+            </select>
           </div>
           
           <div className="drum-activity-meter">

@@ -8,6 +8,8 @@ import { toneEngine } from '../audio/toneEngine';
 import type { PatternDef } from '../patterns/patternTypes';
 import { loadCustomPatterns, invalidatePatternCache } from '../patterns/patternLoader';
 
+import { PRESET_DRUM_KITS, findMatchingKitId, inferCategoryFromChannel } from '../constants/drumKits';
+
 const NOTE_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 export type PaletteMode = 'matrix' | 'fifths' | 'cadences';
@@ -110,12 +112,29 @@ interface SongStore {
 
   // Estado del Secuenciador de Batería
   drumChannels: import('../utils/typeDefinitions').DrumChannel[];
+  activeDrumKitId: string;
+  selectDrumKit: (kitId: string) => void;
   currentDrumPatternEdit: number;
   setCurrentDrumPatternEdit: (pattern: number) => void;
   addDrumChannel: (channel: import('../utils/typeDefinitions').DrumChannel) => void;
   updateDrumChannel: (id: string, updates: Partial<import('../utils/typeDefinitions').DrumChannel>) => void;
   toggleDrumStep: (channelId: string, stepIndex: number, patternIndex: number, forceState?: boolean) => void;
   setDrumStepVelocity: (channelId: string, stepIndex: number, patternIndex: number, velocity: number) => void;
+
+  // Acciones de Copia de Patrón
+  copyDrumPattern: (sourcePatternIndex: number, targetPatternIndex: number) => void;
+  duplicateCurrentPatternToNext: () => void;
+
+  // Estado de Cadena de Patrones (Pattern Chain / Arranger)
+  patternChain: import('../utils/typeDefinitions').PatternChainItem[];
+  isChainModeActive: boolean;
+  currentChainItemIndex: number;
+  setChainModeActive: (active: boolean) => void;
+  setCurrentChainItemIndex: (index: number) => void;
+  addChainItem: (patternIndex: number, repeatCount?: number) => void;
+  updateChainItem: (id: string, updates: Partial<import('../utils/typeDefinitions').PatternChainItem>) => void;
+  removeChainItem: (id: string) => void;
+  moveChainItem: (fromIndex: number, toIndex: number) => void;
 
   // Estado del Mezclador (Mixer)
   isMixerOpen: boolean;
@@ -237,10 +256,10 @@ const createEmptyPatterns = (numPatterns = 8, length = 16) =>
   );
 
 export const DEFAULT_DRUM_CHANNELS: import('../utils/typeDefinitions').DrumChannel[] = [
-  { id: 'kick_1', name: 'Kick', sampleUrl: 'kick1.mp3', patterns: createEmptyPatterns(), volume: 80, pan: 0, muted: false, solo: false },
-  { id: 'snare_1', name: 'Snare', sampleUrl: 'snare1.mp3', patterns: createEmptyPatterns(), volume: 80, pan: 0, muted: false, solo: false },
-  { id: 'hihat_closed', name: 'HiHat (C)', sampleUrl: 'hihat_closed1.mp3', patterns: createEmptyPatterns(), volume: 70, pan: 0, muted: false, solo: false },
-  { id: 'hihat_open', name: 'HiHat (O)', sampleUrl: 'hihat_open1.mp3', patterns: createEmptyPatterns(), volume: 70, pan: 0, muted: false, solo: false }
+  { id: 'kick_1', name: 'Kick', sampleUrl: '/drums/kicks/kick1.wav', patterns: createEmptyPatterns(), volume: 80, pan: 0, muted: false, solo: false },
+  { id: 'snare_1', name: 'Snare', sampleUrl: '/drums/snares/snare1.wav', patterns: createEmptyPatterns(), volume: 80, pan: 0, muted: false, solo: false },
+  { id: 'hihat_closed', name: 'HiHat (C)', sampleUrl: '/drums/hihats_closed/hihat_closed1.wav', patterns: createEmptyPatterns(), volume: 70, pan: 0, muted: false, solo: false },
+  { id: 'hihat_open', name: 'HiHat (O)', sampleUrl: '/drums/hihats_open/hihat_open1.wav', patterns: createEmptyPatterns(), volume: 70, pan: 0, muted: false, solo: false }
 ];
 
 export const useSongStore = create<SongStore>()(
@@ -283,16 +302,117 @@ export const useSongStore = create<SongStore>()(
   isMixerOpen: false,
   channels: DEFAULT_CHANNELS,
   drumChannels: DEFAULT_DRUM_CHANNELS,
+  activeDrumKitId: 'kit_1',
   currentDrumPatternEdit: 0,
+
+  selectDrumKit: (kitId) => set((state) => {
+    if (kitId === 'custom') {
+      return { activeDrumKitId: 'custom' };
+    }
+
+    const kit = PRESET_DRUM_KITS.find(k => k.id === kitId);
+    if (!kit) return state;
+
+    const nextChannels = state.drumChannels.map(ch => {
+      const newSampleUrl = kit.samples[ch.id] || kit.samples[inferCategoryFromChannel(ch)];
+      if (newSampleUrl) {
+        return { ...ch, sampleUrl: newSampleUrl };
+      }
+      return ch;
+    });
+
+    return {
+      drumChannels: nextChannels,
+      activeDrumKitId: kitId
+    };
+  }),
 
   addDrumChannel: (channel) => set((state) => ({ drumChannels: [...state.drumChannels, channel] })),
   
   updateDrumChannel: (id, updates) => set((state) => {
     const nextChannels = state.drumChannels.map(ch => ch.id === id ? { ...ch, ...updates } : ch);
-    return { drumChannels: nextChannels };
+    const newKitId = updates.sampleUrl !== undefined ? findMatchingKitId(nextChannels) : state.activeDrumKitId;
+
+    return { 
+      drumChannels: nextChannels,
+      activeDrumKitId: newKitId
+    };
   }),
 
   setCurrentDrumPatternEdit: (pattern: number) => set({ currentDrumPatternEdit: pattern }),
+
+  // Acciones de Copia de Patrón
+  copyDrumPattern: (sourceIdx, targetIdx) => set((state) => {
+    if (sourceIdx === targetIdx || sourceIdx < 0 || sourceIdx > 7 || targetIdx < 0 || targetIdx > 7) return state;
+
+    const nextChannels = state.drumChannels.map(ch => {
+      const nextPatterns = [...ch.patterns];
+      if (nextPatterns[sourceIdx]) {
+        // Deep copy of pattern steps
+        nextPatterns[targetIdx] = nextPatterns[sourceIdx].map(step => ({ ...step }));
+      }
+      return { ...ch, patterns: nextPatterns };
+    });
+
+    return {
+      drumChannels: nextChannels,
+      currentDrumPatternEdit: targetIdx
+    };
+  }),
+
+  duplicateCurrentPatternToNext: () => set((state) => {
+    const sourceIdx = state.currentDrumPatternEdit;
+    const targetIdx = (sourceIdx + 1) % 8;
+
+    const nextChannels = state.drumChannels.map(ch => {
+      const nextPatterns = [...ch.patterns];
+      if (nextPatterns[sourceIdx]) {
+        nextPatterns[targetIdx] = nextPatterns[sourceIdx].map(step => ({ ...step }));
+      }
+      return { ...ch, patterns: nextPatterns };
+    });
+
+    return {
+      drumChannels: nextChannels,
+      currentDrumPatternEdit: targetIdx
+    };
+  }),
+
+  // Estado de Cadena de Patrones (Pattern Chain)
+  patternChain: [{ id: 'chain_1', patternIndex: 0, repeatCount: 1 }],
+  isChainModeActive: false,
+  currentChainItemIndex: 0,
+
+  setChainModeActive: (active) => set({ isChainModeActive: active }),
+  setCurrentChainItemIndex: (index) => set({ currentChainItemIndex: index }),
+
+  addChainItem: (patternIndex, repeatCount = 1) => set((state) => {
+    const newItem: import('../utils/typeDefinitions').PatternChainItem = {
+      id: `chain_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      patternIndex,
+      repeatCount
+    };
+    return { patternChain: [...state.patternChain, newItem] };
+  }),
+
+  updateChainItem: (id, updates) => set((state) => ({
+    patternChain: state.patternChain.map(item => item.id === id ? { ...item, ...updates } : item)
+  })),
+
+  removeChainItem: (id) => set((state) => {
+    const nextChain = state.patternChain.filter(item => item.id !== id);
+    return { 
+      patternChain: nextChain.length > 0 ? nextChain : [{ id: `chain_${Date.now()}`, patternIndex: 0, repeatCount: 1 }] 
+    };
+  }),
+
+  moveChainItem: (fromIndex, toIndex) => set((state) => {
+    if (fromIndex < 0 || fromIndex >= state.patternChain.length || toIndex < 0 || toIndex >= state.patternChain.length) return state;
+    const nextChain = [...state.patternChain];
+    const [moved] = nextChain.splice(fromIndex, 1);
+    nextChain.splice(toIndex, 0, moved);
+    return { patternChain: nextChain };
+  }),
 
   toggleDrumStep: (channelId, stepIndex, patternIndex, forceState) => set((state) => {
     const nextChannels = state.drumChannels.map(ch => {
@@ -629,6 +749,8 @@ export const useSongStore = create<SongStore>()(
   clearSong: () => set({
     chordBlocks: [],
     melodyNotes: [],
+    drumChannels: DEFAULT_DRUM_CHANNELS,
+    currentDrumPatternEdit: 0,
     selectedChordId: null,
     currentBeat: 0,
     isPlaying: false,

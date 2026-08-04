@@ -325,13 +325,13 @@ export const Header = () => {
               chordBlocks: result.chordBlocks,
               melodyNotes: result.melodyNotes,
               isAutoKey: true,
-              chordOctaveShift: result.chordOctaveShift
+              chordOctaveShift: (result as any).chordOctaveShift ?? 0
             });
             setIsAutoKey(true);
             setKey(result.key as any);
             setScale(result.scale as any);
           } else {
-            alert('Error importando MIDI: ' + result.error);
+            alert('Error importando MIDI: ' + (result.message || 'Error desconocido'));
           }
         } catch (err) {
           alert('Error al leer archivo MIDI.');

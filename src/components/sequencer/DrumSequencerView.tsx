@@ -2,10 +2,24 @@ import React, { useState } from 'react';
 import { useSongStore } from '../../store/songStore';
 import { EditorToolbar } from '../shared/EditorToolbar';
 import { DrumChannelRow } from './DrumChannelRow';
+import { PRESET_DRUM_KITS } from '../../constants/drumKits';
+import { PatternChainArranger } from './PatternChainArranger';
+import { CopyPatternModal } from '../ui/CopyPatternModal';
 
 export const DrumSequencerView: React.FC = () => {
-  const { drumChannels, currentDrumPatternEdit, setCurrentDrumPatternEdit, channels, toggleMute, toggleSolo } = useSongStore();
+  const { 
+    drumChannels, 
+    activeDrumKitId, 
+    selectDrumKit, 
+    currentDrumPatternEdit, 
+    setCurrentDrumPatternEdit, 
+    duplicateCurrentPatternToNext,
+    channels, 
+    toggleMute, 
+    toggleSolo 
+  } = useSongStore();
   const [expandedChannelId, setExpandedChannelId] = useState<string | null>(null);
+  const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
   
   const drumsMixer = channels['drums'] || { muted: false, solo: false };
 
@@ -16,9 +30,28 @@ export const DrumSequencerView: React.FC = () => {
   return (
     <div className="sequencer-container">
       <EditorToolbar>
-        <div className="sequencer-toolbar-content" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <div className="sequencer-toolbar-content" style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
           <span className="toolbar-title">DRUM SEQUENCER</span>
           
+          {/* Selector de Kit Principal */}
+          <div className="drum-kit-selector-wrapper">
+            <span className="drum-kit-label">KIT:</span>
+            <select 
+              className="drum-kit-select"
+              value={activeDrumKitId}
+              onChange={(e) => selectDrumKit(e.target.value)}
+            >
+              {PRESET_DRUM_KITS.map(kit => (
+                <option key={kit.id} value={kit.id}>
+                  {kit.name}
+                </option>
+              ))}
+              <option value="custom">
+                Custom {activeDrumKitId === 'custom' ? '★' : ''}
+              </option>
+            </select>
+          </div>
+
           {/* Global M/S */}
           <div className="drum-mute-solo" style={{ flexDirection: 'row', marginLeft: '0.5rem' }}>
             <button 
@@ -38,21 +71,43 @@ export const DrumSequencerView: React.FC = () => {
             + ADD CHANNEL
           </button>
 
-          {/* Pattern Pagination */}
-          <div className="pattern-pagination">
-            {Array.from({ length: 8 }).map((_, i) => (
+          {/* Pattern Pagination & Copy Tools */}
+          <div className="pattern-pagination-container" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <div className="pattern-pagination">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <button 
+                  key={i}
+                  className={`pattern-btn ${currentDrumPatternEdit === i ? 'active' : ''}`}
+                  onClick={() => setCurrentDrumPatternEdit(i)}
+                >
+                  {i + 1}
+                </button>
+              ))}
+            </div>
+
+            <div className="pattern-copy-tools" style={{ display: 'flex', gap: '0.3rem' }}>
               <button 
-                key={i}
-                className={`pattern-btn ${currentDrumPatternEdit === i ? 'active' : ''}`}
-                onClick={() => setCurrentDrumPatternEdit(i)}
+                className="add-channel-btn" 
+                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', background: 'rgba(255, 255, 255, 0.08)' }}
+                onClick={() => setIsCopyModalOpen(true)}
+                title="Copiar patrón a otro número"
               >
-                {i + 1}
+                📋 Copiar
               </button>
-            ))}
+              <button 
+                className="add-channel-btn" 
+                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', background: 'rgba(0, 255, 204, 0.15)', color: 'var(--reposo)', borderColor: 'var(--reposo)' }}
+                onClick={() => duplicateCurrentPatternToNext()}
+                title={`Duplicar Patrón ${currentDrumPatternEdit + 1} en Patrón ${((currentDrumPatternEdit + 1) % 8) + 1}`}
+              >
+                ⚡ Duplicar
+              </button>
+            </div>
           </div>
         </div>
       </EditorToolbar>
 
+      {/* Grid del Secuenciador */}
       <div className="drum-rack">
         {drumChannels.map((channel, idx) => (
           <DrumChannelRow 
@@ -63,7 +118,16 @@ export const DrumSequencerView: React.FC = () => {
             onToggleExpand={() => handleToggleExpand(channel.id)}
           />
         ))}
+
+        {/* Cadena Visual de Patrones (Arranger) */}
+        <PatternChainArranger />
       </div>
+
+      {/* Modal de Copia de Patrón */}
+      <CopyPatternModal 
+        isOpen={isCopyModalOpen}
+        onClose={() => setIsCopyModalOpen(false)}
+      />
     </div>
   );
 };
