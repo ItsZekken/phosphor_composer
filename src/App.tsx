@@ -28,11 +28,15 @@ export default function App() {
       try {
         const parsed = JSON.parse(saved);
         const currentState = useSongStore.getState();
-        if (parsed.channels) {
+        if (parsed.channels && typeof parsed.channels === 'object') {
           parsed.channels = { ...currentState.channels, ...parsed.channels };
         }
         if (parsed.drumChannels) {
-          parsed.drumChannels = { ...currentState.drumChannels, ...parsed.drumChannels };
+          if (Array.isArray(parsed.drumChannels)) {
+            parsed.drumChannels = parsed.drumChannels;
+          } else if (typeof parsed.drumChannels === 'object') {
+            parsed.drumChannels = Object.values(parsed.drumChannels);
+          }
         }
         useSongStore.setState(parsed);
       } catch (e) {

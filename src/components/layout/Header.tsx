@@ -8,6 +8,7 @@ import { Play, Square, Trash2, RefreshCw, Bell, Settings as SettingsIcon, Slider
 import { CustomSelect } from '../ui/CustomSelect';
 
 import { exportSessionToMidi, importMidiToSession } from '../../utils/midiService';
+import { ExportProgressModal } from '../ui/ExportProgressModal';
 
 const BeatDisplay = () => {
   const currentBeat = useSongStore(state => state.currentBeat);
@@ -60,7 +61,9 @@ export const Header = () => {
     setMixerOpen,
     channels,
     activeView,
-    setChannelInstrument
+    setChannelInstrument,
+    isExporting,
+    exportProgress
   } = useSongStore(useShallow(state => ({
     bpm: state.bpm,
     setBpm: state.setBpm,
@@ -103,7 +106,9 @@ export const Header = () => {
     setMixerOpen: state.setMixerOpen,
     channels: state.channels,
     activeView: state.activeView,
-    setChannelInstrument: state.setChannelInstrument
+    setChannelInstrument: state.setChannelInstrument,
+    isExporting: state.isExporting,
+    exportProgress: state.exportProgress
   })));
 
 
@@ -210,6 +215,9 @@ export const Header = () => {
   };
 
   const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
+  const cancelExportRef = useRef<(() => void) | null>(null);
+  const [exportElapsed, setExportElapsed] = useState(0);
+  const [exportTotal, setExportTotal] = useState(0);
 
   useEffect(() => {
     if (!exportDropdownOpen) return;
@@ -272,6 +280,48 @@ export const Header = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleExportAudio = async () => {
+    setExportDropdownOpen(false);
+    if (chordBlocks.length === 0 && melodyNotes.length === 0) {
+      alert('La canción está vacía. Agrega notas o acordes primero.');
+      return;
+    }
+
+    setExportElapsed(0);
+    setExportTotal(0);
+
+    const cancelFn = await toneEngine.exportToWav(
+      (elapsed, total) => {
+        setExportElapsed(elapsed);
+        setExportTotal(total);
+      },
+      (wavBlob) => {
+        cancelExportRef.current = null;
+        const url = URL.createObjectURL(wavBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `phosphor_${key}_${scale}_${bpm}bpm_render.wav`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      },
+      (err) => {
+        cancelExportRef.current = null;
+        alert('Error al exportar audio: ' + err.message);
+      }
+    );
+
+    cancelExportRef.current = cancelFn;
+  };
+
+  const handleCancelExport = () => {
+    if (cancelExportRef.current) {
+      cancelExportRef.current();
+      cancelExportRef.current = null;
+    }
   };
 
   const downloadMidiFile = (midiArray: Uint8Array, fileName: string) => {
@@ -357,6 +407,7 @@ export const Header = () => {
   }, []);
 
   return (
+    <>
     <header className="app-header">
       <div className="header-brand">
         <h1 className="phosphor-text">🎹 PHOSPHOR</h1>
@@ -722,12 +773,12 @@ export const Header = () => {
         <div className="export-dropdown-container" style={{ position: 'relative' }}>
           <button
             className="action-btn export"
-            disabled={isAudioLoading}
+            disabled={isAudioLoading || isExporting}
             onClick={(e) => {
               e.stopPropagation();
               setExportDropdownOpen(!exportDropdownOpen);
             }}
-            title="Exportar"
+            title={isExporting ? 'Exportando audio...' : 'Exportar'}
           >
             <Save size={16} />
           </button>
@@ -738,6 +789,10 @@ export const Header = () => {
               </button>
               <button className="export-dropdown-item" onClick={handleExportProject}>
                 Guardar Proyecto (.json)
+              </button>
+              <div style={{ height: '1px', background: 'rgba(255,255,255,0.08)', margin: '4px 0' }} />
+              <button className="export-dropdown-item" onClick={handleExportAudio}>
+                🎙️ Exportar Audio (.wav)
               </button>
             </div>
           )}
@@ -771,5 +826,16 @@ export const Header = () => {
 
       </div>
     </header>
+
+    {/* Modal de progreso de export de audio */}
+    {isExporting && (
+      <ExportProgressModal
+        progress={exportProgress}
+        elapsed={exportElapsed}
+        total={exportTotal}
+        onCancel={handleCancelExport}
+      />
+    )}
+  </>  
   );
 };

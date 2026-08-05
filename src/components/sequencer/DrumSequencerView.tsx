@@ -143,7 +143,7 @@ export const DrumSequencerView: React.FC = () => {
 
       {/* Grid del Secuenciador */}
       <div className="drum-rack">
-        {drumChannels.map((channel, idx) => (
+        {(Array.isArray(drumChannels) ? drumChannels : []).map((channel, idx) => (
           <DrumChannelRow 
             key={channel.id}
             channel={channel}
