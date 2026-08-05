@@ -264,7 +264,9 @@ export const DEFAULT_DRUM_CHANNELS: import('../utils/typeDefinitions').DrumChann
   { id: 'kick_1', name: 'Kick', sampleUrl: '/drums/kicks/kick1.wav', patterns: createEmptyPatterns(), volume: 80, pan: 0, muted: false, solo: false },
   { id: 'snare_1', name: 'Snare', sampleUrl: '/drums/snares/snare1.wav', patterns: createEmptyPatterns(), volume: 80, pan: 0, muted: false, solo: false },
   { id: 'hihat_closed', name: 'HiHat (C)', sampleUrl: '/drums/hihats_closed/hihat_closed1.wav', patterns: createEmptyPatterns(), volume: 70, pan: 0, muted: false, solo: false },
-  { id: 'hihat_open', name: 'HiHat (O)', sampleUrl: '/drums/hihats_open/hihat_open1.wav', patterns: createEmptyPatterns(), volume: 70, pan: 0, muted: false, solo: false }
+  { id: 'hihat_open', name: 'HiHat (O)', sampleUrl: '/drums/hihats_open/hihat_open1.wav', patterns: createEmptyPatterns(), volume: 70, pan: 0, muted: false, solo: false },
+  { id: 'clap_1', name: 'Clap', sampleUrl: '/drums/claps/clap1.wav', patterns: createEmptyPatterns(), volume: 75, pan: 0, muted: false, solo: false },
+  { id: 'crash_1', name: 'Crash', sampleUrl: '/drums/crashes/crash1.wav', patterns: createEmptyPatterns(), volume: 70, pan: 0, muted: false, solo: false }
 ];
 
 export const useSongStore = create<SongStore>()(
@@ -329,12 +331,11 @@ export const useSongStore = create<SongStore>()(
 
     return {
       drumChannels: nextChannels,
-      activeDrumKitId: kitId
+  activeDrumKitId: kitId
     };
   }),
 
   addDrumChannel: (channel) => set((state) => ({ drumChannels: [...state.drumChannels, channel] })),
-  
   updateDrumChannel: (id, updates) => set((state) => {
     const nextChannels = state.drumChannels.map(ch => ch.id === id ? { ...ch, ...updates } : ch);
     const newKitId = updates.sampleUrl !== undefined ? findMatchingKitId(nextChannels) : state.activeDrumKitId;

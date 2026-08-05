@@ -1,11 +1,11 @@
-import React, { useRef, useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useSongStore } from '../../store/songStore';
 import { toneEngine } from '../../audio/toneEngine';
 import type { DrumChannel } from '../../utils/typeDefinitions';
 import { Knob } from '../ui/Knob';
-import { AVAILABLE_DRUM_SAMPLES, getSamplesByCategory } from '../../constants/drumSamples';
-import { inferCategoryFromChannel } from '../../constants/drumKits';
-import { CustomSelect } from '../ui/CustomSelect';
+import { DRUM_CATEGORIES, getSamplesByCategory } from '../../constants/drumSamples';
+import { CustomSelect, SelectGroup } from '../ui/CustomSelect';
+import { Trash2 } from 'lucide-react';
 
 interface Props {
   channel: DrumChannel;
@@ -15,13 +15,18 @@ interface Props {
 }
 
 export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpanded, onToggleExpand }) => {
-  const { toggleDrumStep, setDrumStepVelocity, updateDrumChannel, playbackStep, isPlaying, currentDrumPatternEdit } = useSongStore();
+  const { toggleDrumStep, setDrumStepVelocity, updateDrumChannel, removeDrumChannel, playbackStep, isPlaying, currentDrumPatternEdit } = useSongStore();
   
   // Smart Draw State
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawAction, setDrawAction] = useState<boolean | null>(null);
 
-  // Velocity Draw State (para la vista expandida)
+  // Rename state
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editNameValue, setEditNameValue] = useState(channel.name);
+  const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Velocity Draw State
   const [isDrawingVelocity, setIsDrawingVelocity] = useState(false);
 
   const handleStepMouseDown = (index: number, currentlyActive: boolean) => {
@@ -72,7 +77,6 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
   const handleVelocityDraw = (e: React.MouseEvent | React.TouchEvent, stepIndex: number, forceDraw = false) => {
     if (!forceDraw && !isDrawingVelocity) return;
     
-    // Check if we can get the element to calculate relative Y
     let currentElement = e.currentTarget as HTMLElement;
     const rect = currentElement.getBoundingClientRect();
     const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
@@ -90,10 +94,40 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
   const activePattern = channel.patterns[currentDrumPatternEdit];
   const isPlayingActiveStep = isPlaying && activePattern && activePattern[playbackStep]?.isActive;
 
-  // Cargar lista de muestras según la categoría del canal
-  const category = inferCategoryFromChannel(channel);
-  const categorySamples = getSamplesByCategory(category);
-  const availableOptions = categorySamples.length > 0 ? categorySamples : AVAILABLE_DRUM_SAMPLES;
+  // Cargar lista de muestras por categorías
+  const selectGroups: SelectGroup[] = DRUM_CATEGORIES.map(cat => ({
+    label: cat.label,
+    options: getSamplesByCategory(cat.key).map(sample => ({
+      value: sample.path,
+      label: sample.name
+    }))
+  })).filter(g => g.options.length > 0);
+
+  const handleTitleClick = (e: React.MouseEvent) => {
+    // If editing, don't trigger anything
+    if (isEditingName) return;
+
+    if (e.detail === 1) {
+      clickTimeoutRef.current = setTimeout(() => {
+        onToggleExpand();
+      }, 200); // 200ms delay to wait for double click
+    } else if (e.detail === 2) {
+      if (clickTimeoutRef.current) {
+        clearTimeout(clickTimeoutRef.current);
+      }
+      setIsEditingName(true);
+      setEditNameValue(channel.name);
+    }
+  };
+
+  const handleNameSubmit = () => {
+    if (editNameValue.trim() !== '') {
+      updateDrumChannel(channel.id, { name: editNameValue.trim() });
+    } else {
+      setEditNameValue(channel.name);
+    }
+    setIsEditingName(false);
+  };
 
   return (
     <div className={`drum-channel-container ${isExpanded ? 'expanded' : ''}`}>
@@ -102,21 +136,60 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
         <div className="drum-controls">
           <div 
             className="drum-title" 
-            onClick={onToggleExpand}
-            style={{ cursor: 'pointer' }}
+            onClick={handleTitleClick}
+            style={{ cursor: 'pointer', flex: 1, minWidth: 0, overflow: 'hidden' }}
           >
             <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
-            <span className="channel-name-text">{channel.name}</span>
+            {isEditingName ? (
+              <input
+                type="text"
+                value={editNameValue}
+                onChange={(e) => setEditNameValue(e.target.value)}
+                onBlur={handleNameSubmit}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleNameSubmit();
+                  if (e.key === 'Escape') {
+                    setEditNameValue(channel.name);
+                    setIsEditingName(false);
+                  }
+                }}
+                autoFocus
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'inherit',
+                  fontFamily: 'inherit',
+                  fontSize: 'inherit',
+                  fontWeight: 'inherit',
+                  outline: 'none',
+                  width: '100%',
+                  padding: 0,
+                  margin: 0
+                }}
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span className="channel-name-text">{channel.name}</span>
+            )}
           </div>
+          
+          <button 
+            className="action-btn"
+            style={{ padding: '4px', margin: '0 4px', color: 'var(--text-secondary)' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              removeDrumChannel(channel.id);
+            }}
+            title="Eliminar Canal"
+          >
+            <Trash2 size={12} />
+          </button>
 
-          <div className="drum-sample-selector" style={{ width: '180px' }}>
+          <div className="drum-sample-selector" style={{ width: '160px' }}>
             <CustomSelect
               value={channel.sampleUrl}
               onChange={handleSampleChange}
-              options={availableOptions.map(sample => ({
-                value: sample.path,
-                label: sample.name
-              }))}
+              groups={selectGroups}
               style={{ width: '100%' }}
             />
           </div>
@@ -190,7 +263,7 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
                 {step.isActive && (
                   <div 
                     className="velocity-bar" 
-                    style={{ height: `${step.velocity * 100}%`, background: channelColor }}
+                    style={{ height: `${(step.velocity ?? 0.8) * 100}%`, background: channelColor }}
                   />
                 )}
               </div>
