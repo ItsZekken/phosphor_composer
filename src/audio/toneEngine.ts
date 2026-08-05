@@ -1215,11 +1215,14 @@ class ToneEngine {
       const currentState = useSongStore.getState();
       if (!currentState.isPatternRepeatOn) {
         currentState.setCurrentChainItemId(currentChainItemId);
+        if (currentState.isPlaying && currentState.patternChain && currentState.patternChain.length > 0) {
+          currentState.setCurrentDrumPatternEditLive(patternIndex);
+        }
       }
-      if (currentState.currentDrumPatternEdit === patternIndex) {
-        currentState.setPlaybackStep(localStepIndex);
+      if (useSongStore.getState().currentDrumPatternEdit === patternIndex) {
+        useSongStore.getState().setPlaybackStep(localStepIndex);
       } else {
-        currentState.setPlaybackStep(-1);
+        useSongStore.getState().setPlaybackStep(-1);
       }
     }, time);
   }

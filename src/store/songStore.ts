@@ -116,8 +116,10 @@ interface SongStore {
   drumChannels: import('../utils/typeDefinitions').DrumChannel[];
   activeDrumKitId: string;
   selectDrumKit: (kitId: string) => void;
+  userDrumPatternEdit: number;
   currentDrumPatternEdit: number;
   setCurrentDrumPatternEdit: (pattern: number) => void;
+  setCurrentDrumPatternEditLive: (pattern: number) => void;
   addDrumChannel: (channel: import('../utils/typeDefinitions').DrumChannel) => void;
   updateDrumChannel: (id: string, updates: Partial<import('../utils/typeDefinitions').DrumChannel>) => void;
   toggleDrumStep: (channelId: string, stepIndex: number, patternIndex: number, forceState?: boolean) => void;
@@ -317,6 +319,7 @@ export const useSongStore = create<SongStore>()(
   channels: DEFAULT_CHANNELS,
   drumChannels: DEFAULT_DRUM_CHANNELS,
   activeDrumKitId: 'kit_1',
+  userDrumPatternEdit: 0,
   currentDrumPatternEdit: 0,
 
   selectDrumKit: (kitId) => set((state) => {
@@ -353,7 +356,8 @@ export const useSongStore = create<SongStore>()(
   }),
   removeDrumChannel: (id) => set((state) => ({ drumChannels: state.drumChannels.filter(c => c.id !== id) })),
 
-  setCurrentDrumPatternEdit: (pattern: number) => set({ currentDrumPatternEdit: pattern }),
+  setCurrentDrumPatternEdit: (pattern: number) => set({ userDrumPatternEdit: pattern, currentDrumPatternEdit: pattern }),
+  setCurrentDrumPatternEditLive: (pattern: number) => set({ currentDrumPatternEdit: pattern }),
 
   // Acciones de Copia de Patrón
   copyDrumPattern: (sourcePatternIndex) => set((state) => {
@@ -529,7 +533,20 @@ export const useSongStore = create<SongStore>()(
   setPaletteMode: (paletteMode) => set({ paletteMode }),
 
   setActiveView: (activeView) => set({ activeView }),
-  setPlaying: (isPlaying) => set({ isPlaying }),
+  setPlaying: (isPlaying) => set((state) => {
+    if (!isPlaying) {
+      return {
+        isPlaying: false,
+        currentDrumPatternEdit: state.userDrumPatternEdit,
+        playbackStep: -1
+      };
+    } else {
+      return {
+        isPlaying: true,
+        userDrumPatternEdit: state.currentDrumPatternEdit
+      };
+    }
+  }),
   setCurrentBeat: (currentBeat) => {
     const oldBeat = get().currentBeat;
     set({ currentBeat });
@@ -754,6 +771,7 @@ export const useSongStore = create<SongStore>()(
     chordBlocks: [],
     melodyNotes: [],
     drumChannels: DEFAULT_DRUM_CHANNELS,
+    userDrumPatternEdit: 0,
     currentDrumPatternEdit: 0,
     selectedChordId: null,
     currentBeat: 0,
