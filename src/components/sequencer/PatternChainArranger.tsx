@@ -109,26 +109,22 @@ const SortablePatternItem: React.FC<SortablePatternItemProps> = ({
           <div {...attributes} {...listeners} style={{ cursor: 'grab', marginRight: '4px', opacity: 0.7 }}>
             <GripVertical size={14} />
           </div>
-          <button
-            className="pattern-badge-btn"
-            onClick={() => setCurrentDrumPatternEdit(item.patternIndex ?? 0)}
-            title="Haz clic para ver/editar este patrón"
-          >
-            P{(item.patternIndex ?? 0) + 1}
-          </button>
+          <div className="block-pattern-select" style={{ minWidth: '45px' }}>
+            <CustomSelect
+              value={String(item.patternIndex ?? 0)}
+              onChange={(val) => {
+                handleUpdate({ patternIndex: Number(val) });
+                setCurrentDrumPatternEdit(Number(val));
+              }}
+              options={Array.from({ length: 8 }).map((_, pIdx) => ({
+                value: String(pIdx),
+                label: `P${pIdx + 1}`
+              }))}
+            />
+          </div>
           <div className="block-nav-btns">
             <button className="chain-nav-btn remove-btn" onClick={handleRemove}>✕</button>
           </div>
-        </div>
-        <div className="block-pattern-select">
-          <CustomSelect
-            value={String(item.patternIndex ?? 0)}
-            onChange={(val) => handleUpdate({ patternIndex: Number(val) })}
-            options={Array.from({ length: 8 }).map((_, pIdx) => ({
-              value: String(pIdx),
-              label: `Patrón ${pIdx + 1}`
-            }))}
-          />
         </div>
         <div className="block-repeat-counter">
           <button
@@ -209,7 +205,7 @@ const SortableGroupItem: React.FC<SortableGroupItemProps> = ({
           <div {...attributes} {...listeners} style={{ cursor: 'grab', display: 'flex' }}>
             <GripVertical size={12} />
           </div>
-          <Folder size={12} /> Subgrupo
+          <Folder size={12} />
         </span>
         <div className="block-nav-btns" style={{ display: 'flex', gap: '4px' }}>
           <button className="chain-nav-btn remove-btn" onClick={() => removeChainItem(group.id)}>✕</button>
@@ -254,7 +250,6 @@ const SortableGroupItem: React.FC<SortableGroupItemProps> = ({
       </div>
 
       <div className="block-repeat-counter" style={{ alignSelf: 'center', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', padding: '2px 8px' }}>
-        <span style={{ fontSize: '0.65rem', marginRight: '6px', color: 'var(--text-secondary)' }}>Repetir Subgrupo:</span>
         <button className="repeat-btn" disabled={group.repeatCount <= 1} onClick={() => updateChainItem(group.id, { repeatCount: Math.max(1, group.repeatCount - 1) })}>-</button>
         <span className="repeat-count-text">x{group.repeatCount}</span>
         <button className="repeat-btn" onClick={() => updateChainItem(group.id, { repeatCount: group.repeatCount + 1 })}>+</button>
@@ -413,23 +408,24 @@ export const PatternChainArranger: React.FC = () => {
       <div className="pattern-chain-header">
         <div className="chain-title-group">
           <LinkIcon size={16} className="chain-icon" style={{ color: 'var(--reposo)' }} />
-          <span className="chain-title">CADENA DE PATRONES</span>
         </div>
 
         <div className="chain-actions">
           <button 
             className="action-btn"
-            style={{ padding: '4px 8px', fontSize: '0.75rem', color: 'var(--text-primary)' }}
+            style={{ padding: '4px 8px', fontSize: '0.75rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}
             onClick={() => addChainItem(currentDrumPatternEdit, 1)}
+            title={`Añadir Patrón ${currentDrumPatternEdit + 1}`}
           >
-            + Patrón {currentDrumPatternEdit + 1}
+            <Plus size={14} /> P{currentDrumPatternEdit + 1}
           </button>
           <button 
             className="action-btn"
-            style={{ padding: '4px 8px', fontSize: '0.75rem', color: 'var(--subdominante)' }}
+            style={{ padding: '4px 8px', fontSize: '0.75rem', color: 'var(--subdominante)', display: 'flex', alignItems: 'center', gap: '4px' }}
             onClick={handleAddGroup}
+            title="Añadir Subgrupo"
           >
-            + Subgrupo
+            <Plus size={14} /> <Folder size={14} />
           </button>
         </div>
       </div>

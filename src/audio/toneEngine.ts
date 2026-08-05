@@ -3,6 +3,7 @@ import { Piano } from '@tonejs/piano';
 import { useSongStore } from '../store/songStore';
 import { getChordNotes, invertChord, applyVoicing, NOTE_CLASSES, SCALE_INTERVALS } from '../engine/scaleDefinitions';
 import type { PatternDef } from '../patterns/patternTypes';
+import { flattenPatternChain } from '../utils/typeDefinitions';
 
 // Helper debounce simple para evitar llamadas excesivas a syncTimeline
 function debounce<T extends (...args: unknown[]) => void>(fn: T, delay: number): T {
@@ -1140,8 +1141,7 @@ class ToneEngine {
     let globalStepIndex = 0;
 
     if (!state.isPatternRepeatOn && state.patternChain && state.patternChain.length > 0) {
-      // Usar flattenPatternChain para tener una lista plana de bloques de 16-steps
-      const { flattenPatternChain } = require('../utils/typeDefinitions');
+      // Usar flattenPatternChain importada al principio del archivo
       const flatChain = flattenPatternChain(state.patternChain);
       
       const totalChainSteps = flatChain.length * 16;

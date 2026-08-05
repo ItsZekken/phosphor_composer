@@ -23,7 +23,6 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
 
   // Velocity Draw State (para la vista expandida)
   const [isDrawingVelocity, setIsDrawingVelocity] = useState(false);
-  const velocityContainerRef = useRef<HTMLDivElement>(null);
 
   const handleStepMouseDown = (index: number, currentlyActive: boolean) => {
     setIsDrawing(true);
@@ -70,22 +69,17 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
   };
 
   // Velocity Draw Logic
-  const handleVelocityDraw = (e: React.MouseEvent | React.TouchEvent, forceDraw = false) => {
+  const handleVelocityDraw = (e: React.MouseEvent | React.TouchEvent, stepIndex: number, forceDraw = false) => {
     if (!forceDraw && !isDrawingVelocity) return;
-    if (!velocityContainerRef.current) return;
     
-    const rect = velocityContainerRef.current.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    // Check if we can get the element to calculate relative Y
+    let currentElement = e.currentTarget as HTMLElement;
+    const rect = currentElement.getBoundingClientRect();
     const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
     
-    const stepWidth = rect.width / 16;
-    const stepIndex = Math.floor((clientX - rect.left) / stepWidth);
-    
-    if (stepIndex >= 0 && stepIndex < 16) {
-      const relativeY = Math.max(0, Math.min(rect.height, clientY - rect.top));
-      const newVelocity = 1 - (relativeY / rect.height);
-      setDrumStepVelocity(channel.id, stepIndex, currentDrumPatternEdit, newVelocity);
-    }
+    const relativeY = Math.max(0, Math.min(rect.height, clientY - rect.top));
+    const newVelocity = 1 - (relativeY / rect.height);
+    setDrumStepVelocity(channel.id, stepIndex, currentDrumPatternEdit, newVelocity);
   };
 
   // Colores de la paleta
@@ -180,17 +174,19 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
       {/* Accordion Detalle: Velocity */}
       {isExpanded && (
         <div className="drum-velocity-panel">
-          <div className="velocity-label">VELOCITY</div>
           <div 
             className="velocity-editor"
-            ref={velocityContainerRef}
-            onMouseDown={(e) => { setIsDrawingVelocity(true); handleVelocityDraw(e, true); }}
-            onMouseMove={(e) => handleVelocityDraw(e)}
-            onTouchStart={(e) => { setIsDrawingVelocity(true); handleVelocityDraw(e, true); }}
-            onTouchMove={(e) => handleVelocityDraw(e)}
+            onMouseLeave={stopDrawing}
           >
             {activePattern && activePattern.map((step, i) => (
-              <div key={i} className={`velocity-bar-container ${i % 4 === 0 ? 'downbeat-bg' : ''} ${isPlaying && playbackStep === i ? 'playback-head-vel' : ''}`}>
+              <div 
+                key={i} 
+                className={`velocity-bar-container ${i % 4 === 0 ? 'downbeat-bg' : ''} ${isPlaying && playbackStep === i ? 'playback-head-vel' : ''}`}
+                onMouseDown={(e) => { setIsDrawingVelocity(true); handleVelocityDraw(e, i, true); }}
+                onMouseMove={(e) => handleVelocityDraw(e, i)}
+                onTouchStart={(e) => { setIsDrawingVelocity(true); handleVelocityDraw(e, i, true); }}
+                onTouchMove={(e) => handleVelocityDraw(e, i)}
+              >
                 {step.isActive && (
                   <div 
                     className="velocity-bar" 
