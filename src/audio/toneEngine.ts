@@ -635,8 +635,27 @@ class ToneEngine {
 
 
     const playChordImmediate = (durationMs: number, velocity = 0.6) => {
-      // Leer siempre this.previewNotes para tener las notas actualizadas del acorde actual
-      this.previewNotes.forEach(note => playNoteImmediate(note, durationMs, velocity));
+      const now = Tone.now();
+      const durSec = durationMs / 1000;
+      this.previewNotes.forEach(note => {
+        if (!this.activePreviewNotes.includes(note)) {
+          this.activePreviewNotes.push(note);
+        }
+      });
+      if (usePiano && this.chordsPiano && this.chordsPiano.loaded) {
+        this.previewNotes.forEach(note => {
+          try {
+            this.chordsPiano!.keyDown({ note, time: now, velocity });
+            this.chordsPiano!.keyUp({ note, time: now + durSec });
+          } catch (e) { console.error(e); }
+          this.trackNote(note, durSec, undefined, 'harmony');
+        });
+      } else {
+        try {
+          this.chordSynth.triggerAttackRelease(this.previewNotes, durSec, now, velocity);
+        } catch (e) { console.error(e); }
+        this.previewNotes.forEach(note => this.trackNote(note, durSec, undefined, 'harmony'));
+      }
     };
 
     // Redefinir playNoteImmediate para que use this.previewNotes[0] como bajo
@@ -1284,7 +1303,21 @@ class ToneEngine {
     };
 
     const playChord = (durBeats: number, velocity = 0.6) => {
-      notes.forEach(note => playNote(note, durBeats, velocity));
+      const durSec = durBeats * beatDuration;
+      if (usePiano && this.chordsPiano && this.chordsPiano.loaded) {
+        notes.forEach(note => {
+          try {
+            this.chordsPiano!.keyDown({ note, time, velocity });
+            this.chordsPiano!.keyUp({ note, time: time + durSec });
+          } catch (e) { console.error(e); }
+          this.trackNote(note, durSec, time, 'harmony');
+        });
+      } else {
+        try {
+          this.chordSynth.triggerAttackRelease(notes, durSec, time, velocity);
+        } catch (e) { console.error(e); }
+        notes.forEach(note => this.trackNote(note, durSec, time, 'harmony'));
+      }
     };
 
     if (pattern === 'hold') {
