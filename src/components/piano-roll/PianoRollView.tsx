@@ -6,7 +6,7 @@ import { NOTE_CLASSES } from '../../engine/scaleDefinitions';
 import { melodyPredictor } from '../../magenta/melodyPredictor';
 import { autoCorrelate, hzToMidi } from '../../utils/pitchDetector';
 import type { MelodyNote } from '../../utils/typeDefinitions';
-import { Mic, Trash, Sparkles, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Copy, Trash2, Search, ChevronRight } from 'lucide-react';
+import { Mic, Trash, Sparkles, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Copy, Trash2, Search, ChevronRight, Plus } from 'lucide-react';
 import { ContextMenuContainer } from '../ui/ContextMenuContainer';
 import { ScaleFinderSection } from './ScaleFinderSection';
 import { ChannelQuickControl } from '../ui/ChannelQuickControl';
@@ -339,7 +339,7 @@ export const PianoRollView = () => {
   const [tempNote, setTempNote] = useState<{ midi: number; startBeat: number; durationBeats: number } | null>(null);
 
   // Menú contextual flotante del Piano Roll
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: 'notes' | 'canvas'; beat?: number; midi?: number } | null>(null);
   const [isScaleFinderOpen, setIsScaleFinderOpen] = useState(false);
 
   // Referencias para la grabación de audio
@@ -473,7 +473,6 @@ export const PianoRollView = () => {
     // -------------------------------------------------------------
     if (e.button === 2) {
       e.preventDefault();
-      
       if (clickedNote) {
         // A1. Click derecho sobre nota existente: abrir menú contextual de notas en el ratón
         const isAlreadySelected = selectedNoteIds.includes(clickedNote.id);
@@ -483,7 +482,8 @@ export const PianoRollView = () => {
         
         setContextMenu({
           x: e.clientX,
-          y: e.clientY
+          y: e.clientY,
+          type: 'notes'
         });
         
         const closeMenu = () => {
@@ -492,8 +492,14 @@ export const PianoRollView = () => {
         };
         window.addEventListener('click', closeMenu);
       } else {
-        // A2. Click derecho sobre espacio vacío: iniciar selección por Lasso
+        // A2. Click derecho sobre espacio vacío: iniciar selección por Lasso o abrir menú si no hay arrastre
+        let hasMoved = false;
         const handleMouseMoveLasso = (moveEvent: MouseEvent) => {
+          const dx = Math.abs(moveEvent.clientX - e.clientX);
+          const dy = Math.abs(moveEvent.clientY - e.clientY);
+          if (dx > 4 || dy > 4) {
+            hasMoved = true;
+          }
           const currentRect = canvas.getBoundingClientRect();
           const curX = moveEvent.clientX - currentRect.left;
           const curY = moveEvent.clientY - currentRect.top;
@@ -518,15 +524,14 @@ export const PianoRollView = () => {
             const ny1 = row * rowHeight;
             const ny2 = ny1 + rowHeight;
             const nx1 = note.startBeat * beatWidth;
-            const nx2 = nx1 + note.durationBeats * beatWidth;
+            const nx2 = (note.startBeat + note.durationBeats) * beatWidth;
 
-            const collides = nx1 < lx2 && nx2 > lx1 && ny1 < ly2 && ny2 > ly1;
-            if (collides) {
+            if (nx1 < lx2 && nx2 > lx1 && ny1 < ly2 && ny2 > ly1) {
               intersectingIds.push(note.id);
             }
           });
 
-          if (e.ctrlKey) {
+          if (moveEvent.ctrlKey) {
             const combined = Array.from(new Set([...selectedNoteIds, ...intersectingIds]));
             setSelectedNoteIds(combined);
           } else {
@@ -538,6 +543,24 @@ export const PianoRollView = () => {
           window.removeEventListener('mousemove', handleMouseMoveLasso);
           window.removeEventListener('mouseup', handleMouseUpLasso);
           setLassoRect(null);
+
+          if (!hasMoved) {
+            const clickBeat = Math.floor(startX / beatWidth);
+            const clickMidi = MAX_MIDI - Math.floor(startY / rowHeight);
+            setContextMenu({
+              x: e.clientX,
+              y: e.clientY,
+              type: 'canvas',
+              beat: clickBeat,
+              midi: clickMidi
+            });
+
+            const closeMenu = () => {
+              setContextMenu(null);
+              window.removeEventListener('click', closeMenu);
+            };
+            window.addEventListener('click', closeMenu);
+          }
         };
 
         window.addEventListener('mousemove', handleMouseMoveLasso);
@@ -1150,7 +1173,7 @@ export const PianoRollView = () => {
       {isGeneratingGhost && <div className="generating-indicator">IA analizando melodía...</div>}
 
       {/* Menú Contextual Local del Piano Roll */}
-      {contextMenu && (
+      {contextMenu && contextMenu.type === 'notes' && (
         <ContextMenuContainer x={contextMenu.x} y={contextMenu.y}>
           <div className="menu-header">Edición de Notas ({selectedNoteIds.length} sel)</div>
           
@@ -1254,6 +1277,57 @@ export const PianoRollView = () => {
             disabled={selectedNoteIds.length === 0}
           >
             Deseleccionar todo
+          </button>
+        </ContextMenuContainer>
+      )}
+
+      {contextMenu && contextMenu.type === 'canvas' && (
+        <ContextMenuContainer x={contextMenu.x} y={contextMenu.y}>
+          <div className="menu-header">Pista Melódica</div>
+
+          {contextMenu.midi !== undefined && contextMenu.beat !== undefined && (
+            <button
+              type="button"
+              onClick={() => {
+                const noteName = midiToNoteName(contextMenu.midi!);
+                addMelodyNote({
+                  note: noteName,
+                  midi: contextMenu.midi!,
+                  startBeat: contextMenu.beat!,
+                  durationBeats: 1,
+                  velocity: 80
+                });
+                toneEngine.playNotePreview(noteName);
+                setContextMenu(null);
+              }}
+            >
+              <Plus size={14} /> Insertar Nota ({midiToNoteName(contextMenu.midi)})
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedNoteIds(melodyNotes.map(n => n.id));
+              setContextMenu(null);
+            }}
+          >
+            Seleccionar todas las notas
+          </button>
+
+          <hr className="menu-separator" />
+
+          <button
+            type="button"
+            className="menu-danger"
+            onClick={() => {
+              if (window.confirm('¿Borrar todas las notas de la melodía?')) {
+                setMelodyNotes([]);
+              }
+              setContextMenu(null);
+            }}
+          >
+            <Trash2 size={14} /> Limpiar Pista Melódica
           </button>
         </ContextMenuContainer>
       )}

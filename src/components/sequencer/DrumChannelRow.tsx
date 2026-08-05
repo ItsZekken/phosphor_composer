@@ -6,7 +6,8 @@ import { Knob } from '../ui/Knob';
 import { DRUM_CATEGORIES, getSamplesByCategory } from '../../constants/drumSamples';
 import { CustomSelect } from '../ui/CustomSelect';
 import type { SelectGroup } from '../ui/CustomSelect';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Sparkles, RefreshCw } from 'lucide-react';
+import { ContextMenuContainer } from '../ui/ContextMenuContainer';
 
 interface Props {
   channel: DrumChannel;
@@ -191,32 +192,55 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
           </div>
           
           {contextMenuPos && (
-            <div 
-              style={{
-                position: 'fixed',
-                left: contextMenuPos.x,
-                top: contextMenuPos.y,
-                background: 'var(--surface-light)',
-                border: '1px solid var(--border)',
-                borderRadius: '4px',
-                padding: '4px',
-                zIndex: 1000,
-                boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
+            <ContextMenuContainer x={contextMenuPos.x} y={contextMenuPos.y}>
+              <div className="menu-header">Canal: {channel.name}</div>
+              
               <button
-                className="dropdown-item"
-                onClick={(e) => {
-                  e.stopPropagation();
+                type="button"
+                onClick={() => {
+                  setContextMenuPos(null);
+                  // Rellenar cada 4 pasos (0, 4, 8, 12)
+                  const pattern = channel.patterns[currentDrumPatternEdit] || [];
+                  pattern.forEach((_, stepIdx) => {
+                    const shouldBeActive = stepIdx % 4 === 0;
+                    if (pattern[stepIdx]?.isActive !== shouldBeActive) {
+                      toggleDrumStep(channel.id, stepIdx, currentDrumPatternEdit);
+                    }
+                  });
+                }}
+              >
+                <Sparkles size={14} /> Rellenar cada 4 pasos
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setContextMenuPos(null);
+                  // Limpiar todos los pasos del patrón
+                  const pattern = channel.patterns[currentDrumPatternEdit] || [];
+                  pattern.forEach((step, stepIdx) => {
+                    if (step.isActive) {
+                      toggleDrumStep(channel.id, stepIdx, currentDrumPatternEdit);
+                    }
+                  });
+                }}
+              >
+                <RefreshCw size={14} /> Limpiar pasos
+              </button>
+
+              <hr className="menu-separator" />
+
+              <button
+                type="button"
+                className="menu-danger"
+                onClick={() => {
                   setContextMenuPos(null);
                   removeDrumChannel(channel.id);
                 }}
-                style={{ color: '#ff4444', display: 'flex', alignItems: 'center', gap: '8px' }}
               >
                 <Trash2 size={14} /> Eliminar Canal
               </button>
-            </div>
+            </ContextMenuContainer>
           )}
 
           <div className="drum-sample-selector" style={{ width: '160px' }}>

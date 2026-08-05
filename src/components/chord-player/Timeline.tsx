@@ -6,10 +6,10 @@ import type { ChordBlock } from '../../utils/typeDefinitions';
 import { isChordInScale, getChordRomanDegree } from '../../engine/scaleDefinitions';
 import { getChordRole } from './ChordPalette';
 import { ChordPropertiesPanel } from './ChordPropertiesPanel';
-import { Undo2, Redo2 } from 'lucide-react';
+import { ContextMenuContainer } from '../ui/ContextMenuContainer';
+import { Plus, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Trash2, Undo2, Redo2 } from 'lucide-react';
 import { toneEngine } from '../../audio/toneEngine';
 import { ChannelQuickControl } from '../ui/ChannelQuickControl';
-
 
 const TimelinePlayhead: React.FC<{ beatWidth: number }> = ({ beatWidth }) => {
   const currentBeat = useSongStore(state => state.currentBeat);
@@ -43,7 +43,8 @@ export const Timeline: React.FC = () => {
     key,
     scale,
     timeSignature,
-    coarseBeat
+    coarseBeat,
+    transposeSong
   } = useSongStore(useShallow(state => ({
     chordBlocks: state.chordBlocks,
     melodyNotes: state.melodyNotes,
@@ -55,8 +56,11 @@ export const Timeline: React.FC = () => {
     key: state.key,
     scale: state.scale,
     timeSignature: state.timeSignature,
-    coarseBeat: Math.floor(state.currentBeat / 4) * 4
+    coarseBeat: Math.floor(state.currentBeat / 4) * 4,
+    transposeSong: state.transposeSong
   })));
+
+  const [trackContextMenu, setTrackContextMenu] = useState<{ x: number; y: number; beat: number } | null>(null);
 
   // Acceso reactivo al historial de Undo/Redo de zundo
   const { undo, redo, pastStates, futureStates } = useStore(useSongStore.temporal);
@@ -308,6 +312,23 @@ export const Timeline: React.FC = () => {
               setDraggingChord(null);
             }
           }}
+          onContextMenu={(e) => {
+            const target = e.target as HTMLElement;
+            if (!target.closest('.chord-block') && !target.closest('.chord-properties-popover')) {
+              e.preventDefault();
+              e.stopPropagation();
+              const canvasRect = e.currentTarget.getBoundingClientRect();
+              const clickX = e.clientX - canvasRect.left;
+              const beat = Math.max(0, Math.floor(clickX / BEAT_WIDTH));
+              setTrackContextMenu({ x: e.clientX, y: e.clientY, beat });
+              
+              const closeMenu = () => {
+                setTrackContextMenu(null);
+                window.removeEventListener('click', closeMenu);
+              };
+              window.addEventListener('click', closeMenu);
+            }
+          }}
           onMouseDown={(e) => {
             const target = e.target as HTMLElement;
             // Permitir click en la cuadrícula o fondo para cambiar de beat, ignorando bloques de acordes o popovers
@@ -464,6 +485,79 @@ export const Timeline: React.FC = () => {
       {/* Popover flotante del editor de propiedades del acorde (se activa con click derecho) */}
       {selectedBlock && popoverChordId === selectedBlock.id && (
         <ChordPropertiesPanel popoverLeft={popoverLeft} />
+      )}
+
+      {/* Menú Contextual de Pista Armónica */}
+      {trackContextMenu && (
+        <ContextMenuContainer x={trackContextMenu.x} y={trackContextMenu.y}>
+          <div className="menu-header">Pista Armónica (Beat {trackContextMenu.beat + 1})</div>
+          
+          <button
+            type="button"
+            onClick={() => {
+              addChordBlock(key, trackContextMenu.beat, 4);
+              setTrackContextMenu(null);
+            }}
+          >
+            <Plus size={14} /> Insertar Acorde {key}
+          </button>
+
+          <hr className="menu-separator" />
+
+          <div className="menu-quick-actions">
+            <button
+              type="button"
+              className="quick-action-btn"
+              title="Transponer -1 Semitono"
+              onClick={() => transposeSong(-1)}
+            >
+              <ArrowDown size={14} />
+              <span className="btn-subtext">-1</span>
+            </button>
+            <button
+              type="button"
+              className="quick-action-btn"
+              title="Transponer +1 Semitono"
+              onClick={() => transposeSong(1)}
+            >
+              <ArrowUp size={14} />
+              <span className="btn-subtext">+1</span>
+            </button>
+            <button
+              type="button"
+              className="quick-action-btn"
+              title="Bajar 1 Octava (-12)"
+              onClick={() => transposeSong(-12)}
+            >
+              <ChevronsDown size={14} />
+              <span className="btn-subtext">-12</span>
+            </button>
+            <button
+              type="button"
+              className="quick-action-btn"
+              title="Subir 1 Octava (+12)"
+              onClick={() => transposeSong(12)}
+            >
+              <ChevronsUp size={14} />
+              <span className="btn-subtext">+12</span>
+            </button>
+          </div>
+
+          <hr className="menu-separator" />
+
+          <button
+            type="button"
+            className="menu-danger"
+            onClick={() => {
+              if (window.confirm('¿Borrar todos los acordes de la pista armónica?')) {
+                chordBlocks.forEach(b => removeChordBlock(b.id));
+              }
+              setTrackContextMenu(null);
+            }}
+          >
+            <Trash2 size={14} /> Limpiar Pista Armónica
+          </button>
+        </ContextMenuContainer>
       )}
     </div>
   );

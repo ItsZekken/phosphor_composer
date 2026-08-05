@@ -6,29 +6,18 @@ import { PianoRollView } from './components/piano-roll/PianoRollView';
 import { DrumSequencerView } from './components/sequencer/DrumSequencerView';
 import { useSongStore } from './store/songStore';
 import { toneEngine } from './audio/toneEngine';
-import { ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, RefreshCw, Trash2 } from 'lucide-react';
 import { loadCustomPatterns } from './patterns/patternLoader';
 import { PianoVisualizer } from './components/piano-roll/PianoVisualizer';
 import { CRTOverlay } from './components/ui/CRTOverlay';
 import { SettingsPanel } from './components/ui/SettingsPanel';
 import { SynthConfigModal } from './components/ui/SynthConfigModal';
-import { ContextMenuContainer } from './components/ui/ContextMenuContainer';
 import { MixerDrawer } from './components/ui/MixerDrawer';
 import { GlobalLoader } from './components/ui/GlobalLoader';
 
 export default function App() {
   const activeView = useSongStore(state => state.activeView);
-  const transposeSong = useSongStore(state => state.transposeSong);
-  const clearSong = useSongStore(state => state.clearSong);
-  const isLooping = useSongStore(state => state.isLooping);
-  const setLooping = useSongStore(state => state.setLooping);
   const setCustomPatterns = useSongStore(state => state.setCustomPatterns);
   const isCrtEnabled = useSongStore(state => state.isCrtEnabled);
-  const [contextMenu, setContextMenu] = useState<{
-    visible: boolean;
-    x: number;
-    y: number;
-  }>({ visible: false, x: 0, y: 0 });
 
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -189,53 +178,20 @@ export default function App() {
     };
   }, []);
 
-  // 2. Click derecho personalizado
+  // Prevent default context menu on app main workspace so components can handle their own right-click actions
   useEffect(() => {
     const handleGlobalContextMenu = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      // No abrir el menú global del DAW en componentes que manejan su propio menú
-      if (
-        target.closest('canvas') ||
-        target.closest('.chord-block') ||
-        target.closest('.piano-sidebar')
-      ) {
-        return;
-      }
-
       const mainWorkspace = document.querySelector('.app-main');
       if (mainWorkspace && mainWorkspace.contains(e.target as Node)) {
         e.preventDefault();
-        setContextMenu({
-          visible: true,
-          x: e.clientX,
-          y: e.clientY
-        });
       }
     };
 
-    const handleGlobalClick = () => {
-      setContextMenu(prev => prev.visible ? { ...prev, visible: false } : prev);
-    };
-
     window.addEventListener('contextmenu', handleGlobalContextMenu);
-    window.addEventListener('click', handleGlobalClick);
-
     return () => {
       window.removeEventListener('contextmenu', handleGlobalContextMenu);
-      window.removeEventListener('click', handleGlobalClick);
     };
   }, []);
-
-  const handleContextTranspose = (semitones: number) => {
-    transposeSong(semitones);
-  };
-
-  const handleContextClear = () => {
-    if (window.confirm('¿Quieres limpiar toda la canción?')) {
-      clearSong();
-      toneEngine.stop();
-    }
-  };
 
   return (
     <>
@@ -255,63 +211,6 @@ export default function App() {
               {activeView === 'piano-roll' && <PianoRollView />}
               {activeView === 'sequencer' && <DrumSequencerView />}
             </main>
-
-            {/* Menú Contextual Flotante Personalizado */}
-            {contextMenu.visible && (
-              <ContextMenuContainer x={contextMenu.x} y={contextMenu.y}>
-                <div className="menu-header">Herramientas del DAW</div>
-                
-                {/* Barra de Acciones Rápidas estilo Windows 11 */}
-                <div className="menu-quick-actions">
-                  <button
-                    type="button"
-                    className="quick-action-btn"
-                    title="Transponer -1 Semitono"
-                    onClick={() => handleContextTranspose(-1)}
-                  >
-                    <ArrowDown size={14} />
-                    <span className="btn-subtext">-1</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="quick-action-btn"
-                    title="Transponer +1 Semitono"
-                    onClick={() => handleContextTranspose(1)}
-                  >
-                    <ArrowUp size={14} />
-                    <span className="btn-subtext">+1</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="quick-action-btn"
-                    title="Bajar 1 Octava (-12)"
-                    onClick={() => handleContextTranspose(-12)}
-                  >
-                    <ChevronsDown size={14} />
-                    <span className="btn-subtext">-12</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="quick-action-btn"
-                    title="Subir 1 Octava (+12)"
-                    onClick={() => handleContextTranspose(12)}
-                  >
-                    <ChevronsUp size={14} />
-                    <span className="btn-subtext">+12</span>
-                  </button>
-                </div>
-
-                <hr className="menu-separator" />
-
-                <button type="button" onClick={() => setLooping(!isLooping)}>
-                  <RefreshCw size={14} /> Repeat / Loop: {isLooping ? 'ON' : 'OFF'}
-                </button>
-                <hr className="menu-separator" />
-                <button type="button" className="menu-danger" onClick={handleContextClear}>
-                  <Trash2 size={14} /> Limpiar Todo
-                </button>
-              </ContextMenuContainer>
-            )}
           </div>
 
           <SettingsPanel />
