@@ -4,7 +4,8 @@ import { toneEngine } from '../../audio/toneEngine';
 import type { DrumChannel } from '../../utils/typeDefinitions';
 import { Knob } from '../ui/Knob';
 import { DRUM_CATEGORIES, getSamplesByCategory } from '../../constants/drumSamples';
-import { CustomSelect, SelectGroup } from '../ui/CustomSelect';
+import { CustomSelect } from '../ui/CustomSelect';
+import type { SelectGroup } from '../ui/CustomSelect';
 import { Trash2 } from 'lucide-react';
 
 interface Props {
