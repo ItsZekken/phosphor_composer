@@ -38,6 +38,10 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
+        const currentState = useSongStore.getState();
+        if (parsed.channels) {
+          parsed.channels = { ...currentState.channels, ...parsed.channels };
+        }
         useSongStore.setState(parsed);
       } catch (e) {
         console.error("Error cargando sesión persistida", e);

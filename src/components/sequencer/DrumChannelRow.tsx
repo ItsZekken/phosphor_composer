@@ -104,6 +104,21 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
     }))
   })).filter(g => g.options.length > 0);
 
+  const [contextMenuPos, setContextMenuPos] = useState<{ x: number, y: number } | null>(null);
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setContextMenuPos({ x: e.clientX, y: e.clientY });
+  };
+
+  useEffect(() => {
+    if (contextMenuPos) {
+      const closeMenu = () => setContextMenuPos(null);
+      window.addEventListener('click', closeMenu);
+      return () => window.removeEventListener('click', closeMenu);
+    }
+  }, [contextMenuPos]);
+
   const handleTitleClick = (e: React.MouseEvent) => {
     // If editing, don't trigger anything
     if (isEditingName) return;
@@ -138,6 +153,7 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
           <div 
             className="drum-title" 
             onClick={handleTitleClick}
+            onContextMenu={handleContextMenu}
             style={{ cursor: 'pointer', flex: 1, minWidth: 0, overflow: 'hidden' }}
           >
             <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
@@ -174,17 +190,34 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
             )}
           </div>
           
-          <button 
-            className="action-btn"
-            style={{ padding: '4px', margin: '0 4px', color: 'var(--text-secondary)' }}
-            onClick={(e) => {
-              e.stopPropagation();
-              removeDrumChannel(channel.id);
-            }}
-            title="Eliminar Canal"
-          >
-            <Trash2 size={12} />
-          </button>
+          {contextMenuPos && (
+            <div 
+              style={{
+                position: 'fixed',
+                left: contextMenuPos.x,
+                top: contextMenuPos.y,
+                background: 'var(--surface-light)',
+                border: '1px solid var(--border)',
+                borderRadius: '4px',
+                padding: '4px',
+                zIndex: 1000,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                className="dropdown-item"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setContextMenuPos(null);
+                  removeDrumChannel(channel.id);
+                }}
+                style={{ color: '#ff4444', display: 'flex', alignItems: 'center', gap: '8px' }}
+              >
+                <Trash2 size={14} /> Eliminar Canal
+              </button>
+            </div>
+          )}
 
           <div className="drum-sample-selector" style={{ width: '160px' }}>
             <CustomSelect
