@@ -263,6 +263,42 @@ const PianoRollCanvas: React.FC<{
 
   }, [melodyNotes, ghostNotes, currentBeat, canvasWidth, canvasHeight, selectedNoteIds, lassoRect, tempNote, rowHeight, beatWidth]);
 
+  const handleTouchCanvas = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (e.touches.length !== 1) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const touchX = e.touches[0].clientX - rect.left;
+    const touchY = e.touches[0].clientY - rect.top;
+
+    const GRID_SNAP = 0.25;
+    const clickBeat = Math.floor((touchX / beatWidth) / GRID_SNAP) * GRID_SNAP;
+    const clickedRow = Math.floor(touchY / rowHeight);
+    const clickMidi = MAX_MIDI - clickedRow;
+
+    const store = useSongStore.getState();
+    const existingNote = store.melodyNotes.find(n => {
+      const row = MAX_MIDI - n.midi;
+      const x1 = n.startBeat * beatWidth;
+      const x2 = (n.startBeat + n.durationBeats) * beatWidth;
+      return clickedRow === row && touchX >= x1 && touchX <= x2;
+    });
+
+    if (existingNote) {
+      store.removeMelodyNote(existingNote.id);
+    } else {
+      const noteName = midiToNoteName(clickMidi);
+      toneEngine.playNotePreview(noteName);
+      store.addMelodyNote({
+        note: noteName,
+        midi: clickMidi,
+        startBeat: clickBeat,
+        durationBeats: 1,
+        velocity: 0.8
+      });
+    }
+  };
+
   return (
     <canvas
       ref={canvasRef}
@@ -270,6 +306,7 @@ const PianoRollCanvas: React.FC<{
       height={canvasHeight}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMoveIdle}
+      onTouchStart={handleTouchCanvas}
       onContextMenu={e => e.preventDefault()}
       style={{ 
         display: 'block', 

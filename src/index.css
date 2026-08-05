@@ -5545,6 +5545,122 @@ input[type="range"]::-webkit-slider-thumb:hover {
   }
 }
 
+/* ============================================================
+   ESTILOS DE MATRIZ TRANSPUESTA Y BOTÓN DE ACCIÓN TÁCTIL
+   ============================================================ */
+.chord-add-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 229, 255, 0.25);
+  border: 1px solid #00e5ff;
+  color: #fff;
+  font-size: 13px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 5;
+  padding: 0;
+  line-height: 1;
+}
+
+.chord-add-btn:hover,
+.chord-add-btn:active {
+  background: #00e5ff;
+  color: #000;
+}
+
+.mobile-transposed-matrix-container {
+  display: none;
+}
+.desktop-matrix-container {
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .desktop-matrix-container {
+    display: none !important;
+  }
+  .mobile-transposed-matrix-container {
+    display: block !important;
+    width: 100% !important;
+  }
+
+  .transposed-matrix-list {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    width: 100% !important;
+  }
+
+  .transposed-degree-card {
+    background: #181324 !important;
+    border: 1px solid #2a223a !important;
+    border-radius: 8px !important;
+    padding: 8px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+  }
+
+  .transposed-degree-header {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+    padding-bottom: 4px !important;
+  }
+
+  .transposed-degree-header .degree-roman {
+    font-family: 'VT323', monospace !important;
+    font-size: 1.2rem !important;
+    color: #00e5ff !important;
+    font-weight: bold !important;
+  }
+
+  .transposed-degree-header .degree-base {
+    font-family: 'Share Tech Mono', monospace !important;
+    font-size: 0.95rem !important;
+    color: #e8e2f0 !important;
+  }
+
+  .transposed-variations-row {
+    display: flex !important;
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    gap: 8px !important;
+    padding: 4px 0 !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .transposed-var-col {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    min-width: 76px !important;
+    gap: 3px !important;
+  }
+
+  .transposed-var-label {
+    font-size: 0.6rem !important;
+    color: var(--text-secondary) !important;
+    font-family: 'Share Tech Mono', monospace !important;
+    text-transform: uppercase !important;
+  }
+
+  .transposed-var-col .chord-card-matrix {
+    width: 76px !important;
+    min-height: 48px !important;
+    font-size: 0.95rem !important;
+    font-weight: 700 !important;
+  }
+}
+
 /* Interacción táctil optimizada */
 @media (hover: none) and (pointer: coarse) {
   button, 

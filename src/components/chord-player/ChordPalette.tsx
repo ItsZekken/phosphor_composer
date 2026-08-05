@@ -134,6 +134,15 @@ const ChordCard: React.FC<ChordCardProps> = ({ chord, probability = 0, role, sma
     setDraggingChord(null);
   };
 
+  const handleAddDirectly = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    toneEngine.playChordPreviewStart(chord);
+    setTimeout(() => toneEngine.playChordPreviewStop(), 300);
+    const state = useSongStore.getState();
+    const lastBeat = state.chordBlocks.reduce((max, b) => Math.max(max, b.startBeat + b.durationBeats), 0);
+    state.addChordBlock(chord, lastBeat, 4);
+  };
+
   return (
     <div
       className={`chord-card-matrix ${role} ${small ? 'small' : ''}`}
@@ -142,7 +151,7 @@ const ChordCard: React.FC<ChordCardProps> = ({ chord, probability = 0, role, sma
       onMouseEnter={handleMouseEnter}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
-      title={`${chord} · Mantén para escuchar · Arrastra fuera de la paleta para añadir`}
+      title={`${chord} · Toca + para añadir a la línea de tiempo`}
     >
       <span className="chord-matrix-name">{chord}</span>
       {probability > 0.02 && (
@@ -150,23 +159,30 @@ const ChordCard: React.FC<ChordCardProps> = ({ chord, probability = 0, role, sma
           {Math.round(probability * 100)}%
         </span>
       )}
+      <button 
+        className="chord-add-btn" 
+        onClick={handleAddDirectly}
+        onTouchEnd={handleAddDirectly}
+        title="Añadir a la línea de tiempo"
+      >
+        +
+      </button>
     </div>
   );
 };
 
-// ------- Matrix View -------
+// ------- Matrix View (Desktop) -------
 
 interface MatrixViewProps {
   key_: NoteClass;
-  scale: ScaleType; // usado en getDiatonicChords y getChordRole
+  scale: ScaleType;
   suggestions: ChordSuggestion[];
 }
 
-const MatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggestions }) => {  // eslint-disable-line @typescript-eslint/no-unused-vars
+const MatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggestions }) => {
   const diatonic = useMemo(() => getDiatonicChords(key_, scale), [key_, scale]);
   const ROMAN_DEGREES = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
 
-  // Extraer la raíz y la calidad de cada acorde diatónico
   const parseChord = (chord: string) => {
     const m = chord.match(/^([A-G]#?)(m|dim|aug)?$/);
     return { root: m ? m[1] : chord, quality: m ? (m[2] || '') : '' };
@@ -199,12 +215,7 @@ const MatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggestions }) => 
             {diatonic.map((baseChord, colIdx) => {
               const { root, quality } = parseChord(baseChord);
               const varSuffix = getVariationSuffix(row.suffix, quality);
-              let chordName: string;
-              if (row.suffix === '' || row.suffix === 'modal') {
-                chordName = `${root}${varSuffix}`;
-              } else {
-                chordName = `${root}${varSuffix}`;
-              }
+              const chordName = `${root}${varSuffix}`;
               const role = getChordRole(chordName, key_, scale);
               const prob = sugMap[chordName];
               return (
@@ -219,6 +230,63 @@ const MatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggestions }) => 
             })}
           </React.Fragment>
         ))}
+      </div>
+    </div>
+  );
+};
+
+// ------- Transposed Matrix View (Móvil: Grados Verticales, Variaciones Horizontales) -------
+
+const TransposedMatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggestions }) => {
+  const diatonic = useMemo(() => getDiatonicChords(key_, scale), [key_, scale]);
+  const ROMAN_DEGREES = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
+
+  const parseChord = (chord: string) => {
+    const m = chord.match(/^([A-G]#?)(m|dim|aug)?$/);
+    return { root: m ? m[1] : chord, quality: m ? (m[2] || '') : '' };
+  };
+
+  const sugMap = useMemo(() => {
+    const m: Record<string, number> = {};
+    suggestions.forEach(s => { m[s.chord] = s.probability; });
+    return m;
+  }, [suggestions]);
+
+  const variations = VARIATION_ROWS;
+
+  return (
+    <div className="transposed-matrix-view">
+      <div className="transposed-matrix-list">
+        {diatonic.map((baseChord, degreeIdx) => {
+          const { root, quality } = parseChord(baseChord);
+          return (
+            <div key={degreeIdx} className="transposed-degree-card">
+              <div className="transposed-degree-header">
+                <span className="degree-roman">{ROMAN_DEGREES[degreeIdx]}</span>
+                <span className="degree-base">{baseChord}</span>
+              </div>
+              <div className="transposed-variations-row">
+                {variations.map((row) => {
+                  const varSuffix = getVariationSuffix(row.suffix, quality);
+                  const chordName = `${root}${varSuffix}`;
+                  const role = getChordRole(chordName, key_, scale);
+                  const prob = sugMap[chordName];
+                  return (
+                    <div key={row.suffix} className="transposed-var-col">
+                      <span className="transposed-var-label">{row.label}</span>
+                      <ChordCard
+                        chord={chordName}
+                        probability={prob}
+                        role={role}
+                        small={false}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -344,7 +412,14 @@ export const ChordPalette: React.FC = () => {
 
       <div className="palette-body-wrap">
         {paletteMode === 'matrix' && (
-          <MatrixView key_={key} scale={scale} suggestions={chordSuggestions} />
+          <>
+            <div className="desktop-matrix-container">
+              <MatrixView key_={key} scale={scale} suggestions={chordSuggestions} />
+            </div>
+            <div className="mobile-transposed-matrix-container">
+              <TransposedMatrixView key_={key} scale={scale} suggestions={chordSuggestions} />
+            </div>
+          </>
         )}
         {paletteMode === 'fifths' && (
           <CircleFifthsView currentKey={key} scale={scale} suggestions={chordSuggestions} />
