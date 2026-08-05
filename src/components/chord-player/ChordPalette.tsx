@@ -127,6 +127,9 @@ const ChordCard: React.FC<ChordCardProps> = ({ chord, probability = 0, role, sma
   const handleTouchStart = () => {
     toneEngine.playChordPreviewStart(chord);
     setDraggingChord(chord);
+    if (window.__initialDragChordRef) {
+      window.__initialDragChordRef.current = chord;
+    }
   };
 
   return (
@@ -148,6 +151,13 @@ const ChordCard: React.FC<ChordCardProps> = ({ chord, probability = 0, role, sma
     </div>
   );
 };
+
+// Declaro ref global accesible por los ChordCard y ChordPalette
+declare global {
+  interface Window {
+    __initialDragChordRef?: React.MutableRefObject<string | null>;
+  }
+}
 
 // ------- Matrix View (Desktop) -------
 
@@ -279,37 +289,37 @@ export const ChordPalette: React.FC = () => {
   const {
     key,
     scale,
-    chordSuggestions,
-    updateSuggestions,
-    chordBlocks,
     selectedChordId,
-    paletteMode,
-    setPaletteMode,
-    detectedKey,
-    isAutoKey,
+    chordBlocks,
+    updateSuggestions,
+    chordSuggestions,
     draggingChord,
     setDraggingChord,
-    isAutoSuggestions
+    isAutoSuggestions,
+    detectedKey,
+    isAutoKey
   } = useSongStore(useShallow(state => ({
     key: state.key,
     scale: state.scale,
-    chordSuggestions: state.chordSuggestions,
-    updateSuggestions: state.updateSuggestions,
-    chordBlocks: state.chordBlocks,
     selectedChordId: state.selectedChordId,
-    paletteMode: state.paletteMode,
-    setPaletteMode: state.setPaletteMode,
-    detectedKey: state.detectedKey,
-    isAutoKey: state.isAutoKey,
+    chordBlocks: state.chordBlocks,
+    updateSuggestions: state.updateSuggestions,
+    chordSuggestions: state.chordSuggestions,
     draggingChord: state.draggingChord,
     setDraggingChord: state.setDraggingChord,
-    isAutoSuggestions: state.isAutoSuggestions
+    isAutoSuggestions: state.isAutoSuggestions,
+    detectedKey: state.detectedKey,
+    isAutoKey: state.isAutoKey
   })));
 
   const [isMouseOutside, setIsMouseOutside] = React.useState(false);
   const [mousePos, setMousePos] = React.useState({ x: 0, y: 0 });
   const [touchPos, setTouchPos] = useState<{ x: number; y: number } | null>(null);
+  const [paletteMode, setPaletteMode] = useState<PaletteMode>('matrix');
+
   const lastHoveredTouchChordRef = React.useRef<string | null>(null);
+  const initialDragChordRef = React.useRef<string | null>(null);
+  window.__initialDragChordRef = initialDragChordRef;
 
   // P3: Solo actualizar automáticamente si el switch está activado
   useEffect(() => {
@@ -318,7 +328,7 @@ export const ChordPalette: React.FC = () => {
     }
   }, [key, scale, selectedChordId, chordBlocks.length, updateSuggestions, isAutoSuggestions]);
 
-  // Listener global de ratón para seguir el movimiento del mouse y manejar el drop global
+  // Listener global de ratón y táctil para seguir movimiento y manejar drop
   useEffect(() => {
     const handleGlobalMouseMove = (e: MouseEvent) => {
       if (draggingChord) {
@@ -331,6 +341,7 @@ export const ChordPalette: React.FC = () => {
         toneEngine.playChordPreviewStop(draggingChord);
         setDraggingChord(null);
         setIsMouseOutside(false);
+        initialDragChordRef.current = null;
       }
     };
 
@@ -368,8 +379,8 @@ export const ChordPalette: React.FC = () => {
 
     const handleGlobalTouchEnd = (e: TouchEvent) => {
       const state = useSongStore.getState();
-      const chord = state.draggingChord;
-      if (!chord) return;
+      const initialChord = initialDragChordRef.current || state.draggingChord;
+      if (!initialChord) return;
 
       if (e.changedTouches.length === 1) {
         const touch = e.changedTouches[0];
@@ -382,16 +393,17 @@ export const ChordPalette: React.FC = () => {
             const rect = canvasEl.getBoundingClientRect();
             const dropX = touch.clientX - rect.left;
             const dropBeat = Math.max(0, Math.round(dropX / 40));
-            state.addChordBlock(chord, dropBeat, 4);
+            state.addChordBlock(initialChord, dropBeat, 4);
           }
         }
       }
 
-      toneEngine.playChordPreviewStop(chord);
+      toneEngine.playChordPreviewStop();
       state.setDraggingChord(null);
       setIsMouseOutside(false);
       setTouchPos(null);
       lastHoveredTouchChordRef.current = null;
+      initialDragChordRef.current = null;
     };
 
     window.addEventListener('mousemove', handleGlobalMouseMove);
@@ -412,6 +424,8 @@ export const ChordPalette: React.FC = () => {
     { id: 'fifths',   label: 'Quintas',  icon: '◎' },
     { id: 'cadences', label: 'Cadencias', icon: '♩' },
   ];
+
+  const activeGhostChord = initialDragChordRef.current || draggingChord;
 
   return (
     <div 
@@ -487,7 +501,7 @@ export const ChordPalette: React.FC = () => {
       </div>
 
       {/* Fantasma visual flotante de arrastre */}
-      {draggingChord && (isMouseOutside || touchPos) && (
+      {draggingChord && (isMouseOutside || touchPos) && activeGhostChord && (
         <div 
           className="virtual-drag-ghost"
           style={{
@@ -507,7 +521,7 @@ export const ChordPalette: React.FC = () => {
             transform: 'translate(-50%, -50%)'
           }}
         >
-          ➕ {draggingChord}
+          ➕ {activeGhostChord}
         </div>
       )}
     </div>
