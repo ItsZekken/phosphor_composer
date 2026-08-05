@@ -296,6 +296,10 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
                 style={{ '--switch-color': channelColor } as React.CSSProperties}
                 onMouseDown={() => handleStepMouseDown(i, step.isActive)}
                 onMouseEnter={() => handleStepMouseEnter(i, step.isActive)}
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  handleStepMouseDown(i, step.isActive);
+                }}
               />
             );
           })}

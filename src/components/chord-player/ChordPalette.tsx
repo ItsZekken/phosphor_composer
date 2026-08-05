@@ -124,12 +124,24 @@ const ChordCard: React.FC<ChordCardProps> = ({ chord, probability = 0, role, sma
     color: '#F3F4F6'
   };
 
+  const handleTouchStart = () => {
+    toneEngine.playChordPreviewStart(chord);
+    setDraggingChord(chord);
+  };
+
+  const handleTouchEnd = () => {
+    toneEngine.playChordPreviewStop();
+    setDraggingChord(null);
+  };
+
   return (
     <div
       className={`chord-card-matrix ${role} ${small ? 'small' : ''}`}
       style={cardStyle}
       onMouseDown={handleMouseDown}
       onMouseEnter={handleMouseEnter}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
       title={`${chord} · Mantén para escuchar · Arrastra fuera de la paleta para añadir`}
     >
       <span className="chord-matrix-name">{chord}</span>
