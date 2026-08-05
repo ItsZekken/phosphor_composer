@@ -5546,35 +5546,8 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 /* ============================================================
-   ESTILOS DE MATRIZ TRANSPUESTA Y BOTÓN DE ACCIÓN TÁCTIL
+   ESTILOS DE MATRIZ TRANSPUESTA UNIFICADA ("PEGADITOS" Y CON COLORES)
    ============================================================ */
-.chord-add-btn {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: rgba(0, 229, 255, 0.25);
-  border: 1px solid #00e5ff;
-  color: #fff;
-  font-size: 13px;
-  font-weight: bold;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  z-index: 5;
-  padding: 0;
-  line-height: 1;
-}
-
-.chord-add-btn:hover,
-.chord-add-btn:active {
-  background: #00e5ff;
-  color: #000;
-}
-
 .mobile-transposed-matrix-container {
   display: none;
 }
@@ -5591,73 +5564,69 @@ input[type="range"]::-webkit-slider-thumb:hover {
     width: 100% !important;
   }
 
-  .transposed-matrix-list {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 12px !important;
+  .transposed-matrix-view {
     width: 100% !important;
-  }
-
-  .transposed-degree-card {
-    background: #181324 !important;
-    border: 1px solid #2a223a !important;
-    border-radius: 8px !important;
-    padding: 8px !important;
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 6px !important;
-  }
-
-  .transposed-degree-header {
-    display: flex !important;
-    align-items: center !important;
-    gap: 8px !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-    padding-bottom: 4px !important;
-  }
-
-  .transposed-degree-header .degree-roman {
-    font-family: 'VT323', monospace !important;
-    font-size: 1.2rem !important;
-    color: #00e5ff !important;
-    font-weight: bold !important;
-  }
-
-  .transposed-degree-header .degree-base {
-    font-family: 'Share Tech Mono', monospace !important;
-    font-size: 0.95rem !important;
-    color: #e8e2f0 !important;
-  }
-
-  .transposed-variations-row {
-    display: flex !important;
-    flex-direction: row !important;
     overflow-x: auto !important;
-    gap: 8px !important;
-    padding: 4px 0 !important;
     -webkit-overflow-scrolling: touch;
   }
 
-  .transposed-var-col {
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: center !important;
-    min-width: 76px !important;
+  .transposed-single-grid {
+    display: grid !important;
+    grid-template-columns: 48px repeat(5, minmax(56px, 1fr)) !important;
     gap: 3px !important;
+    width: 100% !important;
+    padding: 2px 0 !important;
   }
 
-  .transposed-var-label {
-    font-size: 0.6rem !important;
-    color: var(--text-secondary) !important;
-    font-family: 'Share Tech Mono', monospace !important;
-    text-transform: uppercase !important;
+  .transposed-grid-header-corner {
+    background: transparent;
   }
 
-  .transposed-var-col .chord-card-matrix {
-    width: 76px !important;
+  .transposed-grid-header-cell {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.62rem;
+    font-weight: bold;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    text-align: center;
+    padding: 2px 0;
+    white-space: nowrap;
+  }
+
+  .transposed-grid-degree-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(20, 16, 28, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    padding: 2px;
+  }
+
+  .transposed-grid-degree-label .degree-roman {
+    font-family: 'VT323', monospace;
+    font-size: 1.1rem;
+    color: #00e5ff;
+    line-height: 1;
+  }
+
+  .transposed-grid-degree-label .degree-base {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem;
+    color: #fff;
+    line-height: 1;
+  }
+
+  .transposed-single-grid .chord-card-matrix {
+    width: 100% !important;
+    height: 48px !important;
     min-height: 48px !important;
-    font-size: 0.95rem !important;
+    font-size: 0.85rem !important;
     font-weight: 700 !important;
+    margin: 0 !important;
+    touch-action: none !important;
+    border-radius: 4px !important;
   }
 }
 
@@ -5669,6 +5638,9 @@ input[type="range"]::-webkit-slider-thumb:hover {
   .chord-card-matrix, 
   .drum-step {
     touch-action: manipulation;
+  }
+  .chord-card-matrix {
+    touch-action: none !important;
   }
 }
 

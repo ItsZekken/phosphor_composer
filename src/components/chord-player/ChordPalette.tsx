@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useSongStore } from '../../store/songStore';
 import { useShallow } from 'zustand/react/shallow';
 import type { ChordSuggestion } from '../../utils/typeDefinitions';
@@ -129,20 +129,6 @@ const ChordCard: React.FC<ChordCardProps> = ({ chord, probability = 0, role, sma
     setDraggingChord(chord);
   };
 
-  const handleTouchEnd = () => {
-    toneEngine.playChordPreviewStop();
-    setDraggingChord(null);
-  };
-
-  const handleAddDirectly = (e: React.MouseEvent | React.TouchEvent) => {
-    e.stopPropagation();
-    toneEngine.playChordPreviewStart(chord);
-    setTimeout(() => toneEngine.playChordPreviewStop(), 300);
-    const state = useSongStore.getState();
-    const lastBeat = state.chordBlocks.reduce((max, b) => Math.max(max, b.startBeat + b.durationBeats), 0);
-    state.addChordBlock(chord, lastBeat, 4);
-  };
-
   return (
     <div
       className={`chord-card-matrix ${role} ${small ? 'small' : ''}`}
@@ -150,8 +136,7 @@ const ChordCard: React.FC<ChordCardProps> = ({ chord, probability = 0, role, sma
       onMouseDown={handleMouseDown}
       onMouseEnter={handleMouseEnter}
       onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-      title={`${chord} · Toca + para añadir a la línea de tiempo`}
+      title={`${chord} · Desliza el dedo hacia la línea de tiempo para añadir`}
     >
       <span className="chord-matrix-name">{chord}</span>
       {probability > 0.02 && (
@@ -159,14 +144,6 @@ const ChordCard: React.FC<ChordCardProps> = ({ chord, probability = 0, role, sma
           {Math.round(probability * 100)}%
         </span>
       )}
-      <button 
-        className="chord-add-btn" 
-        onClick={handleAddDirectly}
-        onTouchEnd={handleAddDirectly}
-        title="Añadir a la línea de tiempo"
-      >
-        +
-      </button>
     </div>
   );
 };
@@ -235,7 +212,7 @@ const MatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggestions }) => 
   );
 };
 
-// ------- Transposed Matrix View (Móvil: Grados Verticales, Variaciones Horizontales) -------
+// ------- Transposed Matrix View (Móvil: Grados Verticales, Variaciones Horizontales sin Divisiones) -------
 
 const TransposedMatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggestions }) => {
   const diatonic = useMemo(() => getDiatonicChords(key_, scale), [key_, scale]);
@@ -256,35 +233,38 @@ const TransposedMatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggesti
 
   return (
     <div className="transposed-matrix-view">
-      <div className="transposed-matrix-list">
+      <div className="transposed-single-grid">
+        <div className="transposed-grid-header-corner" />
+        {variations.map((v) => (
+          <div key={v.suffix} className="transposed-grid-header-cell">
+            {v.label}
+          </div>
+        ))}
+
         {diatonic.map((baseChord, degreeIdx) => {
           const { root, quality } = parseChord(baseChord);
           return (
-            <div key={degreeIdx} className="transposed-degree-card">
-              <div className="transposed-degree-header">
+            <React.Fragment key={degreeIdx}>
+              <div className="transposed-grid-degree-label">
                 <span className="degree-roman">{ROMAN_DEGREES[degreeIdx]}</span>
                 <span className="degree-base">{baseChord}</span>
               </div>
-              <div className="transposed-variations-row">
-                {variations.map((row) => {
-                  const varSuffix = getVariationSuffix(row.suffix, quality);
-                  const chordName = `${root}${varSuffix}`;
-                  const role = getChordRole(chordName, key_, scale);
-                  const prob = sugMap[chordName];
-                  return (
-                    <div key={row.suffix} className="transposed-var-col">
-                      <span className="transposed-var-label">{row.label}</span>
-                      <ChordCard
-                        chord={chordName}
-                        probability={prob}
-                        role={role}
-                        small={false}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+              {variations.map((row) => {
+                const varSuffix = getVariationSuffix(row.suffix, quality);
+                const chordName = `${root}${varSuffix}`;
+                const role = getChordRole(chordName, key_, scale);
+                const prob = sugMap[chordName];
+                return (
+                  <ChordCard
+                    key={`${degreeIdx}-${row.suffix}`}
+                    chord={chordName}
+                    probability={prob}
+                    role={role}
+                    small={row.suffix !== ''}
+                  />
+                );
+              })}
+            </React.Fragment>
           );
         })}
       </div>
@@ -336,6 +316,8 @@ export const ChordPalette: React.FC = () => {
   }, [key, scale, selectedChordId, chordBlocks.length, updateSuggestions, isAutoSuggestions]);
 
   // Listener global de ratón para seguir el movimiento del mouse y manejar el drop global
+  const [touchPos, setTouchPos] = useState<{ x: number; y: number } | null>(null);
+
   useEffect(() => {
     const handleGlobalMouseMove = (e: MouseEvent) => {
       if (draggingChord) {
@@ -351,12 +333,53 @@ export const ChordPalette: React.FC = () => {
       }
     };
 
+    const handleGlobalTouchMove = (e: TouchEvent) => {
+      const chord = useSongStore.getState().draggingChord;
+      if (!chord) return;
+      if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        setTouchPos({ x: touch.clientX, y: touch.clientY });
+        setIsMouseOutside(true);
+      }
+    };
+
+    const handleGlobalTouchEnd = (e: TouchEvent) => {
+      const state = useSongStore.getState();
+      const chord = state.draggingChord;
+      if (!chord) return;
+
+      if (e.changedTouches.length === 1) {
+        const touch = e.changedTouches[0];
+        const dropEl = document.elementFromPoint(touch.clientX, touch.clientY);
+        const timelineViewport = dropEl?.closest('.timeline-viewport') || dropEl?.closest('.timeline-section') || dropEl?.closest('.timeline-canvas');
+        
+        if (timelineViewport) {
+          const canvasEl = document.querySelector('.timeline-canvas');
+          if (canvasEl) {
+            const rect = canvasEl.getBoundingClientRect();
+            const dropX = touch.clientX - rect.left;
+            const dropBeat = Math.max(0, Math.round(dropX / 40));
+            state.addChordBlock(chord, dropBeat, 4);
+          }
+        }
+      }
+
+      toneEngine.playChordPreviewStop(chord);
+      state.setDraggingChord(null);
+      setIsMouseOutside(false);
+      setTouchPos(null);
+    };
+
     window.addEventListener('mousemove', handleGlobalMouseMove);
     window.addEventListener('mouseup', handleGlobalMouseUp);
+    window.addEventListener('touchmove', handleGlobalTouchMove);
+    window.addEventListener('touchend', handleGlobalTouchEnd);
 
     return () => {
       window.removeEventListener('mousemove', handleGlobalMouseMove);
       window.removeEventListener('mouseup', handleGlobalMouseUp);
+      window.removeEventListener('touchmove', handleGlobalTouchMove);
+      window.removeEventListener('touchend', handleGlobalTouchEnd);
     };
   }, [draggingChord, setDraggingChord]);
 
@@ -440,13 +463,13 @@ export const ChordPalette: React.FC = () => {
       </div>
 
       {/* Fantasma visual flotante de arrastre */}
-      {draggingChord && isMouseOutside && (
+      {draggingChord && (isMouseOutside || touchPos) && (
         <div 
           className="virtual-drag-ghost"
           style={{
             position: 'fixed',
-            left: mousePos.x + 12,
-            top: mousePos.y + 12,
+            left: (touchPos ? touchPos.x : mousePos.x) + 12,
+            top: (touchPos ? touchPos.y : mousePos.y) + 12,
             pointerEvents: 'none',
             zIndex: 9999,
             background: 'var(--accent)',
