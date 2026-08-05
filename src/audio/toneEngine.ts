@@ -80,7 +80,7 @@ class ToneEngine {
   private isInitialized = false;
 
   private drumSynths = new Map<string, Tone.MembraneSynth | Tone.NoiseSynth | Tone.MetalSynth>();
-  private drumPlayers = new Map<string, Tone.Player>();
+  private drumPlayers = new Map<string, { player: Tone.Player, panner: Tone.Panner, sampleUrl: string }>();
 
   private channelNodes = new Map<string, { volumeNode: Tone.Volume; pannerNode: Tone.Panner }>();
   private cachedChannels: Record<string, any> | null = null;
@@ -114,6 +114,8 @@ class ToneEngine {
   private cachedBpm = 120;
   // P2: maxBeat cacheado — se actualiza solo cuando cambian los bloques, no en cada tick
   private cachedMaxBeat = 4;
+  private cachedChordsMaxBeat = 4;
+  private cachedMelodyMaxBeat = 4;
   // rAF handle para el update de UI del playhead
   private playheadRafId: number | null = null;
   private unsubscribeStore: (() => void) | null = null;
@@ -128,9 +130,21 @@ class ToneEngine {
 
   private updateCachedMaxBeat(state?: any) {
     const s = state || useSongStore.getState();
-    let newMax = 4;
-    (s.chordBlocks || []).forEach((b: any) => { newMax = Math.max(newMax, b.startBeat + b.durationBeats); });
-    (s.melodyNotes || []).forEach((n: any) => { newMax = Math.max(newMax, n.startBeat + n.durationBeats); });
+    let chordsMax = 4;
+    (s.chordBlocks || []).forEach((b: any) => { chordsMax = Math.max(chordsMax, b.startBeat + b.durationBeats); });
+    let melodyMax = 4;
+    (s.melodyNotes || []).forEach((n: any) => { melodyMax = Math.max(melodyMax, n.startBeat + n.durationBeats); });
+    
+    let newMax = Math.max(chordsMax, melodyMax);
+    
+    if (!s.isPatternRepeatOn && s.patternChain && s.patternChain.length > 0) {
+      let chainSteps = 0;
+      s.patternChain.forEach((item: any) => { chainSteps += item.repeatCount * 16; });
+      newMax = Math.max(newMax, chainSteps * 0.25);
+    }
+    
+    this.cachedChordsMaxBeat = chordsMax;
+    this.cachedMelodyMaxBeat = melodyMax;
     this.cachedMaxBeat = newMax;
     return newMax;
   }
@@ -820,6 +834,8 @@ class ToneEngine {
     this.lastTriggeredChordName = '';
     this.lastTriggeredVoicing = '';
     this.lastTriggeredInversion = 0;
+    this.lastTriggeredDrumStep = -1;
+    this.lastTriggeredDrumBeat = -1;
     this.silence();
     // Limpiar visualizador de armonía
     this.activeNotesSet.clear();
@@ -1020,30 +1036,40 @@ class ToneEngine {
   private lastTriggeredDrumStep = -1;
   private lastTriggeredDrumBeat = -1;
 
-  private getOrCreateDrumPlayer(sampleUrl: string): Tone.Player | null {
-    if (this.drumPlayers.has(sampleUrl)) {
-      return this.drumPlayers.get(sampleUrl) || null;
+  private getOrCreateDrumPlayer(channelId: string, sampleUrl: string, pan: number): Tone.Player | null {
+    const cached = this.drumPlayers.get(channelId);
+    
+    if (cached) {
+      cached.panner.pan.value = Math.max(-1, Math.min(1, pan));
+      if (cached.sampleUrl === sampleUrl) {
+        return cached.player;
+      }
+      // If sampleUrl changed for this channel, dispose old player
+      cached.player.dispose();
+      this.drumPlayers.delete(channelId);
     }
 
     if (sampleUrl.startsWith('/') || sampleUrl.endsWith('.wav') || sampleUrl.endsWith('.mp3')) {
       const drumsChannelNode = this.getChannelNode('drums');
+      const panner = new Tone.Panner(Math.max(-1, Math.min(1, pan))).connect(drumsChannelNode.volumeNode);
+      
       const player = new Tone.Player({
         url: sampleUrl,
         autostart: false,
         onerror: (err) => {
           console.warn(`[ToneEngine] Error cargando sample de batería: ${sampleUrl}`, err);
         }
-      }).connect(drumsChannelNode.volumeNode);
+      }).connect(panner);
 
-      this.drumPlayers.set(sampleUrl, player);
+      this.drumPlayers.set(channelId, { player, panner, sampleUrl });
       return player;
     }
 
     return null;
   }
 
-  private triggerDrumSound(sampleUrl: string, volDb: number, time?: number) {
-    const player = this.getOrCreateDrumPlayer(sampleUrl);
+  private triggerDrumSound(channelId: string, sampleUrl: string, volDb: number, pan: number, time?: number) {
+    const player = this.getOrCreateDrumPlayer(channelId, sampleUrl, pan);
     if (player && player.loaded) {
       player.volume.value = volDb;
       if (time !== undefined) {
@@ -1098,7 +1124,7 @@ class ToneEngine {
     const velocity = customVelocity !== undefined ? customVelocity : 0.8;
     const volDb = Tone.gainToDb((channel.volume / 100) * velocity);
 
-    this.triggerDrumSound(channel.sampleUrl, volDb);
+    this.triggerDrumSound(channel.id, channel.sampleUrl, volDb, channel.pan || 0);
   }
 
   private triggerDrumTick(time: number) {
@@ -1110,30 +1136,25 @@ class ToneEngine {
 
     let patternIndex = state.currentDrumPatternEdit;
     let localStepIndex = 0;
-    let currentChainIdx = 0;
+    let currentChainItemId: string | null = null;
     let globalStepIndex = 0;
 
-    if (state.isChainModeActive && state.patternChain && state.patternChain.length > 0) {
-      // Calcular total de 16-steps de toda la cadena
-      let totalChainSteps = 0;
-      state.patternChain.forEach(item => {
-        totalChainSteps += item.repeatCount * 16;
-      });
-
+    if (!state.isPatternRepeatOn && state.patternChain && state.patternChain.length > 0) {
+      // Usar flattenPatternChain para tener una lista plana de bloques de 16-steps
+      const { flattenPatternChain } = require('../utils/typeDefinitions');
+      const flatChain = flattenPatternChain(state.patternChain);
+      
+      const totalChainSteps = flatChain.length * 16;
+      
       if (totalChainSteps > 0) {
         globalStepIndex = Math.round(beat / 0.25) % totalChainSteps;
-        let accumulated = 0;
-
-        for (let i = 0; i < state.patternChain.length; i++) {
-          const item = state.patternChain[i];
-          const itemSteps = item.repeatCount * 16;
-          if (accumulated + itemSteps > globalStepIndex) {
-            currentChainIdx = i;
-            patternIndex = item.patternIndex;
-            localStepIndex = (globalStepIndex - accumulated) % 16;
-            break;
-          }
-          accumulated += itemSteps;
+        const flatIdx = Math.floor(globalStepIndex / 16);
+        const step = flatChain[flatIdx];
+        
+        if (step) {
+          patternIndex = step.patternIndex;
+          localStepIndex = globalStepIndex % 16;
+          currentChainItemId = step.originalItemId;
         }
       }
     } else {
@@ -1150,7 +1171,13 @@ class ToneEngine {
     this.lastTriggeredDrumStep = globalStepIndex;
     this.lastTriggeredDrumBeat = beat;
 
+    const globalDrumsChannel = state.channels['drums'];
+    const isGlobalDrumsSilenced = globalDrumsChannel 
+      ? globalDrumsChannel.muted || (Object.values(state.channels).some((c: any) => c.solo) && !globalDrumsChannel.solo)
+      : false;
+
     state.drumChannels.forEach(channel => {
+      if (isGlobalDrumsSilenced) return;
       if (channel.muted) return;
       
       const isAnySolo = state.drumChannels.some(c => c.solo);
@@ -1160,14 +1187,14 @@ class ToneEngine {
       const step = channel.patterns[patternIndex][localStepIndex];
       if (step && step.isActive) {
         const volDb = Tone.gainToDb((channel.volume / 100) * step.velocity);
-        this.triggerDrumSound(channel.sampleUrl, volDb, time);
+        this.triggerDrumSound(channel.id, channel.sampleUrl, volDb, channel.pan || 0, time);
       }
     });
 
     Tone.Draw.schedule(() => {
       const currentState = useSongStore.getState();
-      if (currentState.isChainModeActive) {
-        currentState.setCurrentChainItemIndex(currentChainIdx);
+      if (!currentState.isPatternRepeatOn) {
+        currentState.setCurrentChainItemId(currentChainItemId);
       }
       if (currentState.currentDrumPatternEdit === patternIndex) {
         currentState.setPlaybackStep(localStepIndex);
@@ -1186,24 +1213,30 @@ class ToneEngine {
     const beat = Tone.Transport.getSecondsAtTime(time) * (bpm / 60);
     // Redondear a la semicorchea más cercana (0.25 beats)
     const tickBeat = Math.round(beat * 4) / 4;
+    
+    // Wrap to chord loop length if shorter than max beat
+    let localTickBeat = tickBeat;
+    if (this.cachedChordsMaxBeat > 0 && this.cachedChordsMaxBeat < this.cachedMaxBeat) {
+      localTickBeat = tickBeat % this.cachedChordsMaxBeat;
+    }
 
     // Si retrocedemos en loop, reseteamos la última marca
-    if (tickBeat < this.lastTriggeredBeat) {
+    if (localTickBeat < this.lastTriggeredBeat) {
       this.lastTriggeredBeat = -1;
       this.lastTriggeredChordId = '';
       this.lastTriggeredChordName = '';
     }
 
-    if (tickBeat === this.lastTriggeredBeat) return;
-    this.lastTriggeredBeat = tickBeat;
+    if (localTickBeat === this.lastTriggeredBeat) return;
+    this.lastTriggeredBeat = localTickBeat;
 
     // Buscar si hay un bloque activo en este beat
     const block = state.chordBlocks.find(b => 
-      tickBeat >= b.startBeat && tickBeat < b.startBeat + b.durationBeats
+      localTickBeat >= b.startBeat && localTickBeat < b.startBeat + b.durationBeats
     );
     if (!block) return;
 
-    const relativeBeat = tickBeat - block.startBeat;
+    const relativeBeat = localTickBeat - block.startBeat;
     const pattern = state.pattern || 'hold';
     const usePiano = this.isChordPianoActive();
     const beatDuration = 60 / bpm;
@@ -1587,35 +1620,45 @@ class ToneEngine {
     // 1. Programar acordes (Deshabilitado: los acordes se programan dinámicamente al vuelo en triggerChordTick)
 
     // 2. Programar notas de melodía
-    state.melodyNotes.forEach((note) => {
-      const startTimeSeconds = note.startBeat * beatDuration;
-      const durationSeconds = note.durationBeats * beatDuration;
+    const repeats = this.cachedMelodyMaxBeat > 0 && this.cachedMelodyMaxBeat < this.cachedMaxBeat 
+      ? Math.ceil(this.cachedMaxBeat / this.cachedMelodyMaxBeat) 
+      : 1;
 
-      if (usePiano && this.melodyPiano && this.melodyPiano.loaded) {
-        // Melodía con piano (apagado programado de forma segura en Web Audio)
-        const id = Tone.Transport.schedule((time) => {
-          try {
-            this.melodyPiano!.keyDown({ note: note.note, time, velocity: note.velocity });
-            this.melodyPiano!.keyUp({ note: note.note, time: time + durationSeconds });
-          } catch (e) {
-            console.error('Error tocando nota de melodía con piano:', e);
-          }
-          this.trackNote(note.note, durationSeconds, time, 'melody');
-        }, startTimeSeconds);
-        this.scheduledEvents.push(id);
-      } else {
-        // Melodía con sintetizador virtual original
-        const id = Tone.Transport.schedule((time) => {
-          try {
-            this.melodySynth.triggerAttackRelease(note.note, durationSeconds, time, note.velocity);
-          } catch (e) {
-            console.error('Error tocando nota de melodía con sintetizador:', e);
-          }
-          this.trackNote(note.note, durationSeconds, time, 'melody');
-        }, startTimeSeconds);
-        this.scheduledEvents.push(id);
-      }
-    });
+    for (let r = 0; r < repeats; r++) {
+      const offsetBeat = r * this.cachedMelodyMaxBeat;
+      state.melodyNotes.forEach((note) => {
+        const startTimeSeconds = (note.startBeat + offsetBeat) * beatDuration;
+        const durationSeconds = note.durationBeats * beatDuration;
+
+        // Si la nota excede el maxBeat global, la acortamos o la ignoramos
+        if (startTimeSeconds >= this.cachedMaxBeat * beatDuration) return;
+
+        if (usePiano && this.melodyPiano && this.melodyPiano.loaded) {
+          // Melodía con piano (apagado programado de forma segura en Web Audio)
+          const id = Tone.Transport.schedule((time) => {
+            try {
+              this.melodyPiano!.keyDown({ note: note.note, time, velocity: note.velocity });
+              this.melodyPiano!.keyUp({ note: note.note, time: time + durationSeconds });
+            } catch (e) {
+              console.error('Error tocando nota de melodía con piano:', e);
+            }
+            this.trackNote(note.note, durationSeconds, time, 'melody');
+          }, startTimeSeconds);
+          this.scheduledEvents.push(id);
+        } else {
+          // Melodía con sintetizador virtual original
+          const id = Tone.Transport.schedule((time) => {
+            try {
+              this.melodySynth.triggerAttackRelease(note.note, durationSeconds, time, note.velocity);
+            } catch (e) {
+              console.error('Error tocando nota de melodía con sintetizador:', e);
+            }
+            this.trackNote(note.note, durationSeconds, time, 'melody');
+          }, startTimeSeconds);
+          this.scheduledEvents.push(id);
+        }
+      });
+    }
 
 
     // 3. Programar clicks del metrónomo de forma aislada y sample-accurate

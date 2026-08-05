@@ -4,7 +4,8 @@ import { useShallow } from 'zustand/react/shallow';
 import { toneEngine } from '../../audio/toneEngine';
 import { NOTE_CLASSES, SCALE_INTERVALS } from '../../engine/scaleDefinitions';
 import type { NoteClass, ScaleType } from '../../utils/typeDefinitions';
-import { Play, Square, Trash2, Music, RefreshCw, Bell, Settings as SettingsIcon, Sliders } from 'lucide-react';
+import { Play, Square, Trash2, RefreshCw, Bell, Settings as SettingsIcon, Sliders, FolderOpen, Save } from 'lucide-react';
+import { CustomSelect } from '../ui/CustomSelect';
 
 import { exportSessionToMidi, importMidiToSession } from '../../utils/midiService';
 
@@ -238,11 +239,12 @@ export const Header = () => {
   };
 
   const handleExportProject = () => {
-    if (chordBlocks.length === 0 && melodyNotes.length === 0) {
-      alert('La canción está vacía. Agrega notas o acordes primero.');
+    const state = useSongStore.getState();
+    if (chordBlocks.length === 0 && melodyNotes.length === 0 && (!state.patternChain || state.patternChain.length === 0)) {
+      alert('La canción está vacía. Agrega notas, acordes o patrones de batería primero.');
       return;
     }
-    const state = useSongStore.getState();
+
     const projectData = {
       version: '1.0',
       bpm,
@@ -256,6 +258,9 @@ export const Header = () => {
       channels: state.channels,
       drumChannels: state.drumChannels,
       chordOctaveShift: state.chordOctaveShift,
+      patternChain: state.patternChain,
+      isPatternRepeatOn: state.isPatternRepeatOn,
+      activeDrumKitId: state.activeDrumKitId,
     };
     
     const jsonString = JSON.stringify(projectData, null, 2);
@@ -301,6 +306,9 @@ export const Header = () => {
             channels: data.channels,
             drumChannels: data.drumChannels,
             chordOctaveShift: data.chordOctaveShift,
+            patternChain: data.patternChain,
+            isPatternRepeatOn: data.isPatternRepeatOn,
+            activeDrumKitId: data.activeDrumKitId
           });
         } catch (err) {
           alert('Error leyendo proyecto JSON.');
@@ -451,21 +459,21 @@ export const Header = () => {
               </button>
             )}
           </div>
-          <div className="key-selectors-row">
-            <div className="custom-select-wrapper">
-              <select value={key} disabled={isAudioLoading} onChange={(e) => setKey(e.target.value as NoteClass)}>
-                {NOTE_CLASSES.map(n => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </select>
-            </div>
-            <div className="custom-select-wrapper">
-              <select value={scale} disabled={isAudioLoading} onChange={(e) => setScale(e.target.value as ScaleType)}>
-                {Object.keys(SCALE_INTERVALS).map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-            </div>
+          <div className="key-selectors-row" style={{ display: 'flex', gap: '4px' }}>
+            <CustomSelect
+              value={key}
+              disabled={isAudioLoading}
+              onChange={(val) => setKey(val as NoteClass)}
+              options={NOTE_CLASSES.map(n => ({ value: n, label: n }))}
+              style={{ minWidth: '50px' }}
+            />
+            <CustomSelect
+              value={scale}
+              disabled={isAudioLoading}
+              onChange={(val) => setScale(val as ScaleType)}
+              options={Object.keys(SCALE_INTERVALS).map(s => ({ value: s, label: s }))}
+              style={{ minWidth: '85px' }}
+            />
           </div>
         </div>
 
@@ -624,16 +632,15 @@ export const Header = () => {
                     <div className="config-row">
                       <div className="config-field">
                         <label>Compás</label>
-                        <div className="custom-select-wrapper">
-                          <select 
-                            value={timeSignature} 
-                            onChange={(e) => setTimeSignature(e.target.value as any)}
-                          >
-                            <option value="4/4">4/4 Standard</option>
-                            <option value="3/4">3/4 Vals</option>
-                            <option value="6/8">6/8 Swing</option>
-                          </select>
-                        </div>
+                        <CustomSelect
+                          value={timeSignature}
+                          onChange={(val) => setTimeSignature(val as any)}
+                          options={[
+                            { value: '4/4', label: '4/4 Standard' },
+                            { value: '3/4', label: '3/4 Vals' },
+                            { value: '6/8', label: '6/8 Swing' }
+                          ]}
+                        />
                       </div>
                     </div>
 
@@ -641,18 +648,17 @@ export const Header = () => {
                     <div className="config-row">
                       <div className="config-field">
                         <label>Transponer Acordes</label>
-                        <div className="custom-select-wrapper">
-                          <select 
-                            value={chordOctaveShift} 
-                            onChange={(e) => setChordOctaveShift(parseInt(e.target.value))}
-                          >
-                            <option value="-2">-2 Octavas</option>
-                            <option value="-1">-1 Octava</option>
-                            <option value="0">Normal (0)</option>
-                            <option value="1">+1 Octava</option>
-                            <option value="2">+2 Octavas</option>
-                          </select>
-                        </div>
+                        <CustomSelect
+                          value={chordOctaveShift.toString()}
+                          onChange={(val) => setChordOctaveShift(parseInt(val))}
+                          options={[
+                            { value: '-2', label: '-2 Octavas' },
+                            { value: '-1', label: '-1 Octava' },
+                            { value: '0', label: 'Normal (0)' },
+                            { value: '1', label: '+1 Octava' },
+                            { value: '2', label: '+2 Octavas' }
+                          ]}
+                        />
                       </div>
                     </div>
 
@@ -709,9 +715,8 @@ export const Header = () => {
           style={{ display: 'none' }}
           onChange={handleImportFile}
         />
-        <label htmlFor="import-midi" className="action-btn">
-          <span className="icon">🎵</span>
-          <span>Importar</span>
+        <label htmlFor="import-midi" className="action-btn" title="Importar">
+          <FolderOpen size={16} />
         </label>
 
         <div className="export-dropdown-container" style={{ position: 'relative' }}>
@@ -722,10 +727,9 @@ export const Header = () => {
               e.stopPropagation();
               setExportDropdownOpen(!exportDropdownOpen);
             }}
-            title="Exportar archivo MIDI"
+            title="Exportar"
           >
-            <Music size={16} style={{ marginRight: '6px' }} />
-            Exportar
+            <Save size={16} />
           </button>
           {exportDropdownOpen && (
             <div className="export-dropdown-menu">

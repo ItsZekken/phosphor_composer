@@ -935,6 +935,37 @@ select:focus {
   box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.25);
 }
 
+.custom-select-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: 4px;
+  padding: 0.35rem 1.75rem 0.35rem 0.6rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  background-image: none; /* We use Lucide icons in React */
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 28px;
+}
+
+.custom-select-btn:hover, .custom-select-btn.active {
+  border-color: var(--accent);
+  background-color: rgba(124, 58, 237, 0.1);
+}
+
+.custom-select-btn:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.25);
+}
+
 /* Custom Context Menu */
 .custom-context-menu {
   background-color: var(--bg-secondary);
@@ -4493,7 +4524,6 @@ input[type="range"]::-webkit-slider-thumb:hover {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  overflow: hidden;
   box-shadow: 0 4px 6px rgba(0,0,0,0.3);
   transition: all 0.2s ease;
 }
@@ -4507,17 +4537,20 @@ input[type="range"]::-webkit-slider-thumb:hover {
   display: flex;
   height: 60px;
   background: linear-gradient(180deg, #252030 0%, #1e1a26 100%);
+  border-radius: 5px;
 }
 
 .drum-controls {
-  width: 250px;
-  min-width: 250px;
+  width: 350px;
+  min-width: 350px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 1rem;
   border-right: 2px solid #14111a;
   background: linear-gradient(90deg, #1e1a26 0%, #252030 100%);
+  border-top-left-radius: 5px;
+  border-bottom-left-radius: 5px;
   user-select: none;
   cursor: pointer;
   position: relative;
@@ -4904,25 +4937,15 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .channel-sample-select {
   width: 100%;
-  background: rgba(15, 12, 20, 0.8);
-  color: var(--text-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
-  padding: 0.15rem 0.3rem;
   font-size: 0.72rem;
   font-weight: 500;
-  cursor: pointer;
-  outline: none;
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
-  transition: all 0.2s ease;
 }
 
 .channel-sample-select:hover, .channel-sample-select:focus {
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.3);
-  background: rgba(30, 25, 40, 0.9);
+  /* Inherits from custom-select-wrapper */
 }
 
 /* ==========================================================================

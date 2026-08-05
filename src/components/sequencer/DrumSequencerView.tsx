@@ -4,7 +4,10 @@ import { EditorToolbar } from '../shared/EditorToolbar';
 import { DrumChannelRow } from './DrumChannelRow';
 import { PRESET_DRUM_KITS } from '../../constants/drumKits';
 import { PatternChainArranger } from './PatternChainArranger';
-import { CopyPatternModal } from '../ui/CopyPatternModal';
+
+import { CustomSelect } from '../ui/CustomSelect';
+import { Copy, ClipboardPaste, Repeat } from 'lucide-react';
+import { type DrumChannel } from '../../utils/typeDefinitions';
 
 export const DrumSequencerView: React.FC = () => {
   const { 
@@ -13,18 +16,37 @@ export const DrumSequencerView: React.FC = () => {
     selectDrumKit, 
     currentDrumPatternEdit, 
     setCurrentDrumPatternEdit, 
-    duplicateCurrentPatternToNext,
+    copyDrumPattern,
+    pasteDrumPattern,
+    clipboardPattern,
+    isPatternRepeatOn,
+    setPatternRepeatOn,
     channels, 
     toggleMute, 
-    toggleSolo 
+    toggleSolo,
+    addDrumChannel
   } = useSongStore();
   const [expandedChannelId, setExpandedChannelId] = useState<string | null>(null);
-  const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
   
   const drumsMixer = channels['drums'] || { muted: false, solo: false };
 
   const handleToggleExpand = (id: string) => {
     setExpandedChannelId(prev => (prev === id ? null : id));
+  };
+
+  const handleAddChannel = () => {
+    const newId = `custom_drum_${Date.now()}`;
+    const newChannel: DrumChannel = {
+      id: newId,
+      name: `Custom ${drumChannels.length + 1}`,
+      sampleUrl: PRESET_DRUM_KITS[0].samples['kick'] || '',
+      patterns: Array(8).fill(null).map(() => Array(16).fill({ isActive: false, velocity: 0.8 })),
+      volume: 80,
+      pan: 0,
+      muted: false,
+      solo: false,
+    };
+    addDrumChannel(newChannel);
   };
 
   return (
@@ -36,20 +58,15 @@ export const DrumSequencerView: React.FC = () => {
           {/* Selector de Kit Principal */}
           <div className="drum-kit-selector-wrapper">
             <span className="drum-kit-label">KIT:</span>
-            <select 
-              className="drum-kit-select"
+            <CustomSelect
               value={activeDrumKitId}
-              onChange={(e) => selectDrumKit(e.target.value)}
-            >
-              {PRESET_DRUM_KITS.map(kit => (
-                <option key={kit.id} value={kit.id}>
-                  {kit.name}
-                </option>
-              ))}
-              <option value="custom">
-                Custom {activeDrumKitId === 'custom' ? '★' : ''}
-              </option>
-            </select>
+              onChange={selectDrumKit}
+              options={[
+                ...PRESET_DRUM_KITS.map(kit => ({ value: kit.id, label: kit.name })),
+                { value: 'custom', label: `Custom ${activeDrumKitId === 'custom' ? '★' : ''}` }
+              ]}
+              style={{ marginLeft: '0.5rem', minWidth: '120px' }}
+            />
           </div>
 
           {/* Global M/S */}
@@ -65,8 +82,8 @@ export const DrumSequencerView: React.FC = () => {
           </div>
 
           <button 
-            className="add-channel-btn" 
-            onClick={() => alert('Añadir canal (Próximamente)')}
+            className="action-btn add-channel-btn" 
+            onClick={handleAddChannel}
           >
             + ADD CHANNEL
           </button>
@@ -87,20 +104,37 @@ export const DrumSequencerView: React.FC = () => {
 
             <div className="pattern-copy-tools" style={{ display: 'flex', gap: '0.3rem' }}>
               <button 
-                className="add-channel-btn" 
+                className="action-btn" 
                 style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', background: 'rgba(255, 255, 255, 0.08)' }}
-                onClick={() => setIsCopyModalOpen(true)}
-                title="Copiar patrón a otro número"
+                onClick={() => copyDrumPattern(currentDrumPatternEdit)}
+                title="Copiar patrón actual"
               >
-                📋 Copiar
+                <Copy size={14} />
               </button>
               <button 
-                className="add-channel-btn" 
-                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', background: 'rgba(0, 255, 204, 0.15)', color: 'var(--reposo)', borderColor: 'var(--reposo)' }}
-                onClick={() => duplicateCurrentPatternToNext()}
-                title={`Duplicar Patrón ${currentDrumPatternEdit + 1} en Patrón ${((currentDrumPatternEdit + 1) % 8) + 1}`}
+                className="action-btn" 
+                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', background: clipboardPattern ? 'rgba(0, 255, 204, 0.15)' : 'transparent', color: clipboardPattern ? 'var(--reposo)' : 'var(--text-secondary)', borderColor: clipboardPattern ? 'var(--reposo)' : 'var(--border-color)', opacity: clipboardPattern ? 1 : 0.5, cursor: clipboardPattern ? 'pointer' : 'not-allowed' }}
+                onClick={() => { if (clipboardPattern) pasteDrumPattern(currentDrumPatternEdit); }}
+                title="Pegar patrón"
+                disabled={!clipboardPattern}
               >
-                ⚡ Duplicar
+                <ClipboardPaste size={14} />
+              </button>
+              
+              <button
+                className={`action-btn ${isPatternRepeatOn ? 'active' : ''}`}
+                style={{ 
+                  padding: '0.3rem 0.6rem', 
+                  fontSize: '0.75rem', 
+                  marginLeft: '0.5rem',
+                  background: isPatternRepeatOn ? 'rgba(255, 100, 200, 0.15)' : 'transparent', 
+                  color: isPatternRepeatOn ? '#ff64c8' : 'var(--text-secondary)', 
+                  borderColor: isPatternRepeatOn ? '#ff64c8' : 'var(--border-color)' 
+                }}
+                onClick={() => setPatternRepeatOn(!isPatternRepeatOn)}
+                title="Repetir patrón actual"
+              >
+                <Repeat size={14} />
               </button>
             </div>
           </div>
@@ -122,12 +156,6 @@ export const DrumSequencerView: React.FC = () => {
         {/* Cadena Visual de Patrones (Arranger) */}
         <PatternChainArranger />
       </div>
-
-      {/* Modal de Copia de Patrón */}
-      <CopyPatternModal 
-        isOpen={isCopyModalOpen}
-        onClose={() => setIsCopyModalOpen(false)}
-      />
     </div>
   );
 };

@@ -72,6 +72,39 @@ export interface DrumChannel {
 
 export interface PatternChainItem {
   id: string;
-  patternIndex: number; // 0 a 7
+  type: 'pattern' | 'group';
   repeatCount: number;  // 1 a 64
+  patternIndex?: number; // 0 a 7
+  items?: PatternChainItem[]; // Solo usado si type === 'group'
+}
+
+export interface FlatChainStep {
+  patternIndex: number;
+  originalItemId: string; // ID for UI highlighting
+}
+
+export const flattenPatternChain = (chain: PatternChainItem[]): FlatChainStep[] => {
+  const result: FlatChainStep[] = [];
+  
+  for (const item of chain) {
+    for (let r = 0; r < item.repeatCount; r++) {
+      if (item.type === 'group' && item.items) {
+        for (const subItem of item.items) {
+          // Asumimos 1 solo nivel de profundidad
+          for (let sr = 0; sr < subItem.repeatCount; sr++) {
+            result.push({
+              patternIndex: subItem.patternIndex ?? 0,
+              originalItemId: subItem.id
+            });
+          }
+        }
+      } else {
+        result.push({
+          patternIndex: item.patternIndex ?? 0,
+          originalItemId: item.id
+        });
+      }
+    }
+  }
+  return result;
 }

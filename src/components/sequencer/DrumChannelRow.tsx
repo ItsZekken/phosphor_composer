@@ -5,6 +5,7 @@ import type { DrumChannel } from '../../utils/typeDefinitions';
 import { Knob } from '../ui/Knob';
 import { AVAILABLE_DRUM_SAMPLES, getSamplesByCategory } from '../../constants/drumSamples';
 import { inferCategoryFromChannel } from '../../constants/drumKits';
+import { CustomSelect } from '../ui/CustomSelect';
 
 interface Props {
   channel: DrumChannel;
@@ -61,8 +62,7 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
   const handleVolumeDouble = () => updateDrumChannel(channel.id, { volume: 80 });
   const handlePanDouble = () => updateDrumChannel(channel.id, { pan: 0 });
 
-  const handleSampleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newSampleUrl = e.target.value;
+  const handleSampleChange = (newSampleUrl: string) => {
     updateDrumChannel(channel.id, { sampleUrl: newSampleUrl });
     setTimeout(() => {
       toneEngine.playDrumPreview(channel.id);
@@ -115,19 +115,16 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
             <span className="channel-name-text">{channel.name}</span>
           </div>
 
-          <div className="drum-sample-selector">
-            <select 
-              className="channel-sample-select"
+          <div className="drum-sample-selector" style={{ width: '180px' }}>
+            <CustomSelect
               value={channel.sampleUrl}
               onChange={handleSampleChange}
-              title={`Sample: ${channel.sampleUrl}`}
-            >
-              {availableOptions.map(sample => (
-                <option key={sample.id} value={sample.path}>
-                  {sample.name}
-                </option>
-              ))}
-            </select>
+              options={availableOptions.map(sample => ({
+                value: sample.path,
+                label: sample.name
+              }))}
+              style={{ width: '100%' }}
+            />
           </div>
           
           <div className="drum-activity-meter">
@@ -163,7 +160,7 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
         </div>
 
         {/* Panel Derecho: Switches (16 Steps) */}
-        <div className="drum-steps" onMouseLeave={stopDrawing}>
+        <div className="drum-steps" onMouseLeave={stopDrawing} style={{ userSelect: 'none' }}>
           {activePattern && activePattern.map((step, i) => {
             const isDownbeat = i % 4 === 0;
             const isPlayingThisStep = isPlaying && playbackStep === i;

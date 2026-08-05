@@ -122,19 +122,21 @@ interface SongStore {
   setDrumStepVelocity: (channelId: string, stepIndex: number, patternIndex: number, velocity: number) => void;
 
   // Acciones de Copia de Patrón
-  copyDrumPattern: (sourcePatternIndex: number, targetPatternIndex: number) => void;
-  duplicateCurrentPatternToNext: () => void;
+  clipboardPattern: import('../utils/typeDefinitions').DrumStep[][] | null;
+  copyDrumPattern: (sourcePatternIndex: number) => void;
+  pasteDrumPattern: (targetPatternIndex: number) => void;
 
   // Estado de Cadena de Patrones (Pattern Chain / Arranger)
   patternChain: import('../utils/typeDefinitions').PatternChainItem[];
-  isChainModeActive: boolean;
-  currentChainItemIndex: number;
-  setChainModeActive: (active: boolean) => void;
-  setCurrentChainItemIndex: (index: number) => void;
+  isPatternRepeatOn: boolean;
+  currentChainItemId: string | null;
+  setPatternRepeatOn: (active: boolean) => void;
+  setCurrentChainItemId: (id: string | null) => void;
   addChainItem: (patternIndex: number, repeatCount?: number) => void;
   updateChainItem: (id: string, updates: Partial<import('../utils/typeDefinitions').PatternChainItem>) => void;
   removeChainItem: (id: string) => void;
   moveChainItem: (fromIndex: number, toIndex: number) => void;
+  removeDrumChannel: (id: string) => void;
 
   // Estado del Mezclador (Mixer)
   isMixerOpen: boolean;
@@ -211,6 +213,9 @@ interface SongStore {
     chordOctaveShift?: number;
     channels?: Record<string, ChannelConfig>;
     drumChannels?: import('../utils/typeDefinitions').DrumChannel[];
+    patternChain?: import('../utils/typeDefinitions').PatternChainItem[];
+    isPatternRepeatOn?: boolean;
+    activeDrumKitId?: string;
   }) => void;
 }
 
@@ -241,12 +246,12 @@ export const DEFAULT_CHANNELS: Record<string, ChannelConfig> = {
     id: 'drums',
     name: 'Batería',
     type: 'drums',
-    instrument: 'synth',
+    instrument: 'sampler' as ChannelInstrument,
     volume: 80,
     pan: 0,
     muted: false,
     solo: false,
-    color: '#00ffcc'
+    color: '#00e5ff'
   }
 };
 
@@ -300,6 +305,7 @@ export const useSongStore = create<SongStore>()(
   isSynthModalOpen: false,
   isAutoSuggestions: false,
   isMixerOpen: false,
+  clipboardPattern: null,
   channels: DEFAULT_CHANNELS,
   drumChannels: DEFAULT_DRUM_CHANNELS,
   activeDrumKitId: 'kit_1',
@@ -338,62 +344,41 @@ export const useSongStore = create<SongStore>()(
       activeDrumKitId: newKitId
     };
   }),
+  removeDrumChannel: (id) => set((state) => ({ drumChannels: state.drumChannels.filter(c => c.id !== id) })),
 
   setCurrentDrumPatternEdit: (pattern: number) => set({ currentDrumPatternEdit: pattern }),
 
   // Acciones de Copia de Patrón
-  copyDrumPattern: (sourceIdx, targetIdx) => set((state) => {
-    if (sourceIdx === targetIdx || sourceIdx < 0 || sourceIdx > 7 || targetIdx < 0 || targetIdx > 7) return state;
-
-    const nextChannels = state.drumChannels.map(ch => {
-      const nextPatterns = [...ch.patterns];
-      if (nextPatterns[sourceIdx]) {
-        // Deep copy of pattern steps
-        nextPatterns[targetIdx] = nextPatterns[sourceIdx].map(step => ({ ...step }));
-      }
-      return { ...ch, patterns: nextPatterns };
-    });
-
-    return {
-      drumChannels: nextChannels,
-      currentDrumPatternEdit: targetIdx
-    };
+  copyDrumPattern: (sourcePatternIndex) => set((state) => {
+    // Copiamos la información de TODOS los canales para ese index
+    const copiedData = state.drumChannels.map(ch => ch.patterns[sourcePatternIndex]);
+    return { clipboardPattern: copiedData };
   }),
-
-  duplicateCurrentPatternToNext: () => set((state) => {
-    const sourceIdx = state.currentDrumPatternEdit;
-    const targetIdx = (sourceIdx + 1) % 8;
-
-    const nextChannels = state.drumChannels.map(ch => {
+  pasteDrumPattern: (targetPatternIndex) => set((state) => {
+    if (!state.clipboardPattern) return state;
+    
+    const nextChannels = state.drumChannels.map((ch, idx) => {
       const nextPatterns = [...ch.patterns];
-      if (nextPatterns[sourceIdx]) {
-        nextPatterns[targetIdx] = nextPatterns[sourceIdx].map(step => ({ ...step }));
+      if (state.clipboardPattern && state.clipboardPattern[idx]) {
+        // Deep copy del pattern pegado
+        nextPatterns[targetPatternIndex] = state.clipboardPattern[idx].map(step => ({ ...step }));
       }
       return { ...ch, patterns: nextPatterns };
     });
-
-    return {
-      drumChannels: nextChannels,
-      currentDrumPatternEdit: targetIdx
-    };
+    return { drumChannels: nextChannels };
   }),
 
   // Estado de Cadena de Patrones (Pattern Chain)
-  patternChain: [{ id: 'chain_1', patternIndex: 0, repeatCount: 1 }],
-  isChainModeActive: false,
-  currentChainItemIndex: 0,
+  patternChain: [],
+  isPatternRepeatOn: true,
+  currentChainItemId: null,
 
-  setChainModeActive: (active) => set({ isChainModeActive: active }),
-  setCurrentChainItemIndex: (index) => set({ currentChainItemIndex: index }),
+  setPatternRepeatOn: (active) => set({ isPatternRepeatOn: active }),
+  setCurrentChainItemId: (id) => set({ currentChainItemId: id }),
 
-  addChainItem: (patternIndex, repeatCount = 1) => set((state) => {
-    const newItem: import('../utils/typeDefinitions').PatternChainItem = {
-      id: `chain_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      patternIndex,
-      repeatCount
-    };
-    return { patternChain: [...state.patternChain, newItem] };
-  }),
+  addChainItem: (patternIndex, repeatCount = 1) => set((state) => ({
+    patternChain: [...state.patternChain, { id: `chain_${Date.now()}`, type: 'pattern', patternIndex, repeatCount }]
+  })),
 
   updateChainItem: (id, updates) => set((state) => ({
     patternChain: state.patternChain.map(item => item.id === id ? { ...item, ...updates } : item)
@@ -401,9 +386,7 @@ export const useSongStore = create<SongStore>()(
 
   removeChainItem: (id) => set((state) => {
     const nextChain = state.patternChain.filter(item => item.id !== id);
-    return { 
-      patternChain: nextChain.length > 0 ? nextChain : [{ id: `chain_${Date.now()}`, patternIndex: 0, repeatCount: 1 }] 
-    };
+    return { patternChain: nextChain };
   }),
 
   moveChainItem: (fromIndex, toIndex) => set((state) => {
@@ -415,22 +398,34 @@ export const useSongStore = create<SongStore>()(
   }),
 
   toggleDrumStep: (channelId, stepIndex, patternIndex, forceState) => set((state) => {
+    let becameActive = false;
     const nextChannels = state.drumChannels.map(ch => {
       if (ch.id === channelId) {
         const nextPatterns = [...ch.patterns];
         const nextSteps = [...nextPatterns[patternIndex]];
         if (nextSteps[stepIndex]) {
+          const isActivating = forceState !== undefined ? forceState : !nextSteps[stepIndex].isActive;
           nextSteps[stepIndex] = {
             ...nextSteps[stepIndex],
-            isActive: forceState !== undefined ? forceState : !nextSteps[stepIndex].isActive
+            isActive: isActivating
           };
+          if (isActivating) becameActive = true;
         }
         nextPatterns[patternIndex] = nextSteps;
         return { ...ch, patterns: nextPatterns };
       }
       return ch;
     });
-    return { drumChannels: nextChannels };
+
+    let nextChain = state.patternChain;
+    if (becameActive) {
+      const isInChain = state.patternChain.some(item => item.patternIndex === patternIndex);
+      if (!isInChain) {
+        nextChain = [...state.patternChain, { id: `chain_${Date.now()}`, type: 'pattern', patternIndex, repeatCount: 1 }];
+      }
+    }
+
+    return { drumChannels: nextChannels, patternChain: nextChain };
   }),
 
   setDrumStepVelocity: (channelId, stepIndex, patternIndex, velocity) => set((state) => {
@@ -759,7 +754,7 @@ export const useSongStore = create<SongStore>()(
 
   importSong: (session) => {
     toneEngine.stop();
-    const loadedChannels = session.channels || get().channels;
+    const loadedChannels = session.channels ? { ...DEFAULT_CHANNELS, ...session.channels } : get().channels;
     set({
       bpm: session.bpm,
       key: session.key,

@@ -3,6 +3,7 @@ import { useSongStore } from '../../store/songStore';
 import { useShallow } from 'zustand/react/shallow';
 import { X, Sliders, Music, Plus } from 'lucide-react';
 import type { ChannelConfig, ChannelInstrument } from '../../utils/typeDefinitions';
+import { CustomSelect } from './CustomSelect';
 
 const INSTRUMENT_LABELS: Record<ChannelInstrument, string> = {
   piano: 'Piano de Cola',
@@ -106,20 +107,26 @@ export const MixerDrawer: React.FC = () => {
                 </div>
 
                 {/* Seleccionador de Instrumento */}
-                <div className="strip-instrument-select">
-                  <Music size={12} className="strip-inst-icon" />
-                  <select
-                    value={ch.instrument}
-                    onChange={(e) => setChannelInstrument(ch.id, e.target.value as ChannelInstrument)}
-                    className="strip-select"
-                  >
-                    {Object.entries(INSTRUMENT_LABELS).map(([key, label]) => (
-                      <option key={key} value={key}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {ch.type !== 'drums' ? (
+                  <div className="strip-instrument-select">
+                    <Music size={12} className="strip-inst-icon" />
+                    <CustomSelect
+                      value={ch.instrument}
+                      onChange={(val) => setChannelInstrument(ch.id, val as ChannelInstrument)}
+                      options={Object.entries(INSTRUMENT_LABELS).map(([key, label]) => ({
+                        value: key,
+                        label
+                      }))}
+                      className="strip-select"
+                      style={{ flex: 1 }}
+                    />
+                  </div>
+                ) : (
+                  <div className="strip-instrument-select">
+                    <Music size={12} className="strip-inst-icon" />
+                    <span className="strip-select" style={{ display: 'inline-block', lineHeight: '24px', opacity: 0.7 }}>Drum Machine</span>
+                  </div>
+                )}
 
                 {/* Botones Mute y Solo */}
                 <div className="strip-ms-buttons">
