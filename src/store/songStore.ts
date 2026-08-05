@@ -118,6 +118,7 @@ interface SongStore {
   selectDrumKit: (kitId: string) => void;
   userDrumPatternEdit: number;
   currentDrumPatternEdit: number;
+  isLiveFollowLocked: boolean;
   setCurrentDrumPatternEdit: (pattern: number) => void;
   setCurrentDrumPatternEditLive: (pattern: number) => void;
   addDrumChannel: (channel: import('../utils/typeDefinitions').DrumChannel) => void;
@@ -321,6 +322,7 @@ export const useSongStore = create<SongStore>()(
   activeDrumKitId: 'kit_1',
   userDrumPatternEdit: 0,
   currentDrumPatternEdit: 0,
+  isLiveFollowLocked: false,
 
   selectDrumKit: (kitId) => set((state) => {
     if (kitId === 'custom') {
@@ -356,7 +358,11 @@ export const useSongStore = create<SongStore>()(
   }),
   removeDrumChannel: (id) => set((state) => ({ drumChannels: state.drumChannels.filter(c => c.id !== id) })),
 
-  setCurrentDrumPatternEdit: (pattern: number) => set({ userDrumPatternEdit: pattern, currentDrumPatternEdit: pattern }),
+  setCurrentDrumPatternEdit: (pattern: number) => set((state) => ({
+    userDrumPatternEdit: pattern,
+    currentDrumPatternEdit: pattern,
+    isLiveFollowLocked: state.isPlaying ? true : state.isLiveFollowLocked
+  })),
   setCurrentDrumPatternEditLive: (pattern: number) => set({ currentDrumPatternEdit: pattern }),
 
   // Acciones de Copia de Patrón
@@ -376,7 +382,12 @@ export const useSongStore = create<SongStore>()(
       }
       return { ...ch, patterns: nextPatterns };
     });
-    return { drumChannels: nextChannels };
+    return { 
+      drumChannels: nextChannels,
+      userDrumPatternEdit: targetPatternIndex,
+      currentDrumPatternEdit: targetPatternIndex,
+      isLiveFollowLocked: state.isPlaying ? true : state.isLiveFollowLocked
+    };
   }),
 
   // Estado de Cadena de Patrones (Pattern Chain)
@@ -436,7 +447,12 @@ export const useSongStore = create<SongStore>()(
       }
     }
 
-    return { drumChannels: nextChannels, patternChain: nextChain };
+    return { 
+      drumChannels: nextChannels, 
+      patternChain: nextChain,
+      userDrumPatternEdit: patternIndex,
+      ...(state.isPlaying && { isLiveFollowLocked: true })
+    };
   }),
 
   setDrumStepVelocity: (channelId, stepIndex, patternIndex, velocity) => set((state) => {
@@ -452,7 +468,11 @@ export const useSongStore = create<SongStore>()(
       }
       return ch;
     });
-    return { drumChannels: nextChannels };
+    return { 
+      drumChannels: nextChannels,
+      userDrumPatternEdit: patternIndex,
+      ...(state.isPlaying && { isLiveFollowLocked: true })
+    };
   }),
 
   setMixerOpen: (isMixerOpen) => set({ isMixerOpen }),
@@ -537,12 +557,14 @@ export const useSongStore = create<SongStore>()(
     if (!isPlaying) {
       return {
         isPlaying: false,
+        isLiveFollowLocked: false,
         currentDrumPatternEdit: state.userDrumPatternEdit,
         playbackStep: -1
       };
     } else {
       return {
         isPlaying: true,
+        isLiveFollowLocked: false,
         userDrumPatternEdit: state.currentDrumPatternEdit
       };
     }

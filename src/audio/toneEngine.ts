@@ -1215,7 +1215,7 @@ class ToneEngine {
       const currentState = useSongStore.getState();
       if (!currentState.isPatternRepeatOn) {
         currentState.setCurrentChainItemId(currentChainItemId);
-        if (currentState.isPlaying && currentState.patternChain && currentState.patternChain.length > 0) {
+        if (currentState.isPlaying && !currentState.isLiveFollowLocked && currentState.patternChain && currentState.patternChain.length > 0) {
           currentState.setCurrentDrumPatternEditLive(patternIndex);
         }
       }
