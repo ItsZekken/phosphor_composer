@@ -292,7 +292,7 @@ export const Header = () => {
     setExportElapsed(0);
     setExportTotal(0);
 
-    const cancelFn = await toneEngine.exportToWav(
+    const cancelFn = toneEngine.exportToWav(
       (elapsed, total) => {
         setExportElapsed(elapsed);
         setExportTotal(total);

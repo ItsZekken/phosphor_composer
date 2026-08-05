@@ -59,6 +59,8 @@ interface SongStore {
   metroVolume: number;
   isAudioLoading: boolean;
   isEngineReady: boolean;
+  isExporting: boolean;
+  exportProgress: number; // 0.0 – 1.0
   instrumentType: 'synth' | 'piano';
   draggingChord: string | null;
   timeSignature: '4/4' | '3/4' | '6/8';
@@ -165,6 +167,8 @@ interface SongStore {
   setMetroVolume: (volume: number) => void;
   setIsAudioLoading: (loading: boolean) => void;
   setIsEngineReady: (ready: boolean) => void;
+  setIsExporting: (v: boolean) => void;
+  setExportProgress: (v: number) => void;
   setInstrumentType: (type: 'synth' | 'piano') => void;
   setDraggingChord: (chord: string | null) => void;
   setTimeSignature: (timeSignature: '4/4' | '3/4' | '6/8') => void;
@@ -292,6 +296,8 @@ export const useSongStore = create<SongStore>()(
   metroSubdivision: '4n',
   metroVolume: 50,
   isAudioLoading: false,
+  isExporting: false,
+  exportProgress: 0,
   isEngineReady: false,
   instrumentType: 'piano',
   timeSignature: '4/4',
@@ -547,6 +553,8 @@ export const useSongStore = create<SongStore>()(
   setMetroVolume: (metroVolume) => set({ metroVolume }),
   setIsAudioLoading: (isAudioLoading) => set({ isAudioLoading }),
   setIsEngineReady: (isEngineReady) => set({ isEngineReady }),
+  setIsExporting: (isExporting) => set({ isExporting }),
+  setExportProgress: (exportProgress) => set({ exportProgress }),
   setInstrumentType: (instrumentType) => {
     set({ instrumentType });
     toneEngine.setInstrument(instrumentType);
