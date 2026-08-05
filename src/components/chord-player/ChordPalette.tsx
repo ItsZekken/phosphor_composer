@@ -132,11 +132,12 @@ const ChordCard: React.FC<ChordCardProps> = ({ chord, probability = 0, role, sma
   return (
     <div
       className={`chord-card-matrix ${role} ${small ? 'small' : ''}`}
+      data-chord={chord}
       style={cardStyle}
       onMouseDown={handleMouseDown}
       onMouseEnter={handleMouseEnter}
       onTouchStart={handleTouchStart}
-      title={`${chord} · Desliza el dedo hacia la línea de tiempo para añadir`}
+      title={`${chord} · Desliza el dedo sobre los acordes para escuchar. Arrastra fuera de la paleta a la línea de tiempo para añadir`}
     >
       <span className="chord-matrix-name">{chord}</span>
       {probability > 0.02 && (
@@ -307,6 +308,8 @@ export const ChordPalette: React.FC = () => {
 
   const [isMouseOutside, setIsMouseOutside] = React.useState(false);
   const [mousePos, setMousePos] = React.useState({ x: 0, y: 0 });
+  const [touchPos, setTouchPos] = useState<{ x: number; y: number } | null>(null);
+  const lastHoveredTouchChordRef = React.useRef<string | null>(null);
 
   // P3: Solo actualizar automáticamente si el switch está activado
   useEffect(() => {
@@ -316,8 +319,6 @@ export const ChordPalette: React.FC = () => {
   }, [key, scale, selectedChordId, chordBlocks.length, updateSuggestions, isAutoSuggestions]);
 
   // Listener global de ratón para seguir el movimiento del mouse y manejar el drop global
-  const [touchPos, setTouchPos] = useState<{ x: number; y: number } | null>(null);
-
   useEffect(() => {
     const handleGlobalMouseMove = (e: MouseEvent) => {
       if (draggingChord) {
@@ -334,12 +335,34 @@ export const ChordPalette: React.FC = () => {
     };
 
     const handleGlobalTouchMove = (e: TouchEvent) => {
-      const chord = useSongStore.getState().draggingChord;
-      if (!chord) return;
-      if (e.touches.length === 1) {
-        const touch = e.touches[0];
+      const state = useSongStore.getState();
+      if (!state.draggingChord) return;
+      if (e.touches.length !== 1) return;
+
+      const touch = e.touches[0];
+      const currentEl = document.elementFromPoint(touch.clientX, touch.clientY);
+      if (!currentEl) return;
+
+      const cardEl = currentEl.closest('[data-chord]') as HTMLElement | null;
+      const paletteEl = currentEl.closest('.chord-palette');
+
+      if (paletteEl && cardEl) {
+        // DENTRO de la paleta: Deslizar entre acordes y hacerlos sonar en tiempo real
+        const hoveredChord = cardEl.getAttribute('data-chord');
+        if (hoveredChord && hoveredChord !== lastHoveredTouchChordRef.current) {
+          lastHoveredTouchChordRef.current = hoveredChord;
+          state.setDraggingChord(hoveredChord);
+          toneEngine.playChordPreviewStart(hoveredChord);
+        }
+        setTouchPos(null);
+        setIsMouseOutside(false);
+        e.preventDefault();
+      } else {
+        // FUERA de la paleta: Arrastrar hacia la línea de tiempo (mostrar fantasma)
+        lastHoveredTouchChordRef.current = null;
         setTouchPos({ x: touch.clientX, y: touch.clientY });
         setIsMouseOutside(true);
+        e.preventDefault();
       }
     };
 
@@ -368,11 +391,12 @@ export const ChordPalette: React.FC = () => {
       state.setDraggingChord(null);
       setIsMouseOutside(false);
       setTouchPos(null);
+      lastHoveredTouchChordRef.current = null;
     };
 
     window.addEventListener('mousemove', handleGlobalMouseMove);
     window.addEventListener('mouseup', handleGlobalMouseUp);
-    window.addEventListener('touchmove', handleGlobalTouchMove);
+    window.addEventListener('touchmove', handleGlobalTouchMove, { passive: false });
     window.addEventListener('touchend', handleGlobalTouchEnd);
 
     return () => {
