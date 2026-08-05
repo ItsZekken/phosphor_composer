@@ -1263,11 +1263,14 @@ class ToneEngine {
     const notes = this.getBlockNotes(block, state.chordOctaveShift || 0);
     if (notes.length === 0) return;
 
+    const currentVoicing = block.voicing || 'default';
+    const currentInversion = block.inversion || 0;
+
     const hasChordChanged = 
       block.id !== this.lastTriggeredChordId || 
       block.chord !== this.lastTriggeredChordName || 
-      block.voicing !== this.lastTriggeredVoicing || 
-      block.inversion !== this.lastTriggeredInversion;
+      currentVoicing !== this.lastTriggeredVoicing || 
+      currentInversion !== this.lastTriggeredInversion;
 
     if (hasChordChanged) {
       // Liberar notas activas anteriores para evitar amontonamiento
@@ -1282,8 +1285,8 @@ class ToneEngine {
       }
       this.lastTriggeredChordId = block.id;
       this.lastTriggeredChordName = block.chord;
-      this.lastTriggeredVoicing = block.voicing || 'default';
-      this.lastTriggeredInversion = block.inversion || 0;
+      this.lastTriggeredVoicing = currentVoicing;
+      this.lastTriggeredInversion = currentInversion;
     }
 
     const playNote = (note: string, durBeats: number, velocity = 0.6) => {

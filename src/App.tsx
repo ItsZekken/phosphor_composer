@@ -31,6 +31,9 @@ export default function App() {
         if (parsed.channels) {
           parsed.channels = { ...currentState.channels, ...parsed.channels };
         }
+        if (parsed.drumChannels) {
+          parsed.drumChannels = { ...currentState.drumChannels, ...parsed.drumChannels };
+        }
         useSongStore.setState(parsed);
       } catch (e) {
         console.error("Error cargando sesión persistida", e);
@@ -62,6 +65,11 @@ export default function App() {
           crtParams: state.crtParams,
           synthSettings: state.synthSettings,
           channels: state.channels,
+          drumChannels: state.drumChannels,
+          patternChain: state.patternChain,
+          isPatternRepeatOn: state.isPatternRepeatOn,
+          activeDrumKitId: state.activeDrumKitId,
+          currentDrumPatternEdit: state.currentDrumPatternEdit,
           isKeyboardMelodyEnabled: state.isKeyboardMelodyEnabled,
           isKeyboardChromatic: state.isKeyboardChromatic,
           isAutoSuggestions: state.isAutoSuggestions
