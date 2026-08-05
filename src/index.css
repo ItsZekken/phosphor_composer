@@ -8,8 +8,10 @@
   --accent: #7060b0;
   --accent-hover: #5d4f96;
   --reposo: #5a9e7a;
+  --subdominante: #4a8cb8;
   --tension: #b09040;
   --spicy: #a05080;
+  --exotic: #e88c42;
 
   /* Colores de roles armÃ³nicos para la paleta de acordes (desaturados 16-bit) */
   --role-reposo:       #5a9e7a;  /* verde pizarra */
