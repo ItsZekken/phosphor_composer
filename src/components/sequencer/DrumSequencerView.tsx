@@ -24,14 +24,47 @@ export const DrumSequencerView: React.FC = () => {
     channels, 
     toggleMute, 
     toggleSolo,
-    addDrumChannel
+    addDrumChannel,
+    reorderDrumChannels
   } = useSongStore();
   const [expandedChannelId, setExpandedChannelId] = useState<string | null>(null);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   
   const drumsMixer = channels['drums'] || { muted: false, solo: false };
 
   const handleToggleExpand = (id: string) => {
     setExpandedChannelId(prev => (prev === id ? null : id));
+  };
+
+  const handleDragStartRow = (e: React.DragEvent, index: number) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(index));
+  };
+
+  const handleDragOverRow = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverIndex !== index) {
+      setDragOverIndex(index);
+    }
+  };
+
+  const handleDropRow = (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    const sourceIndexStr = e.dataTransfer.getData('text/plain');
+    const sourceIndex = sourceIndexStr !== '' ? Number(sourceIndexStr) : draggedIndex;
+    if (sourceIndex !== null && !isNaN(sourceIndex) && sourceIndex !== targetIndex) {
+      reorderDrumChannels(sourceIndex, targetIndex);
+    }
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragEndRow = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
   };
 
   const handleAddChannel = () => {
@@ -150,6 +183,12 @@ export const DrumSequencerView: React.FC = () => {
             channelIndex={idx}
             isExpanded={expandedChannelId === channel.id}
             onToggleExpand={() => handleToggleExpand(channel.id)}
+            onDragStartRow={handleDragStartRow}
+            onDragOverRow={handleDragOverRow}
+            onDropRow={handleDropRow}
+            onDragEndRow={handleDragEndRow}
+            isDragging={draggedIndex === idx}
+            isDragOver={dragOverIndex === idx && draggedIndex !== idx}
           />
         ))}
 

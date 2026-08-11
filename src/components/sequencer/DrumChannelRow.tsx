@@ -14,9 +14,26 @@ interface Props {
   channelIndex: number;
   isExpanded: boolean;
   onToggleExpand: () => void;
+  onDragStartRow?: (e: React.DragEvent, index: number) => void;
+  onDragOverRow?: (e: React.DragEvent, index: number) => void;
+  onDropRow?: (e: React.DragEvent, index: number) => void;
+  onDragEndRow?: (e: React.DragEvent) => void;
+  isDragging?: boolean;
+  isDragOver?: boolean;
 }
 
-export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpanded, onToggleExpand }) => {
+export const DrumChannelRow: React.FC<Props> = ({ 
+  channel, 
+  channelIndex, 
+  isExpanded, 
+  onToggleExpand,
+  onDragStartRow,
+  onDragOverRow,
+  onDropRow,
+  onDragEndRow,
+  isDragging,
+  isDragOver
+}) => {
   const { toggleDrumStep, setDrumStepVelocity, updateDrumChannel, removeDrumChannel, playbackStep, isPlaying, currentDrumPatternEdit } = useSongStore();
   
   // Smart Draw State
@@ -26,7 +43,16 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
   // Rename state
   const [isEditingName, setIsEditingName] = useState(false);
   const [editNameValue, setEditNameValue] = useState(channel.name);
-  const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [isInteractiveHovered, setIsInteractiveHovered] = useState(false);
+
+  // Preview debounce on knob tweak
+  const previewTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const triggerDebouncedPreview = () => {
+    if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    previewTimerRef.current = setTimeout(() => {
+      toneEngine.playDrumPreview(channel.id);
+    }, 60);
+  };
 
   // Velocity Draw State
   const [isDrawingVelocity, setIsDrawingVelocity] = useState(false);
@@ -120,21 +146,9 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
     }
   }, [contextMenuPos]);
 
-  const handleTitleClick = (e: React.MouseEvent) => {
-    // If editing, don't trigger anything
+  const handleTitleClick = () => {
     if (isEditingName) return;
-
-    if (e.detail === 1) {
-      clickTimeoutRef.current = setTimeout(() => {
-        onToggleExpand();
-      }, 200); // 200ms delay to wait for double click
-    } else if (e.detail === 2) {
-      if (clickTimeoutRef.current) {
-        clearTimeout(clickTimeoutRef.current);
-      }
-      setIsEditingName(true);
-      setEditNameValue(channel.name);
-    }
+    onToggleExpand();
   };
 
   const handleNameSubmit = () => {
@@ -147,10 +161,25 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
   };
 
   return (
-    <div className={`drum-channel-container ${isExpanded ? 'expanded' : ''}`}>
+    <div className={`drum-channel-container ${isExpanded ? 'expanded' : ''} ${isDragging ? 'dragging-channel' : ''} ${isDragOver ? 'drag-over-channel' : ''}`}>
       <div className="drum-channel-row">
-        {/* Panel Izquierdo: Controles */}
-        <div className="drum-controls">
+        {/* Panel Izquierdo: Controles (Toda la cabecera es arrastrable excepto al interactuar con controles) */}
+        <div 
+          className={`drum-controls ${isDragging ? 'is-dragging' : ''}`}
+          draggable={!isEditingName && !isInteractiveHovered}
+          onDragStart={(e) => {
+            if (onDragStartRow) onDragStartRow(e, channelIndex);
+          }}
+          onDragOver={(e) => {
+            if (onDragOverRow) onDragOverRow(e, channelIndex);
+          }}
+          onDrop={(e) => {
+            if (onDropRow) onDropRow(e, channelIndex);
+          }}
+          onDragEnd={(e) => {
+            if (onDragEndRow) onDragEndRow(e);
+          }}
+        >
           <div 
             className="drum-title" 
             onClick={handleTitleClick}
@@ -185,9 +214,21 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
                   margin: 0
                 }}
                 onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onMouseEnter={() => setIsInteractiveHovered(true)}
+                onMouseLeave={() => setIsInteractiveHovered(false)}
               />
             ) : (
-              <span className="channel-name-text">{channel.name}</span>
+              <span 
+                className="channel-name-text"
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  setIsEditingName(true);
+                  setEditNameValue(channel.name);
+                }}
+              >
+                {channel.name}
+              </span>
             )}
           </div>
           
@@ -243,7 +284,13 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
             </ContextMenuContainer>
           )}
 
-          <div className="drum-sample-selector" style={{ width: '160px' }}>
+          <div 
+            className="drum-sample-selector" 
+            style={{ width: '160px' }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onMouseEnter={() => setIsInteractiveHovered(true)}
+            onMouseLeave={() => setIsInteractiveHovered(false)}
+          >
             <CustomSelect
               value={channel.sampleUrl}
               onChange={handleSampleChange}
@@ -256,18 +303,29 @@ export const DrumChannelRow: React.FC<Props> = ({ channel, channelIndex, isExpan
             <div className={`meter-led ${isPlayingActiveStep ? 'lit' : ''}`} style={{ '--led-color': channelColor } as React.CSSProperties} />
           </div>
           
-          <div className="drum-knobs">
+          <div 
+            className="drum-knobs"
+            onMouseDown={(e) => e.stopPropagation()}
+            onMouseEnter={() => setIsInteractiveHovered(true)}
+            onMouseLeave={() => setIsInteractiveHovered(false)}
+          >
             <Knob 
               value={channel.volume} 
               min={0} max={100} size={24} 
-              onChange={(val) => updateDrumChannel(channel.id, { volume: val })} 
+              onChange={(val) => {
+                updateDrumChannel(channel.id, { volume: val });
+                triggerDebouncedPreview();
+              }} 
               onDoubleClick={handleVolumeDouble} 
               label="VOL" 
             />
             <Knob 
               value={channel.pan} 
               min={-1} max={1} size={24} 
-              onChange={(val) => updateDrumChannel(channel.id, { pan: val })} 
+              onChange={(val) => {
+                updateDrumChannel(channel.id, { pan: val });
+                triggerDebouncedPreview();
+              }} 
               onDoubleClick={handlePanDouble} 
               label="PAN" 
             />

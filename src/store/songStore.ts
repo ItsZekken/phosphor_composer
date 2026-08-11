@@ -142,6 +142,7 @@ interface SongStore {
   removeChainItem: (id: string) => void;
   moveChainItem: (fromIndex: number, toIndex: number) => void;
   removeDrumChannel: (id: string) => void;
+  reorderDrumChannels: (fromIndex: number, toIndex: number) => void;
 
   // Estado del Mezclador (Mixer)
   isMixerOpen: boolean;
@@ -351,12 +352,34 @@ export const useSongStore = create<SongStore>()(
     const nextChannels = state.drumChannels.map(ch => ch.id === id ? { ...ch, ...updates } : ch);
     const newKitId = updates.sampleUrl !== undefined ? findMatchingKitId(nextChannels) : state.activeDrumKitId;
 
+    if (updates.pan !== undefined) {
+      toneEngine.updateDrumChannelPan(id, updates.pan);
+    }
+
     return { 
       drumChannels: nextChannels,
       activeDrumKitId: newKitId
     };
   }),
-  removeDrumChannel: (id) => set((state) => ({ drumChannels: state.drumChannels.filter(c => c.id !== id) })),
+  removeDrumChannel: (id) => set((state) => {
+    toneEngine.removeDrumPlayer(id);
+    return { drumChannels: state.drumChannels.filter(c => c.id !== id) };
+  }),
+  reorderDrumChannels: (fromIndex, toIndex) => set((state) => {
+    if (
+      fromIndex === toIndex ||
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= state.drumChannels.length ||
+      toIndex >= state.drumChannels.length
+    ) {
+      return state;
+    }
+    const nextChannels = [...state.drumChannels];
+    const [movedItem] = nextChannels.splice(fromIndex, 1);
+    nextChannels.splice(toIndex, 0, movedItem);
+    return { drumChannels: nextChannels };
+  }),
 
   setCurrentDrumPatternEdit: (pattern: number) => set((state) => ({
     userDrumPatternEdit: pattern,

@@ -39,7 +39,6 @@ const PianoKey = React.memo(({
       title={keyDef.noteName}
     >
       {!isBlack && keyDef.label && <span className="key-label">{keyDef.label}</span>}
-      <div className={`key-led ${isMelody ? 'active melody' : isHarmony ? 'active' : ''}`} />
     </div>
   );
 });
@@ -48,10 +47,10 @@ export const PianoVisualizer: React.FC = () => {
   const activeNotes = useSongStore(state => state.activeNotes);
   const activeMelodyNotes = useSongStore(state => state.activeMelodyNotes);
 
-  // Generar 61 notas desde C2 (36) hasta C7 (96)
+  // Generar 85 notas desde C1 (24) hasta C8 (108) (7 octavas completas)
   const keys = useMemo(() => {
     const list: KeyDef[] = [];
-    for (let m = 36; m <= 96; m++) {
+    for (let m = 24; m <= 108; m++) {
       const pitchClass = NOTE_NAMES[m % 12];
       const octave = Math.floor(m / 12) - 1;
       const noteName = `${pitchClass}${octave}`;

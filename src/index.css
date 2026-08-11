@@ -2402,33 +2402,7 @@ select:focus {
   color: #fff;
 }
 
-/* LED indicators estilo diodo fÃ­sico encastrado */
-.key-led {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background-color: #100c14; /* Diodo apagado */
-  border: 1px solid #1c1824;
-  position: absolute;
-  bottom: 2px;
-  box-shadow: inset 0 1px 1px rgba(0,0,0,0.8);
-}
 
-.top-piano-key.black .key-led {
-  bottom: 2px;
-  left: calc(50% - 2.5px);
-}
-
-/* LED armonÃ­a - azul */
-.key-led.active {
-  background-color: #3182ce;
-  box-shadow: 0 0 4px #63b3ed, 0 0 8px #63b3ed;
-}
-
-.top-piano-key.black .key-led.active.melody {
-  background-color: #a21caf;
-  box-shadow: 0 0 4px #e879f9, 0 0 8px #e879f9;
-}
 
 /* ============================================================
    CRT MONITOR & SCREEN LAYOUT
@@ -4542,6 +4516,16 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-radius: 5px;
 }
 
+.drum-channel-container.dragging-channel {
+  opacity: 0.35;
+  transform: scale(0.99);
+}
+
+.drum-channel-container.drag-over-channel {
+  border: 2px dashed var(--reposo, #00ffcc) !important;
+  box-shadow: 0 0 12px rgba(0, 255, 204, 0.4);
+}
+
 .drum-controls {
   width: 350px;
   min-width: 350px;
@@ -4554,8 +4538,12 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-top-left-radius: 5px;
   border-bottom-left-radius: 5px;
   user-select: none;
-  cursor: pointer;
+  cursor: grab;
   position: relative;
+}
+
+.drum-controls.is-dragging {
+  cursor: grabbing;
 }
 
 .drum-title {

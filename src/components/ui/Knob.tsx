@@ -61,11 +61,18 @@ export const Knob: React.FC<KnobProps> = ({
   }, [isDragging, handleMouseMove, handleMouseUp]);
 
   return (
-    <div className="knob-container" onDoubleClick={onDoubleClick}>
+    <div 
+      className="knob-container" 
+      onDoubleClick={onDoubleClick}
+      draggable={false}
+      onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
+    >
       <div 
         className={`knob-body ${isDragging ? 'dragging' : ''}`}
         style={{ width: size, height: size }}
         onMouseDown={handleMouseDown}
+        draggable={false}
+        onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
       >
         <div 
           className="knob-indicator"
