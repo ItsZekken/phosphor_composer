@@ -28,7 +28,13 @@ export const SettingsPanel = () => {
     isKeyboardChromatic,
     setKeyboardChromatic,
     isAutoSuggestions,
-    setAutoSuggestions
+    setAutoSuggestions,
+    chordOctaveShift,
+    setChordOctaveShift,
+    swing,
+    setSwing,
+    sustain,
+    setSustain
   } = useSongStore(useShallow(state => ({
     isSettingsOpen: state.isSettingsOpen,
     setSettingsOpen: state.setSettingsOpen,
@@ -54,7 +60,13 @@ export const SettingsPanel = () => {
     isKeyboardChromatic: state.isKeyboardChromatic,
     setKeyboardChromatic: state.setKeyboardChromatic,
     isAutoSuggestions: state.isAutoSuggestions,
-    setAutoSuggestions: state.setAutoSuggestions
+    setAutoSuggestions: state.setAutoSuggestions,
+    chordOctaveShift: state.chordOctaveShift,
+    setChordOctaveShift: state.setChordOctaveShift,
+    swing: state.swing,
+    setSwing: state.setSwing,
+    sustain: state.sustain,
+    setSustain: state.setSustain
   })));
 
   if (!isSettingsOpen) return null;
@@ -303,7 +315,7 @@ export const SettingsPanel = () => {
         )}
       </div>
 
-      {/* SECCIÓN NUEVA: TECLADO MELODÍA */}
+      {/* SECCIÓN: TECLADO MELODÍA */}
       <div className="settings-section">
         <div className="settings-section-title">
           <Music size={12} style={{ marginRight: '4px', verticalAlign: 'middle', display: 'inline' }} />
@@ -374,7 +386,7 @@ export const SettingsPanel = () => {
       <div className="settings-section">
         <div className="settings-section-title">
           <Music size={12} style={{ marginRight: '4px', verticalAlign: 'middle', display: 'inline' }} />
-          Métrica & Ritmo
+          Métrica, Octava & Ritmo
         </div>
         <div className="switch-container">
           <span className="settings-label">Compás (Sign.)</span>
@@ -391,6 +403,46 @@ export const SettingsPanel = () => {
         </div>
 
         <div className="switch-container">
+          <span className="settings-label">Transponer Acordes</span>
+          <select
+            className="panel-select"
+            value={chordOctaveShift.toString()}
+            onChange={(e) => setChordOctaveShift(parseInt(e.target.value))}
+            style={{ width: '130px', padding: '0.25rem 0.5rem', fontSize: '0.78rem' }}
+          >
+            <option value="-2">-2 Octavas</option>
+            <option value="-1">-1 Octava</option>
+            <option value="0">Normal (0)</option>
+            <option value="1">+1 Octava</option>
+            <option value="2">+2 Octavas</option>
+          </select>
+        </div>
+
+        <div className="settings-row" style={{ marginTop: '6px' }}>
+          <span className="settings-label">Swing Ratio</span>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={swing}
+            onChange={(e) => setSwing(parseInt(e.target.value))}
+          />
+          <span className="settings-val">{swing}%</span>
+        </div>
+
+        <div className="switch-container" style={{ marginTop: '6px' }}>
+          <span className="settings-label">Pedal Sustain</span>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={sustain}
+              onChange={(e) => setSustain(e.target.checked)}
+            />
+            <span className="slider-toggle" />
+          </label>
+        </div>
+
+        <div className="switch-container" style={{ marginTop: '6px' }}>
           <span className="settings-label">Patrón Rítmico</span>
           <select
             className="panel-select"

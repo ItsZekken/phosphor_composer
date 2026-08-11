@@ -39,6 +39,13 @@ export default function App() {
           }
         }
         useSongStore.setState(parsed);
+        if (Array.isArray(parsed.drumChannels)) {
+          parsed.drumChannels.forEach((ch: any) => {
+            if (ch && ch.id && typeof ch.pan === 'number') {
+              toneEngine.updateDrumChannelPan(ch.id, ch.pan);
+            }
+          });
+        }
       } catch (e) {
         console.error("Error cargando sesión persistida", e);
       }

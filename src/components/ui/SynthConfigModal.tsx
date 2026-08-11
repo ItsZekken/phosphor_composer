@@ -1,32 +1,128 @@
+import React, { useEffect, useRef, useState } from 'react';
 import { useSongStore } from '../../store/songStore';
 import { useShallow } from 'zustand/react/shallow';
-import { X, Sliders, Activity } from 'lucide-react';
+import { X, Sliders, Activity, Radio } from 'lucide-react';
+import { toneEngine } from '../../audio/toneEngine';
 
-export const SynthConfigModal = () => {
+export const SynthConfigModal: React.FC = () => {
   const {
     isSynthModalOpen,
     setSynthModalOpen,
-    synthSettings,
-    setSynthSettings
-  } = useSongStore(useShallow(state => ({
-    isSynthModalOpen: state.isSynthModalOpen,
-    setSynthModalOpen: state.setSynthModalOpen,
-    synthSettings: state.synthSettings,
-    setSynthSettings: state.setSynthSettings
-  })));
+    editingChannelId,
+    channels,
+    setChannelSynthSettings
+  } = useSongStore(
+    useShallow((state) => ({
+      isSynthModalOpen: state.isSynthModalOpen,
+      setSynthModalOpen: state.setSynthModalOpen,
+      editingChannelId: state.editingChannelId,
+      channels: state.channels,
+      setChannelSynthSettings: state.setChannelSynthSettings
+    }))
+  );
+
+  const scopeCanvasRef = useRef<HTMLCanvasElement>(null);
+  const filterSvgRef = useRef<SVGSVGElement>(null);
+  const [isDraggingFilterNode, setIsDraggingFilterNode] = useState(false);
+
+  // Obtener canal y configuraciones de sintetizador objetivo
+  const targetChannelId = editingChannelId || 'chords';
+  const targetChannel = channels[targetChannelId] || channels['chords'] || Object.values(channels)[0];
+  const synthSettings = targetChannel?.synthSettings || {
+    waveType: 'sine',
+    detune: 0,
+    envelope: { attack: 0.05, decay: 0.2, sustain: 0.7, release: 0.8 },
+    filter: { enabled: true, type: 'lowpass', frequency: 3500, Q: 2 }
+  };
+
+  // 1. Animación del Osciloscopio FFT en Tiempo Real
+  useEffect(() => {
+    if (!isSynthModalOpen) return;
+
+    let animId: number;
+    const canvas = scopeCanvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const drawScope = () => {
+      const width = canvas.width;
+      const height = canvas.height;
+      const waveform = toneEngine.getWaveformData();
+
+      ctx.fillStyle = '#08080f';
+      ctx.fillRect(0, 0, width, height);
+
+      // Dibujar retícula de cuadrícula CRT
+      ctx.strokeStyle = 'rgba(0, 229, 255, 0.08)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let x = 0; x < width; x += 20) {
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+      }
+      for (let y = 0; y < height; y += 15) {
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+      }
+      ctx.stroke();
+
+      // Dibujar forma de onda FFT
+      ctx.strokeStyle = '#00e5ff';
+      ctx.shadowColor = '#00e5ff';
+      ctx.shadowBlur = 8;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+
+      const sliceWidth = width / waveform.length;
+      let x = 0;
+
+      for (let i = 0; i < waveform.length; i++) {
+        const v = waveform[i];
+        const y = ((v + 1) / 2) * height;
+
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+
+        x += sliceWidth;
+      }
+
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      animId = requestAnimationFrame(drawScope);
+    };
+
+    drawScope();
+
+    return () => {
+      cancelAnimationFrame(animId);
+    };
+  }, [isSynthModalOpen]);
 
   if (!isSynthModalOpen) return null;
 
+  const updateSettings = (partial: any) => {
+    setChannelSynthSettings(targetChannelId, {
+      ...synthSettings,
+      ...partial
+    });
+  };
+
   const handleWaveSelect = (waveType: 'sine' | 'triangle' | 'square' | 'sawtooth') => {
-    setSynthSettings({ waveType });
+    updateSettings({ waveType });
   };
 
   const handleDetuneChange = (val: number) => {
-    setSynthSettings({ detune: val });
+    updateSettings({ detune: val });
   };
 
   const handleEnvelopeChange = (key: 'attack' | 'decay' | 'sustain' | 'release', val: number) => {
-    setSynthSettings({
+    updateSettings({
       envelope: {
         ...synthSettings.envelope,
         [key]: val
@@ -35,7 +131,7 @@ export const SynthConfigModal = () => {
   };
 
   const handleFilterToggle = (enabled: boolean) => {
-    setSynthSettings({
+    updateSettings({
       filter: {
         ...synthSettings.filter,
         enabled
@@ -44,13 +140,47 @@ export const SynthConfigModal = () => {
   };
 
   const handleFilterChange = (key: 'type' | 'frequency' | 'Q', val: any) => {
-    setSynthSettings({
+    updateSettings({
       filter: {
         ...synthSettings.filter,
         [key]: val
       }
     });
   };
+
+  // 2. Interacción Gráfica con la Curva del Filtro VCF (Drag Cutoff X & Q Y)
+  const handleFilterSvgInteraction = (e: React.MouseEvent<SVGSVGElement>) => {
+    const svg = filterSvgRef.current;
+    if (!svg) return;
+
+    const rect = svg.getBoundingClientRect();
+    const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+    const y = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+
+    // Mapear X (0 a rect.width) -> Frecuencia 100 Hz a 12000 Hz (escala log/lineal)
+    const normX = x / rect.width;
+    const freq = Math.round(100 + Math.pow(normX, 2) * 11900);
+
+    // Mapear Y (rect.height a 0) -> Q 0.5 a 12
+    const normY = 1 - y / rect.height;
+    const qVal = parseFloat((0.5 + normY * 11.5).toFixed(1));
+
+    updateSettings({
+      filter: {
+        ...synthSettings.filter,
+        frequency: Math.max(100, Math.min(12000, freq)),
+        Q: Math.max(0.5, Math.min(12, qVal))
+      }
+    });
+  };
+
+  // Calcular puntos de la curva VCF SVG
+  const svgWidth = 280;
+  const svgHeight = 90;
+  const normCutoff = Math.sqrt((synthSettings.filter.frequency - 100) / 11900);
+  const nodeX = normCutoff * svgWidth;
+  const normQ = (synthSettings.filter.Q - 0.5) / 11.5;
+  const nodeY = (1 - normQ) * svgHeight;
 
   return (
     <div className="synth-modal-overlay" onClick={() => setSynthModalOpen(false)}>
@@ -59,11 +189,27 @@ export const SynthConfigModal = () => {
         <div className="synth-modal-header">
           <div className="synth-header-title">
             <Activity className="header-icon pulse-icon" size={16} />
-            <span>SINTETIZADOR VIRTUAL // CONFIGURACIÓN DE VOZ</span>
+            <span>SINTETIZADOR VIRTUAL // {targetChannel.name.toUpperCase()}</span>
           </div>
           <button className="synth-close-btn" onClick={() => setSynthModalOpen(false)} title="Cerrar Panel">
             <X size={16} />
           </button>
+        </div>
+
+        {/* Osciloscopio FFT en Tiempo Real */}
+        <div className="synth-scope-section" style={{ padding: '8px 16px', background: '#05050a', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+            <span style={{ fontSize: '0.7rem', fontFamily: "'Share Tech Mono', monospace", color: '#00e5ff', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Radio size={12} /> OSCILOSCOPIO FFT EN TIEMPO REAL
+            </span>
+            <span style={{ fontSize: '0.65rem', color: '#888', fontFamily: "'Share Tech Mono', monospace" }}>CANAL: {targetChannel.id}</span>
+          </div>
+          <canvas
+            ref={scopeCanvasRef}
+            width={480}
+            height={70}
+            style={{ width: '100%', height: '70px', borderRadius: '4px', border: '1px solid rgba(0, 229, 255, 0.2)', display: 'block' }}
+          />
         </div>
 
         {/* Panel Body (Eurorack Rack) */}
@@ -138,7 +284,7 @@ export const SynthConfigModal = () => {
             </div>
           </div>
 
-          {/* SECCIÓN 2: FILTRO */}
+          {/* SECCIÓN 2: FILTRO CON GRÁFICO INTERACTIVO */}
           <div className="synth-rack-module">
             <div className="module-title">
               <span>II. FILTRO VCF</span>
@@ -157,6 +303,48 @@ export const SynthConfigModal = () => {
               </label>
             </div>
             <div className={`module-content ${synthSettings.filter.enabled ? '' : 'module-bypassed'}`}>
+              
+              {/* Gráfico Interactivo de Respuesta en Frecuencia (SVG) */}
+              <div className="filter-graph-container" style={{ marginBottom: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem', color: '#aaa', fontFamily: "'Share Tech Mono', monospace", marginBottom: '2px' }}>
+                  <span>CURVA DE CORTE Y RESONANCIA</span>
+                  <span>ARRASTRA EL NODO Y/X</span>
+                </div>
+                <svg
+                  ref={filterSvgRef}
+                  width={svgWidth}
+                  height={svgHeight}
+                  style={{ background: '#0a0a14', borderRadius: '4px', border: '1px solid rgba(168, 85, 247, 0.3)', cursor: 'crosshair', display: 'block', width: '100%' }}
+                  onMouseDown={(e) => {
+                    setIsDraggingFilterNode(true);
+                    handleFilterSvgInteraction(e);
+                  }}
+                  onMouseMove={(e) => {
+                    if (isDraggingFilterNode) handleFilterSvgInteraction(e);
+                  }}
+                  onMouseUp={() => setIsDraggingFilterNode(false)}
+                  onMouseLeave={() => setIsDraggingFilterNode(false)}
+                >
+                  {/* Curva de filtro estilizada */}
+                  <path
+                    d={`M 0 ${svgHeight * 0.4} Q ${nodeX * 0.8} ${svgHeight * 0.4}, ${nodeX} ${nodeY} T ${svgWidth} ${svgHeight * 0.9}`}
+                    fill="none"
+                    stroke="#a855f7"
+                    strokeWidth="2"
+                  />
+                  {/* Nodo Interactivo */}
+                  <circle
+                    cx={nodeX}
+                    cy={nodeY}
+                    r="6"
+                    fill="#ff007f"
+                    stroke="#fff"
+                    strokeWidth="2"
+                    style={{ filter: 'drop-shadow(0 0 6px #ff007f)' }}
+                  />
+                </svg>
+              </div>
+
               {/* Tipo de Filtro */}
               <div className="control-field">
                 <label className="field-label">TIPO</label>
@@ -302,7 +490,7 @@ export const SynthConfigModal = () => {
         {/* Panel Footer */}
         <div className="synth-modal-footer">
           <Sliders size={12} style={{ marginRight: '6px' }} />
-          <span>VIRTUAL ANALOG SYNTHESIS MODEL - PHOSPHOR V15</span>
+          <span>VIRTUAL ANALOG SYNTHESIS MODEL - PHOSPHOR V15 // {targetChannel.name.toUpperCase()}</span>
         </div>
       </div>
     </div>

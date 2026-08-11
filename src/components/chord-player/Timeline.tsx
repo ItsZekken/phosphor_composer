@@ -1,5 +1,4 @@
 import React, { useRef, useState } from 'react';
-import { useStore } from 'zustand';
 import { useSongStore } from '../../store/songStore';
 import { useShallow } from 'zustand/react/shallow';
 import type { ChordBlock } from '../../utils/typeDefinitions';
@@ -7,7 +6,7 @@ import { isChordInScale, getChordRomanDegree } from '../../engine/scaleDefinitio
 import { getChordRole } from './ChordPalette';
 import { ChordPropertiesPanel } from './ChordPropertiesPanel';
 import { ContextMenuContainer } from '../ui/ContextMenuContainer';
-import { Plus, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Trash2, Undo2, Redo2 } from 'lucide-react';
+import { Plus, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Trash2 } from 'lucide-react';
 import { toneEngine } from '../../audio/toneEngine';
 import { ChannelQuickControl } from '../ui/ChannelQuickControl';
 
@@ -44,7 +43,11 @@ export const Timeline: React.FC = () => {
     scale,
     timeSignature,
     coarseBeat,
-    transposeSong
+    transposeSong,
+    styleMarkers,
+    addStyleMarker,
+    removeStyleMarker,
+    updateStyleMarker
   } = useSongStore(useShallow(state => ({
     chordBlocks: state.chordBlocks,
     melodyNotes: state.melodyNotes,
@@ -57,15 +60,14 @@ export const Timeline: React.FC = () => {
     scale: state.scale,
     timeSignature: state.timeSignature,
     coarseBeat: Math.floor(state.currentBeat / 4) * 4,
-    transposeSong: state.transposeSong
+    transposeSong: state.transposeSong,
+    styleMarkers: state.styleMarkers,
+    addStyleMarker: state.addStyleMarker,
+    removeStyleMarker: state.removeStyleMarker,
+    updateStyleMarker: state.updateStyleMarker
   })));
 
   const [trackContextMenu, setTrackContextMenu] = useState<{ x: number; y: number; beat: number } | null>(null);
-
-  // Acceso reactivo al historial de Undo/Redo de zundo
-  const { undo, redo, pastStates, futureStates } = useStore(useSongStore.temporal);
-  const canUndo = pastStates.length > 0;
-  const canRedo = futureStates.length > 0;
 
   const BEAT_WIDTH = 40; // píxeles por beat
 
@@ -255,27 +257,9 @@ export const Timeline: React.FC = () => {
       <div className="timeline-header-row">
         <div className="title-undo-group">
           <h2>Línea de Tiempo de Acordes</h2>
-          <div className="timeline-undo-redo">
-            <button
-              onClick={() => undo()}
-              disabled={!canUndo}
-              className="undo-redo-btn"
-              title="Deshacer (Ctrl+Z)"
-            >
-              <Undo2 size={14} /> Deshacer
-            </button>
-            <button
-              onClick={() => redo()}
-              disabled={!canRedo}
-              className="undo-redo-btn"
-              title="Rehacer (Ctrl+Y)"
-            >
-              <Redo2 size={14} /> Rehacer
-            </button>
-          </div>
         </div>
         <ChannelQuickControl channelId="chords" />
-        <span className="ux-tip">Arrastra para mover • Estira el borde derecho para cambiar duración • Click derecho para editar</span>
+        <span className="ux-tip">Arrastra acordes • Marcadores de estilo arriba • Click derecho para editar</span>
       </div>
 
       
@@ -341,6 +325,78 @@ export const Timeline: React.FC = () => {
             }
           }}
         >
+          {/* Pista de Marcadores de Estilo (Timeline Style Markers) */}
+          <div
+            className="style-markers-ruler"
+            style={{
+              position: 'absolute',
+              top: '0px',
+              left: 0,
+              right: 0,
+              height: '20px',
+              background: 'rgba(0, 0, 0, 0.4)',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              zIndex: 5,
+              cursor: 'pointer'
+            }}
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const clickX = e.clientX - rect.left;
+              const beat = Math.max(0, Math.floor(clickX / BEAT_WIDTH));
+              const existing = styleMarkers.find((m) => m.beat === beat);
+              if (!existing) {
+                addStyleMarker({
+                  id: `sm_${Math.random().toString(36).substr(2, 9)}`,
+                  beat,
+                  pattern: 'quarters'
+                });
+              }
+            }}
+            title="Haz clic para agregar un marcador de estilo en este beat"
+          >
+            {styleMarkers.map((marker) => {
+              const markerLeft = marker.beat * BEAT_WIDTH;
+              return (
+                <div
+                  key={marker.id}
+                  className="style-marker-flag"
+                  style={{
+                    position: 'absolute',
+                    left: `${markerLeft}px`,
+                    top: '2px',
+                    height: '16px',
+                    padding: '0 6px',
+                    borderRadius: '3px',
+                    background: 'rgba(0, 229, 255, 0.25)',
+                    border: '1px solid #00e5ff',
+                    color: '#00e5ff',
+                    fontSize: '0.65rem',
+                    fontFamily: "'Share Tech Mono', monospace",
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    zIndex: 6
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const patterns: ('hold' | 'quarters' | 'eighths' | 'pop' | 'arpeggio' | 'strum')[] = ['hold', 'quarters', 'eighths', 'pop', 'arpeggio', 'strum'];
+                    const currentIndex = patterns.indexOf(marker.pattern as any);
+                    const nextPattern = patterns[(currentIndex + 1) % patterns.length];
+                    updateStyleMarker(marker.id, { pattern: nextPattern });
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    removeStyleMarker(marker.id);
+                  }}
+                  title={`Marcador: ${marker.pattern} en Beat ${marker.beat} — Click para cambiar estilo, Clic Derecho para eliminar`}
+                >
+                  <span>📍 {marker.pattern}</span>
+                </div>
+              );
+            })}
+          </div>
+
           {/* Líneas de cuadrícula */}
           {gridLines}
 

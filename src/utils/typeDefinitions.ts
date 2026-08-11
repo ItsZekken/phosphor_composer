@@ -39,19 +39,59 @@ export interface ChordSuggestion {
 
 export type ActiveView = 'chord' | 'piano-roll' | 'sequencer';
 
-export type ChannelInstrument = 'synth' | 'piano';
+export interface SynthSettings {
+  waveType: 'sine' | 'triangle' | 'square' | 'sawtooth';
+  envelope: {
+    attack: number;
+    decay: number;
+    sustain: number;
+    release: number;
+  };
+  filter: {
+    enabled: boolean;
+    type: 'lowpass' | 'highpass' | 'bandpass';
+    frequency: number;
+    Q: number;
+  };
+  detune: number;
+}
 
+export type ChannelInstrument = 'synth' | 'piano' | 'sampler';
+
+export interface PianoRollTrack {
+  id: string;
+  name: string;
+  color: string;
+  channelId: string;
+  notes: MelodyNote[];
+  synthSettings?: SynthSettings;
+  viewport?: {
+    scrollLeft?: number;
+    scrollTop?: number;
+    zoomX?: number;
+    zoomY?: number;
+    beatWidth?: number;
+    rowHeight?: number;
+  };
+}
+
+export interface StyleMarker {
+  id: string;
+  beat: number;
+  pattern: string;
+}
 
 export interface ChannelConfig {
-  id: string; // Ej: 'chords', 'melody', 'drums'
-  name: string; // Ej: 'Armonía', 'Melodía'
-  type: 'chord' | 'melody' | 'drums' | 'bass';
+  id: string; // Ej: 'master', 'chords', 'melody', 'drums', 'track_123'
+  name: string; // Ej: 'Master', 'Armonía', 'Melodía'
+  type: 'master' | 'chord' | 'chords' | 'melody' | 'drums' | 'bass' | 'synth';
   instrument: ChannelInstrument;
-  volume: number; // 0 a 100
+  volume: number; // 0 a 100 (80 es nominal 0 dB)
   pan: number; // -1.0 (L) a +1.0 (R)
   muted: boolean;
   solo: boolean;
   color: string;
+  synthSettings?: SynthSettings;
 }
 
 export interface DrumStep {

@@ -205,6 +205,28 @@ interface SongStore {
   removeMelodyNote: (id: string) => void;
   setMelodyNotes: (notes: MelodyNote[]) => void;
 
+  // Pistas de Piano Roll Multicanal y Marcadores de Estilo
+  tracks: import('../utils/typeDefinitions').PianoRollTrack[];
+  activeTrackId: string;
+  styleMarkers: import('../utils/typeDefinitions').StyleMarker[];
+  editingChannelId: string | null;
+  clipboardNotes: MelodyNote[];
+
+  addPianoRollTrack: (name?: string) => void;
+  removePianoRollTrack: (id: string) => void;
+  renamePianoRollTrack: (id: string, name: string) => void;
+  setActiveTrackId: (id: string) => void;
+  updateTrackViewport: (id: string, viewport: Partial<import('../utils/typeDefinitions').PianoRollTrack['viewport']>) => void;
+  setTrackNotes: (trackId: string, notes: MelodyNote[]) => void;
+
+  addStyleMarker: (marker: import('../utils/typeDefinitions').StyleMarker) => void;
+  removeStyleMarker: (id: string) => void;
+  updateStyleMarker: (id: string, updates: Partial<import('../utils/typeDefinitions').StyleMarker>) => void;
+
+  openSynthConfigForChannel: (channelId: string) => void;
+  setChannelSynthSettings: (channelId: string, settings: import('../utils/typeDefinitions').SynthSettings) => void;
+  setClipboardNotes: (notes: MelodyNote[]) => void;
+
   updateSuggestions: () => void;
   setGhostNotes: (ghostNotes: GhostNote[]) => void;
   transposeSong: (semitones: number) => void;
@@ -228,10 +250,21 @@ interface SongStore {
 }
 
 export const DEFAULT_CHANNELS: Record<string, ChannelConfig> = {
+  master: {
+    id: 'master',
+    name: 'MASTER',
+    type: 'master',
+    instrument: 'synth',
+    volume: 80,
+    pan: 0,
+    muted: false,
+    solo: false,
+    color: '#ffaa00'
+  },
   chords: {
     id: 'chords',
     name: 'Armonía',
-    type: 'chord',
+    type: 'chords',
     instrument: 'piano',
     volume: 80,
     pan: 0,
@@ -241,7 +274,7 @@ export const DEFAULT_CHANNELS: Record<string, ChannelConfig> = {
   },
   melody: {
     id: 'melody',
-    name: 'Melodía',
+    name: 'Melodía 1',
     type: 'melody',
     instrument: 'synth',
     volume: 85,
@@ -324,6 +357,133 @@ export const useSongStore = create<SongStore>()(
   userDrumPatternEdit: 0,
   currentDrumPatternEdit: 0,
   isLiveFollowLocked: false,
+
+  tracks: [
+    {
+      id: 'track_melody_1',
+      name: 'Melodía 1',
+      channelId: 'melody',
+      color: '#ff00aa',
+      notes: [],
+      viewport: { scrollLeft: 0, scrollTop: 600, beatWidth: 40, rowHeight: 20 }
+    }
+  ],
+  activeTrackId: 'track_melody_1',
+  styleMarkers: [],
+  editingChannelId: 'chords',
+  clipboardNotes: [],
+
+  addPianoRollTrack: (name) => set((state) => {
+    const trackNum = state.tracks.length + 1;
+    const trackId = `track_${Date.now()}`;
+    const channelId = `ch_${trackId}`;
+    const trackName = name || `Melodía ${trackNum}`;
+    const trackColor = ['#00e5ff', '#ff00aa', '#a855f7', '#ffaa00', '#00ffcc', '#ff3366'][state.tracks.length % 6];
+
+    const newChannel: ChannelConfig = {
+      id: channelId,
+      name: trackName,
+      type: 'melody',
+      instrument: 'synth',
+      volume: 80,
+      pan: 0,
+      muted: false,
+      solo: false,
+      color: trackColor
+    };
+
+    const newTrack: import('../utils/typeDefinitions').PianoRollTrack = {
+      id: trackId,
+      name: trackName,
+      channelId: channelId,
+      color: trackColor,
+      notes: [],
+      viewport: { scrollLeft: 0, scrollTop: 600, beatWidth: 40, rowHeight: 20 }
+    };
+
+    return {
+      channels: { ...state.channels, [channelId]: newChannel },
+      tracks: [...state.tracks, newTrack],
+      activeTrackId: trackId
+    };
+  }),
+
+  removePianoRollTrack: (id) => set((state) => {
+    if (state.tracks.length <= 1) return state;
+    const track = state.tracks.find(t => t.id === id);
+    const nextTracks = state.tracks.filter(t => t.id !== id);
+    const nextActiveId = state.activeTrackId === id ? nextTracks[0].id : state.activeTrackId;
+    const nextChannels = { ...state.channels };
+    if (track && track.channelId !== 'melody') {
+      delete nextChannels[track.channelId];
+    }
+    return {
+      tracks: nextTracks,
+      activeTrackId: nextActiveId,
+      channels: nextChannels
+    };
+  }),
+
+  renamePianoRollTrack: (id, name) => set((state) => {
+    const track = state.tracks.find(t => t.id === id);
+    if (!track) return state;
+    const nextTracks = state.tracks.map(t => t.id === id ? { ...t, name } : t);
+    const nextChannels = { ...state.channels };
+    if (nextChannels[track.channelId]) {
+      nextChannels[track.channelId] = { ...nextChannels[track.channelId], name };
+    }
+    return { tracks: nextTracks, channels: nextChannels };
+  }),
+
+  setActiveTrackId: (id) => set((state) => {
+    const activeTrack = state.tracks.find(t => t.id === id);
+    return {
+      activeTrackId: id,
+      melodyNotes: activeTrack ? activeTrack.notes : state.melodyNotes
+    };
+  }),
+
+  updateTrackViewport: (id, viewport) => set((state) => ({
+    tracks: state.tracks.map(t => t.id === id ? { ...t, viewport: { ...t.viewport, ...viewport } } : t)
+  })),
+
+  setTrackNotes: (trackId, notes) => set((state) => ({
+    tracks: state.tracks.map(t => t.id === trackId ? { ...t, notes } : t),
+    melodyNotes: state.activeTrackId === trackId ? notes : state.melodyNotes
+  })),
+
+  addStyleMarker: (marker) => set((state) => ({
+    styleMarkers: [...state.styleMarkers.filter(m => m.beat !== marker.beat), marker].sort((a, b) => a.beat - b.beat)
+  })),
+
+  removeStyleMarker: (id) => set((state) => ({
+    styleMarkers: state.styleMarkers.filter(m => m.id !== id)
+  })),
+
+  updateStyleMarker: (id, updates) => set((state) => ({
+    styleMarkers: state.styleMarkers.map(m => m.id === id ? { ...m, ...updates } : m)
+  })),
+
+  openSynthConfigForChannel: (channelId) => set({
+    editingChannelId: channelId,
+    isSynthModalOpen: true
+  }),
+
+  setChannelSynthSettings: (channelId, settings) => set((state) => {
+    const ch = state.channels[channelId];
+    if (!ch) return state;
+    return {
+      channels: {
+        ...state.channels,
+        [channelId]: {
+          ...ch,
+          synthSettings: settings
+        }
+      }
+    };
+  }),
+
+  setClipboardNotes: (notes) => set({ clipboardNotes: notes }),
 
   selectDrumKit: (kitId) => set((state) => {
     if (kitId === 'custom') {
@@ -707,24 +867,37 @@ export const useSongStore = create<SongStore>()(
 
   addMelodyNote: (noteData) => {
     const newNote: MelodyNote = { id: Math.random().toString(36).substr(2, 9), ...noteData };
-    set((state) => ({ melodyNotes: [...state.melodyNotes, newNote] }));
+    set((state) => {
+      const nextNotes = [...state.melodyNotes, newNote];
+      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? { ...t, notes: nextNotes } : t);
+      return { melodyNotes: nextNotes, tracks: nextTracks };
+    });
     if (get().isAutoSuggestions) get().updateSuggestions();
   },
 
   updateMelodyNote: (id, updates) => {
-    set((state) => ({
-      melodyNotes: state.melodyNotes.map(n => n.id === id ? { ...n, ...updates } : n)
-    }));
+    set((state) => {
+      const nextNotes = state.melodyNotes.map(n => n.id === id ? { ...n, ...updates } : n);
+      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? { ...t, notes: nextNotes } : t);
+      return { melodyNotes: nextNotes, tracks: nextTracks };
+    });
     if (get().isAutoSuggestions) get().updateSuggestions();
   },
 
   removeMelodyNote: (id) => {
-    set((state) => ({ melodyNotes: state.melodyNotes.filter(n => n.id !== id) }));
+    set((state) => {
+      const nextNotes = state.melodyNotes.filter(n => n.id !== id);
+      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? { ...t, notes: nextNotes } : t);
+      return { melodyNotes: nextNotes, tracks: nextTracks };
+    });
     if (get().isAutoSuggestions) get().updateSuggestions();
   },
 
   setMelodyNotes: (melodyNotes) => {
-    set({ melodyNotes });
+    set((state) => {
+      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? { ...t, notes: melodyNotes } : t);
+      return { melodyNotes, tracks: nextTracks };
+    });
     if (get().isAutoSuggestions) get().updateSuggestions();
   },
 
@@ -855,11 +1028,15 @@ export const useSongStore = create<SongStore>()(
     scale: state.scale,
     chordBlocks: state.chordBlocks,
     melodyNotes: state.melodyNotes,
+    tracks: state.tracks,
+    styleMarkers: state.styleMarkers,
     timeSignature: state.timeSignature,
     pattern: state.pattern,
     chordOctaveShift: state.chordOctaveShift,
     synthSettings: state.synthSettings,
     channels: state.channels,
+    drumChannels: state.drumChannels,
+    patternChain: state.patternChain,
   }),
 }
 )

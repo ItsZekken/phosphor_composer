@@ -155,13 +155,28 @@ class ToneEngine {
   // syncTimeline con debounce para evitar reconstrucciones excesivas durante edición
   private syncTimelineDebounced: () => void;
 
+  private channelMeters = new Map<string, Tone.Meter>();
+  private analyserNode: Tone.Analyser = new Tone.Analyser('waveform', 512);
+  private trackSynths = new Map<string, Tone.PolySynth>();
+
   private getChannelNode(id: string) {
     let node = this.channelNodes.get(id);
     if (!node) {
       const volumeNode = new Tone.Volume(0);
       const pannerNode = new Tone.Panner({ pan: 0 });
+      const meterNode = new Tone.Meter({ smoothing: 0.8 });
+
       volumeNode.connect(pannerNode);
-      pannerNode.toDestination();
+
+      if (id === 'master') {
+        pannerNode.toDestination();
+        pannerNode.connect(meterNode);
+        pannerNode.connect(this.analyserNode);
+      } else {
+        const masterNode = this.getChannelNode('master');
+        pannerNode.connect(masterNode.volumeNode);
+        pannerNode.connect(meterNode);
+      }
 
       // Enforce explicit 2-channel stereo on Web Audio nodes to prevent mono downmixing
       try {
@@ -181,8 +196,28 @@ class ToneEngine {
 
       node = { volumeNode, pannerNode };
       this.channelNodes.set(id, node);
+      this.channelMeters.set(id, meterNode);
     }
     return node;
+  }
+
+  public getChannelMeterLevel(id: string): number {
+    const meter = this.channelMeters.get(id);
+    if (!meter) return -Infinity;
+    try {
+      const val = meter.getValue();
+      return typeof val === 'number' ? val : Array.isArray(val) ? (val as number[])[0] : -Infinity;
+    } catch (_) {
+      return -Infinity;
+    }
+  }
+
+  public getWaveformData(): Float32Array {
+    try {
+      return this.analyserNode.getValue() as Float32Array;
+    } catch (_) {
+      return new Float32Array(512);
+    }
   }
 
   constructor() {
@@ -1343,8 +1378,11 @@ class ToneEngine {
     );
     if (!block) return;
 
+    const activeMarker = (state.styleMarkers || [])
+      .filter((m: any) => localTickBeat >= m.beat)
+      .pop();
+    const pattern = activeMarker ? activeMarker.pattern : (state.pattern || 'hold');
     const relativeBeat = localTickBeat - block.startBeat;
-    const pattern = state.pattern || 'hold';
     const usePiano = this.isChordPianoActive();
     const beatDuration = 60 / bpm;
 
@@ -1748,39 +1786,66 @@ class ToneEngine {
       ? Math.ceil(this.cachedMaxBeat / this.cachedMelodyMaxBeat) 
       : 1;
 
+    const tracksToPlay = (state.tracks && state.tracks.length > 0)
+      ? state.tracks
+      : [{ id: 'melody', name: 'Melodía', channelId: 'melody', notes: state.melodyNotes }];
+
     for (let r = 0; r < repeats; r++) {
       const offsetBeat = r * this.cachedMelodyMaxBeat;
-      state.melodyNotes.forEach((note) => {
-        const startTimeSeconds = (note.startBeat + offsetBeat) * beatDuration;
-        const durationSeconds = note.durationBeats * beatDuration;
+      tracksToPlay.forEach((track) => {
+        const channelConfig = state.channels[track.channelId];
+        if (channelConfig && channelConfig.muted) return;
+        const isAnySolo = Object.values(state.channels).some((c: any) => c.solo);
+        if (isAnySolo && channelConfig && !channelConfig.solo) return;
 
-        // Si la nota excede el maxBeat global, la acortamos o la ignoramos
-        if (startTimeSeconds >= this.cachedMaxBeat * beatDuration) return;
+        (track.notes || []).forEach((note) => {
+          const startTimeSeconds = (note.startBeat + offsetBeat) * beatDuration;
+          const durationSeconds = note.durationBeats * beatDuration;
 
-        if (usePiano && this.melodyPiano && this.melodyPiano.loaded) {
-          // Melodía con piano (apagado programado de forma segura en Web Audio)
+          if (startTimeSeconds >= this.cachedMaxBeat * beatDuration) return;
+
           const id = Tone.Transport.schedule((time) => {
-            try {
-              this.melodyPiano!.keyDown({ note: note.note, time, velocity: note.velocity });
-              this.melodyPiano!.keyUp({ note: note.note, time: time + durationSeconds });
-            } catch (e) {
-              console.error('Error tocando nota de melodía con piano:', e);
+            const isPiano = channelConfig?.instrument === 'piano';
+            if (isPiano && this.melodyPiano && this.melodyPiano.loaded) {
+              try {
+                this.melodyPiano.keyDown({ note: note.note, time, velocity: note.velocity });
+                this.melodyPiano.keyUp({ note: note.note, time: time + durationSeconds });
+              } catch (e) {
+                console.error('Error tocando nota de piano:', e);
+              }
+            } else {
+              let synth = this.trackSynths.get(track.channelId);
+              if (!synth) {
+                synth = new Tone.PolySynth(Tone.Synth, {
+                  oscillator: { type: 'sine' },
+                  envelope: { attack: 0.05, decay: 0.2, sustain: 0.6, release: 0.4 }
+                });
+                const channelNode = this.getChannelNode(track.channelId);
+                synth.connect(this.synthFilter);
+                this.synthFilter.connect(channelNode.volumeNode);
+                this.trackSynths.set(track.channelId, synth);
+              }
+
+              if (channelConfig?.synthSettings) {
+                try {
+                  synth.set({
+                    oscillator: { type: channelConfig.synthSettings.waveType },
+                    envelope: channelConfig.synthSettings.envelope,
+                    detune: channelConfig.synthSettings.detune
+                  });
+                } catch (_) {}
+              }
+
+              try {
+                synth.triggerAttackRelease(note.note, durationSeconds, time, note.velocity);
+              } catch (e) {
+                console.error('Error tocando sintetizador de pista:', e);
+              }
             }
             this.trackNote(note.note, durationSeconds, time, 'melody');
           }, startTimeSeconds);
           this.scheduledEvents.push(id);
-        } else {
-          // Melodía con sintetizador virtual original
-          const id = Tone.Transport.schedule((time) => {
-            try {
-              this.melodySynth.triggerAttackRelease(note.note, durationSeconds, time, note.velocity);
-            } catch (e) {
-              console.error('Error tocando nota de melodía con sintetizador:', e);
-            }
-            this.trackNote(note.note, durationSeconds, time, 'melody');
-          }, startTimeSeconds);
-          this.scheduledEvents.push(id);
-        }
+        });
       });
     }
 

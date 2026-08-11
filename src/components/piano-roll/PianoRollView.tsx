@@ -6,7 +6,7 @@ import { NOTE_CLASSES } from '../../engine/scaleDefinitions';
 import { melodyPredictor } from '../../magenta/melodyPredictor';
 import { autoCorrelate, hzToMidi } from '../../utils/pitchDetector';
 import type { MelodyNote } from '../../utils/typeDefinitions';
-import { Mic, Trash, Sparkles, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Copy, Trash2, Search, ChevronRight, Plus } from 'lucide-react';
+import { Mic, Trash, Sparkles, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Copy, Trash2, Search, ChevronRight, Plus, Settings } from 'lucide-react';
 import { ContextMenuContainer } from '../ui/ContextMenuContainer';
 import { ScaleFinderSection } from './ScaleFinderSection';
 import { ChannelQuickControl } from '../ui/ChannelQuickControl';
@@ -337,7 +337,17 @@ export const PianoRollView = () => {
     chordBlocks,
     activeNotes,
     activeMelodyNotes,
-    isAutoSuggestions
+    isAutoSuggestions,
+    tracks,
+    activeTrackId,
+    addPianoRollTrack,
+    removePianoRollTrack,
+    renamePianoRollTrack,
+    setActiveTrackId,
+    updateTrackViewport,
+    openSynthConfigForChannel,
+    clipboardNotes,
+    setClipboardNotes
   } = useSongStore(useShallow(state => ({
     melodyNotes: state.melodyNotes,
     addMelodyNote: state.addMelodyNote,
@@ -356,7 +366,17 @@ export const PianoRollView = () => {
     chordBlocks: state.chordBlocks,
     activeNotes: state.activeNotes,
     activeMelodyNotes: state.activeMelodyNotes,
-    isAutoSuggestions: state.isAutoSuggestions
+    isAutoSuggestions: state.isAutoSuggestions,
+    tracks: state.tracks,
+    activeTrackId: state.activeTrackId,
+    addPianoRollTrack: state.addPianoRollTrack,
+    removePianoRollTrack: state.removePianoRollTrack,
+    renamePianoRollTrack: state.renamePianoRollTrack,
+    setActiveTrackId: state.setActiveTrackId,
+    updateTrackViewport: state.updateTrackViewport,
+    openSynthConfigForChannel: state.openSynthConfigForChannel,
+    clipboardNotes: state.clipboardNotes,
+    setClipboardNotes: state.setClipboardNotes
   })));
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -410,7 +430,87 @@ export const PianoRollView = () => {
     if (pianoRef.current) {
       pianoRef.current.scrollTop = e.currentTarget.scrollTop;
     }
+    const target = e.currentTarget;
+    if (activeTrackId) {
+      updateTrackViewport(activeTrackId, {
+        scrollLeft: target.scrollLeft,
+        scrollTop: target.scrollTop
+      });
+    }
   };
+
+  // Restauración de Viewport y Zoom al alternar de pista activa
+  useEffect(() => {
+    const activeTrack = tracks.find(t => t.id === activeTrackId);
+    if (activeTrack && activeTrack.viewport && containerRef.current) {
+      containerRef.current.scrollLeft = activeTrack.viewport.scrollLeft ?? 0;
+      containerRef.current.scrollTop = activeTrack.viewport.scrollTop ?? 600;
+      if (pianoRef.current) {
+        pianoRef.current.scrollTop = activeTrack.viewport.scrollTop ?? 600;
+      }
+    }
+  }, [activeTrackId, tracks, updateTrackViewport]);
+
+  // Atajos de teclado QoL: Ctrl+C, Ctrl+V y Tecla Supr / Delete
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+
+      // Tecla Supr / Delete / Backspace: eliminar notas seleccionadas
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedNoteIds.length > 0) {
+          e.preventDefault();
+          selectedNoteIds.forEach(id => removeMelodyNote(id));
+          setSelectedNoteIds([]);
+        }
+      }
+
+      // Ctrl+C / Cmd+C: Copiar notas seleccionadas
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
+        if (selectedNoteIds.length > 0) {
+          e.preventDefault();
+          const selected = melodyNotes.filter(n => selectedNoteIds.includes(n.id));
+          if (selected.length > 0) {
+            setClipboardNotes(selected);
+          }
+        }
+      }
+
+      // Ctrl+V / Cmd+V: Pegar notas comenzando en la posición del playhead
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
+        if (clipboardNotes && clipboardNotes.length > 0) {
+          e.preventDefault();
+          const currentPlayheadBeat = useSongStore.getState().currentBeat;
+          const minStartBeat = Math.min(...clipboardNotes.map(n => n.startBeat));
+          
+          const pastedNotes: MelodyNote[] = clipboardNotes.map(n => {
+            const relativeOffset = n.startBeat - minStartBeat;
+            return {
+              id: `pasted_${Math.random().toString(36).substr(2, 9)}`,
+              note: n.note,
+              midi: n.midi,
+              startBeat: currentPlayheadBeat + relativeOffset,
+              durationBeats: n.durationBeats,
+              velocity: n.velocity
+            };
+          });
+
+          const newMelodyNotes = [...melodyNotes, ...pastedNotes];
+          setMelodyNotes(newMelodyNotes);
+          setSelectedNoteIds(pastedNotes.map(n => n.id));
+          if (pastedNotes.length > 0) {
+            toneEngine.playNotePreview(pastedNotes[0].note);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedNoteIds, melodyNotes, removeMelodyNote, setMelodyNotes, clipboardNotes, setClipboardNotes]);
 
   // 1. Inferencia Melódica (Notas Fantasma de Magenta)
   // fetchGhostNotes como callback para poder llamarlo manualmente desde el botón
@@ -1025,9 +1125,119 @@ export const PianoRollView = () => {
 
   return (
     <div className="piano-roll-view">
+      {/* Barra de Pistas Multicanal de Piano Roll */}
+      <div className="piano-roll-tabs-bar" style={{ display: 'flex', gap: '6px', padding: '8px 12px', background: 'rgba(15, 15, 22, 0.95)', borderBottom: '1px solid var(--border-color)', alignItems: 'center', overflowX: 'auto' }}>
+        {tracks.map((track) => {
+          const isActive = track.id === activeTrackId;
+          return (
+            <div
+              key={track.id}
+              className={`piano-track-tab ${isActive ? 'active' : ''}`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '4px 12px',
+                borderRadius: '6px',
+                background: isActive ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.3)',
+                border: isActive ? `1px solid ${track.color}` : '1px solid rgba(255,255,255,0.06)',
+                color: isActive ? '#fff' : 'var(--text-secondary)',
+                cursor: 'pointer',
+                fontSize: '0.8rem',
+                fontFamily: "'Share Tech Mono', monospace",
+                transition: 'all 0.15s ease'
+              }}
+              onClick={() => setActiveTrackId(track.id)}
+            >
+              <span className="track-tab-dot" style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: track.color, boxShadow: isActive ? `0 0 6px ${track.color}` : 'none' }} />
+              <span
+                className="track-tab-name"
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  const newName = prompt('Nombre de la pista:', track.name);
+                  if (newName && newName.trim()) {
+                    renamePianoRollTrack(track.id, newName.trim());
+                  }
+                }}
+                title="Doble click para renombrar pista"
+              >
+                {track.name}
+              </span>
+              {tracks.length > 1 && (
+                <button
+                  className="track-tab-close-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm(`¿Eliminar la pista "${track.name}"?`)) {
+                      removePianoRollTrack(track.id);
+                    }
+                  }}
+                  style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: '12px', padding: '0 2px' }}
+                  title="Eliminar esta pista"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          );
+        })}
+        <button
+          className="piano-track-add-btn"
+          onClick={() => addPianoRollTrack()}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '4px 10px',
+            borderRadius: '6px',
+            background: 'rgba(0, 229, 255, 0.1)',
+            border: '1px solid rgba(0, 229, 255, 0.3)',
+            color: '#00e5ff',
+            cursor: 'pointer',
+            fontSize: '0.75rem',
+            fontFamily: "'Share Tech Mono', monospace"
+          }}
+          title="Añadir nueva pista de Piano Roll con canal en el mezclador"
+        >
+          <Plus size={14} />
+          <span>Nueva Pista</span>
+        </button>
+
+        {/* Botón de Sintetizador Dedicado */}
+        <div style={{ marginLeft: 'auto' }}>
+          <button
+            className="control-btn track-synth-config-btn"
+            onClick={() => {
+              const activeTrack = tracks.find(t => t.id === activeTrackId);
+              openSynthConfigForChannel(activeTrack ? activeTrack.channelId : 'melody');
+            }}
+            title="Configurar Sintetizador de esta pista"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 12px',
+              fontSize: '0.78rem',
+              fontFamily: "'Share Tech Mono', monospace",
+              background: 'rgba(168, 85, 247, 0.15)',
+              border: '1px solid rgba(168, 85, 247, 0.4)',
+              color: '#a855f7',
+              borderRadius: '6px',
+              cursor: 'pointer'
+            }}
+          >
+            <Settings size={14} />
+            <span>Config Synth</span>
+          </button>
+        </div>
+      </div>
+
       {/* Barra de herramientas */}
       <div className="piano-roll-toolbar">
-        <ChannelQuickControl channelId="melody" />
+        {(() => {
+          const activeTrack = tracks.find(t => t.id === activeTrackId);
+          return <ChannelQuickControl channelId={activeTrack ? activeTrack.channelId : 'melody'} />;
+        })()}
 
         {/* Segmento de Duración de Nota por Defecto (5 Estados sin texto) */}
 

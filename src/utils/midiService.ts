@@ -466,6 +466,13 @@ export function exportSessionToMidi(session: any, type: 'normal' | 'project'): U
       instrumentType: session.instrumentType,
       chordBlocks: session.chordBlocks,
       melodyNotes: session.melodyNotes,
+      channels: session.channels,
+      drumChannels: session.drumChannels,
+      patternChain: session.patternChain,
+      isPatternRepeatOn: session.isPatternRepeatOn,
+      activeDrumKitId: session.activeDrumKitId,
+      chordOctaveShift: session.chordOctaveShift,
+      currentDrumPatternEdit: session.currentDrumPatternEdit
     };
     
     midi.header.meta.push({
@@ -535,6 +542,13 @@ export function importMidiToSession(
   timeSignature: '4/4' | '3/4' | '6/8';
   chordBlocks: ChordBlock[];
   melodyNotes: MelodyNote[];
+  channels?: Record<string, any>;
+  drumChannels?: any[];
+  patternChain?: any[];
+  isPatternRepeatOn?: boolean;
+  activeDrumKitId?: string;
+  chordOctaveShift?: number;
+  currentDrumPatternEdit?: number;
   message: string;
 } {
   const midi = new Midi(midiData);
@@ -556,6 +570,13 @@ export function importMidiToSession(
           timeSignature: state.timeSignature ?? '4/4',
           chordBlocks: state.chordBlocks ?? [],
           melodyNotes: state.melodyNotes ?? [],
+          channels: state.channels,
+          drumChannels: state.drumChannels,
+          patternChain: state.patternChain,
+          isPatternRepeatOn: state.isPatternRepeatOn,
+          activeDrumKitId: state.activeDrumKitId,
+          chordOctaveShift: state.chordOctaveShift,
+          currentDrumPatternEdit: state.currentDrumPatternEdit,
           message: 'Sesión de proyecto restaurada al 100% desde metadatos.'
         };
       } catch (e) {
