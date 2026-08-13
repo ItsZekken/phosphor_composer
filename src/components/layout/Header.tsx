@@ -12,6 +12,7 @@ import { exportSessionToMidi, importMidiToSession } from '../../utils/midiServic
 import { exportSessionToJson } from '../../core/session';
 import { ExportProgressModal } from '../ui/ExportProgressModal';
 import { ConfirmModal } from '../ui/ConfirmModal';
+import { PhosphorLogo } from '../ui/PhosphorLogo';
 
 const BeatDisplay = () => {
   const currentBeat = useSongStore(state => state.currentBeat);
@@ -311,7 +312,10 @@ export const Header = () => {
     <>
     <header className="app-header">
       <div className="header-brand">
-        <h1 className="phosphor-text">PHOSPHOR</h1>
+        <h1 className="phosphor-text">
+          <PhosphorLogo size={22} style={{ marginRight: '6px' }} />
+          PHOSPHOR
+        </h1>
         {isAudioLoading && (
           <span className="audio-loading-indicator" style={{
             fontSize: '11px',
