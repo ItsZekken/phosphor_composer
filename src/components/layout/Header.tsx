@@ -9,6 +9,7 @@ import { Play, Square, Trash2, RefreshCw, Bell, Settings as SettingsIcon, Slider
 import { CustomSelect } from '../ui/CustomSelect';
 
 import { exportSessionToMidi, importMidiToSession } from '../../utils/midiService';
+import { exportSessionToJson } from '../../core/session';
 import { ExportProgressModal } from '../ui/ExportProgressModal';
 import { ConfirmModal } from '../ui/ConfirmModal';
 
@@ -179,25 +180,9 @@ export const Header = () => {
       return;
     }
 
-    const projectData = {
-      version: '1.0',
-      bpm,
-      key,
-      scale,
-      timeSignature,
-      pattern,
-      instrumentType,
-      chordBlocks,
-      melodyNotes,
-      channels: state.channels,
-      drumChannels: state.drumChannels,
-      chordOctaveShift: state.chordOctaveShift,
-      patternChain: state.patternChain,
-      isPatternRepeatOn: state.isPatternRepeatOn,
-      activeDrumKitId: state.activeDrumKitId,
-    };
-    
-    const jsonString = JSON.stringify(projectData, null, 2);
+    const jsonString = exportSessionToJson(state, {
+      title: `Phosphor Project ${key} ${scale}`
+    });
     const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -270,24 +255,9 @@ export const Header = () => {
       reader.onload = (event) => {
         try {
           const jsonStr = event.target?.result as string;
-          const data = JSON.parse(jsonStr);
-          importSong({
-            bpm: data.bpm || 120,
-            key: data.key || 'C',
-            scale: data.scale || 'major',
-            pattern: data.pattern || 'hold',
-            timeSignature: data.timeSignature || '4/4',
-            chordBlocks: data.chordBlocks || [],
-            melodyNotes: data.melodyNotes || [],
-            channels: data.channels,
-            drumChannels: data.drumChannels,
-            chordOctaveShift: data.chordOctaveShift,
-            patternChain: data.patternChain,
-            isPatternRepeatOn: data.isPatternRepeatOn,
-            activeDrumKitId: data.activeDrumKitId
-          });
+          importSong(jsonStr);
         } catch (err) {
-          alert('Error leyendo proyecto JSON.');
+          alert('Error leyendo proyecto JSON: ' + (err as Error).message);
         }
       };
       reader.readAsText(file);

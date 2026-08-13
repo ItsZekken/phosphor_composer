@@ -10,6 +10,7 @@ import { loadCustomPatterns, invalidatePatternCache } from '../patterns/patternL
 
 import { PRESET_DRUM_KITS, findMatchingKitId, inferCategoryFromChannel } from '../constants/drumKits';
 import { NOTE_CLASSES, transposeNote, transposeChordName } from '../core/music';
+import { deserializeSession } from '../core/session';
 
 export type PaletteMode = 'matrix' | 'fifths' | 'cadences';
 
@@ -216,22 +217,7 @@ interface SongStore {
   setGhostNotes: (ghostNotes: GhostNote[]) => void;
   transposeSong: (semitones: number) => void;
   clearSong: () => void;
-  importSong: (session: {
-    bpm: number;
-    key: NoteClass;
-    scale: ScaleType;
-    pattern: string;
-    timeSignature: '4/4' | '3/4' | '6/8';
-    chordBlocks: ChordBlock[];
-    melodyNotes: MelodyNote[];
-    isAutoKey?: boolean;
-    chordOctaveShift?: number;
-    channels?: Record<string, ChannelConfig>;
-    drumChannels?: import('../utils/typeDefinitions').DrumChannel[];
-    patternChain?: import('../utils/typeDefinitions').PatternChainItem[];
-    isPatternRepeatOn?: boolean;
-    activeDrumKitId?: string;
-  }) => void;
+  importSong: (session: unknown) => void;
 }
 
 export const DEFAULT_CHANNELS: Record<string, ChannelConfig> = {
@@ -405,7 +391,8 @@ export const useSongStore = create<SongStore>()(
       channels: { ...state.channels, [channelId]: newChannel },
       tracks: [...state.tracks, newTrack],
       channelOrder: [...currentOrder, channelId],
-      activeTrackId: trackId
+      activeTrackId: trackId,
+      melodyNotes: []
     };
   }),
 
@@ -414,6 +401,7 @@ export const useSongStore = create<SongStore>()(
     const track = state.tracks.find(t => t.id === id);
     const nextTracks = state.tracks.filter(t => t.id !== id);
     const nextActiveId = state.activeTrackId === id ? nextTracks[0].id : state.activeTrackId;
+    const nextActiveTrack = nextTracks.find(t => t.id === nextActiveId) || nextTracks[0];
     const nextChannels = { ...state.channels };
     if (track) {
       delete nextChannels[track.channelId];
@@ -423,6 +411,7 @@ export const useSongStore = create<SongStore>()(
     return {
       tracks: nextTracks,
       activeTrackId: nextActiveId,
+      melodyNotes: nextActiveTrack ? nextActiveTrack.notes : [],
       channels: nextChannels,
       channelOrder: nextChannelOrder
     };
@@ -1049,27 +1038,53 @@ export const useSongStore = create<SongStore>()(
     get().updateSuggestions();
   },
 
-  importSong: (session) => {
+  importSong: (sessionInput) => {
     toneEngine.stop();
-    const loadedChannels = session.channels ? { ...DEFAULT_CHANNELS, ...session.channels } : get().channels;
+    const { session } = deserializeSession(sessionInput);
+    const activeTrack = session.tracks.find(t => t.id === session.activeTrackId) || session.tracks[0];
+    const activeMelodyNotes = activeTrack ? activeTrack.notes : [];
+
     set({
-      bpm: session.bpm,
-      key: session.key,
-      scale: session.scale,
-      isAutoKey: session.isAutoKey ?? false,
+      bpm: session.transport.bpm,
+      key: session.transport.key,
+      scale: session.transport.scale,
+      isAutoKey: session.transport.isAutoKey,
       detectedKey: null,
-      pattern: session.pattern,
-      timeSignature: session.timeSignature,
-      chordBlocks: session.chordBlocks,
-      melodyNotes: session.melodyNotes,
+      timeSignature: session.transport.timeSignature,
+      pattern: session.harmony.defaultPattern,
+      chordBlocks: session.harmony.chordBlocks,
+      styleMarkers: session.harmony.styleMarkers,
+      chordOctaveShift: session.harmony.chordOctaveShift,
+      tracks: session.tracks,
+      activeTrackId: session.activeTrackId,
+      melodyNotes: activeMelodyNotes,
+      patternChain: session.drums.patternChain,
+      isPatternRepeatOn: session.drums.isPatternRepeatOn,
+      activeDrumKitId: session.drums.activeDrumKitId,
+      drumChannels: session.drums.drumChannels,
+      channels: session.mixer.channels,
+      channelOrder: session.mixer.channelOrder,
       selectedChordId: null,
       currentBeat: 0,
       isPlaying: false,
-      chordOctaveShift: session.chordOctaveShift ?? 0,
-      channels: loadedChannels,
-      ...(session.drumChannels && { drumChannels: session.drumChannels })
+      ...(session.ui?.isCrtEnabled !== undefined && { isCrtEnabled: session.ui.isCrtEnabled }),
+      ...(session.ui?.crtParams && { crtParams: { ...get().crtParams, ...session.ui.crtParams } }),
+      ...(session.ui?.isKeyboardMelodyEnabled !== undefined && { isKeyboardMelodyEnabled: session.ui.isKeyboardMelodyEnabled }),
+      ...(session.ui?.isKeyboardChromatic !== undefined && { isKeyboardChromatic: session.ui.isKeyboardChromatic }),
+      ...(session.ui?.keyboardCenterNote && { keyboardCenterNote: session.ui.keyboardCenterNote })
     });
-    toneEngine.syncChannels(loadedChannels);
+
+    try {
+      toneEngine.syncChannels(session.mixer.channels);
+      if (Array.isArray(session.drums.drumChannels)) {
+        session.drums.drumChannels.forEach(ch => {
+          if (ch && ch.id && typeof ch.pan === 'number') {
+            toneEngine.updateDrumChannelPan(ch.id, ch.pan);
+          }
+        });
+      }
+    } catch (_) {}
+
     get().updateSuggestions();
   }
 }),

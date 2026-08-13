@@ -2,6 +2,26 @@ export type NoteClass = 'C' | 'C#' | 'D' | 'D#' | 'E' | 'F' | 'F#' | 'G' | 'G#' 
 
 export type ScaleType = 'major' | 'minor' | 'dorian' | 'mixolydian' | 'lydian' | 'phrygian' | 'locrian';
 
+export type TimeSignature = '4/4' | '3/4' | '6/8';
+
+export interface CRTParams {
+  scanlineOpacity: number;
+  scanlineSize: number;
+  curvature: number;
+  aberration: number;
+  bloom: number;
+  svgBlur: number;
+  phosphorHue: number;
+  phosphorSat: number;
+  tintStrength: number;
+  noise: number;
+  flicker: number;
+  vignette: number;
+  brightness: number;
+  contrast: number;
+  saturation: number;
+}
+
 export interface ChordBlock {
   id: string;
   chord: string; // Ej: "C", "Dm", "G", "Am"
