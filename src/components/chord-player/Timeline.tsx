@@ -279,8 +279,8 @@ export const Timeline: React.FC = () => {
         className={`grid-tick ${isMeasure ? 'measure' : isBeat ? 'beat' : 'subdivision'}`}
         style={{ 
           left: `${beat * BEAT_WIDTH}px`,
-          borderLeftStyle: isMeasure ? 'solid' : isBeat ? 'solid' : 'dashed',
-          opacity: isMeasure ? 1 : isBeat ? 0.6 : 0.25
+          backgroundColor: isMeasure ? 'rgba(112, 96, 176, 0.25)' : isBeat ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 229, 255, 0.06)',
+          width: isMeasure ? '2px' : '1px'
         }}
       >
         {isMeasure ? <span className="measure-num">{Math.round(beat / beatsPerMeasure) + 1}</span> : null}
@@ -642,31 +642,55 @@ export const Timeline: React.FC = () => {
             const isDiad = isChordInScale(block.chord, key, scale);
             const romanDegree = isDiad ? getChordRomanDegree(block.chord, key, scale) : '';
             const role = getChordRole(block.chord, key, scale);
+            const inScale = isDiad;
 
             return (
               <div
                 key={block.id}
-                className={`chord-block ${isSelected ? 'selected' : ''}`}
+                className={`chord-block ${isSelected ? 'selected' : ''} ${isDraggingThis ? 'dragging' : ''}`}
                 style={{
+                  position: 'absolute',
                   left: `${left}px`,
-                  width: `${width}px`,
-                  borderBottomColor: `var(--role-${role})`,
+                  top: '24px',
+                  width: `${Math.max(16, width - 4)}px`,
+                  height: '52px',
+                  zIndex: isSelected || isDraggingThis ? 10 : 3,
                   cursor: isDraggingThis ? 'grabbing' : 'grab'
                 }}
                 onMouseDown={(e) => handleMouseDown(e, block)}
                 onContextMenu={(e) => handleContextMenu(e, block)}
               >
-                <span className="chord-name">
-                  {block.chord}
-                  {romanDegree && (
-                    <span 
-                      className="roman-numeral-sub"
-                      style={{ color: `var(--role-${role})` }}
-                    >
-                      {romanDegree}
-                    </span>
-                  )}
-                </span>
+                <div className="block-content-only">
+                  <span className="block-name" style={{ fontSize: '0.95rem', fontWeight: 700 }}>
+                    {block.chord}
+                    {!inScale && (
+                      <span 
+                        className="out-of-scale-warning" 
+                        title="Este acorde contiene notas fuera de la escala actual"
+                        style={{ marginLeft: '4px', cursor: 'help' }}
+                      >
+                        ⚠️
+                      </span>
+                    )}
+                  </span>
+                  <span className="block-duration-label" style={{ fontSize: '0.65rem', opacity: 0.85 }}>
+                    {romanDegree ? romanDegree : `${durationBeats} ${durationBeats === 1 ? 'beat' : 'beats'}`}
+                  </span>
+                </div>
+
+                {/* Barrita de color del rol armónico en la base */}
+                <div 
+                  style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: '3px',
+                    backgroundColor: `var(--role-${role})`,
+                    opacity: 0.95
+                  }}
+                />
+                
                 <div 
                   className="resize-handle right"
                   title="Arrastra para redimensionar duración"
