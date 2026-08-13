@@ -127,6 +127,26 @@ export const Timeline: React.FC = () => {
   const [scrollLeft, setScrollLeft] = useState(0);
   const [popoverChordId, setPopoverChordId] = useState<string | null>(null);
 
+  // Listener nativo para Zoom con Alt + Rueda del ratón sobre la línea de tiempo
+  React.useEffect(() => {
+    const viewportEl = viewportRef.current;
+    if (!viewportEl) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.altKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        const delta = e.deltaY > 0 ? -0.12 : 0.12;
+        setZoomLevel(z => Math.max(0.4, Math.min(3.0, parseFloat((z + delta).toFixed(2)))));
+      }
+    };
+
+    viewportEl.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      viewportEl.removeEventListener('wheel', handleWheel);
+    };
+  }, []);
+
   // Listener global para deseleccionar acorde
   React.useEffect(() => {
     const handleGlobalClick = (e: MouseEvent) => {
@@ -644,6 +664,11 @@ export const Timeline: React.FC = () => {
             const role = getChordRole(block.chord, key, scale);
             const inScale = isDiad;
 
+            const blockWidth = Math.max(12, width - 4);
+            const isCompact = blockWidth < 50;
+            const isMicro = blockWidth < 28;
+            const fontSize = isMicro ? '0.65rem' : isCompact ? '0.78rem' : '0.95rem';
+
             return (
               <div
                 key={block.id}
@@ -652,30 +677,67 @@ export const Timeline: React.FC = () => {
                   position: 'absolute',
                   left: `${left}px`,
                   top: '24px',
-                  width: `${Math.max(16, width - 4)}px`,
+                  width: `${blockWidth}px`,
                   height: '52px',
                   zIndex: isSelected || isDraggingThis ? 10 : 3,
-                  cursor: isDraggingThis ? 'grabbing' : 'grab'
+                  cursor: isDraggingThis ? 'grabbing' : 'grab',
+                  padding: isMicro ? '0.2rem 2px' : isCompact ? '0.25rem 4px' : '0.4rem 0.6rem',
+                  overflow: 'hidden'
                 }}
                 onMouseDown={(e) => handleMouseDown(e, block)}
                 onContextMenu={(e) => handleContextMenu(e, block)}
+                title={`${block.chord} (${durationBeats} beats)${romanDegree ? ` · Grado ${romanDegree}` : ''}`}
               >
-                <div className="block-content-only">
-                  <span className="block-name" style={{ fontSize: '0.95rem', fontWeight: 700 }}>
+                <div 
+                  className="block-content-only"
+                  style={{
+                    width: '100%',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center',
+                    alignItems: isMicro ? 'center' : 'flex-start'
+                  }}
+                >
+                  <span 
+                    className="block-name" 
+                    style={{ 
+                      fontSize, 
+                      fontWeight: 700,
+                      width: '100%',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      textAlign: isMicro ? 'center' : 'left'
+                    }}
+                  >
                     {block.chord}
-                    {!inScale && (
+                    {!inScale && !isMicro && (
                       <span 
                         className="out-of-scale-warning" 
                         title="Este acorde contiene notas fuera de la escala actual"
-                        style={{ marginLeft: '4px', cursor: 'help' }}
+                        style={{ marginLeft: '2px', cursor: 'help', fontSize: '0.6rem' }}
                       >
                         ⚠️
                       </span>
                     )}
                   </span>
-                  <span className="block-duration-label" style={{ fontSize: '0.65rem', opacity: 0.85 }}>
-                    {romanDegree ? romanDegree : `${durationBeats} ${durationBeats === 1 ? 'beat' : 'beats'}`}
-                  </span>
+                  
+                  {!isCompact && (
+                    <span 
+                      className="block-duration-label" 
+                      style={{ 
+                        fontSize: '0.62rem', 
+                        opacity: 0.85,
+                        width: '100%',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {romanDegree ? romanDegree : `${durationBeats} ${durationBeats === 1 ? 'beat' : 'beats'}`}
+                    </span>
+                  )}
                 </div>
 
                 {/* Barrita de color del rol armónico en la base */}
