@@ -6,3 +6,4 @@
 export * from './audioTypes';
 export * from './timelineScheduler';
 export * from './offlineRenderer';
+export * from './pianoSampler';

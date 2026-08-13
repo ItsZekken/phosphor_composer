@@ -101,7 +101,7 @@ export const Timeline: React.FC = () => {
   const TOTAL_BEATS = Math.ceil(rawBeatsNeeded / beatsPerMeasure) * beatsPerMeasure;
 
   const viewportRef = useRef<HTMLDivElement>(null);
-  const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const clickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [popoverChordId, setPopoverChordId] = useState<string | null>(null);
 

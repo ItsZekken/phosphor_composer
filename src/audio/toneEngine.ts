@@ -1,5 +1,4 @@
 import * as Tone from 'tone';
-import { Piano } from '@tonejs/piano';
 import { useSongStore } from '../store/songStore';
 import {
   getChordNotes,
@@ -11,7 +10,7 @@ import {
 } from '../core/music';
 import type { PatternDef } from '../patterns/patternTypes';
 import { flattenPatternChain } from '../utils/typeDefinitions';
-import { renderSessionToWav } from '../core/audio';
+import { renderSessionToWav, PianoSampler } from '../core/audio';
 import { serializeSession } from '../core/session';
 
 const shiftNoteOctave = shiftOctave;
@@ -76,8 +75,8 @@ class ToneEngine {
   private chordSynth: Tone.PolySynth;
   private melodySynth: Tone.PolySynth;
   private metroSynth: Tone.Synth; // Synth dedicado para el metrónomo
-  private chordsPiano: Piano | null = null;
-  private melodyPiano: Piano | null = null;
+  private chordsPiano: PianoSampler | null = null;
+  private melodyPiano: PianoSampler | null = null;
   private synthFilter: Tone.Filter;
   private isInitialized = false;
 
@@ -553,7 +552,7 @@ class ToneEngine {
   public async setInstrument(type: 'synth' | 'piano') {
     if (!this.isInitialized) await this.init();
 
-    if (type === 'piano' && (!this.chordsPiano || !this.melodyPiano)) {
+    if (type === 'piano') {
       useSongStore.getState().setIsAudioLoading(true);
       
       try {
@@ -561,28 +560,14 @@ class ToneEngine {
         const melodyNode = this.getChannelNode('melody');
 
         if (!this.chordsPiano) {
-          this.chordsPiano = new Piano({ velocities: 5, url: '/piano/' }).connect(chordsNode.volumeNode);
-          if ((this.chordsPiano as any)._keybed) (this.chordsPiano as any)._keybed._internalLoad = () => Promise.resolve();
-          if ((this.chordsPiano as any)._harmonics) (this.chordsPiano as any)._harmonics._internalLoad = () => Promise.resolve();
+          this.chordsPiano = new PianoSampler(chordsNode.volumeNode);
         }
 
         if (!this.melodyPiano) {
-          this.melodyPiano = new Piano({ velocities: 5, url: '/piano/' }).connect(melodyNode.volumeNode);
-          if ((this.melodyPiano as any)._keybed) (this.melodyPiano as any)._keybed._internalLoad = () => Promise.resolve();
-          if ((this.melodyPiano as any)._harmonics) (this.melodyPiano as any)._harmonics._internalLoad = () => Promise.resolve();
+          this.melodyPiano = new PianoSampler(melodyNode.volumeNode);
         }
 
-        const timeoutPromise = new Promise((resolve) => {
-          setTimeout(() => {
-            console.warn('Timeout de carga de piano superado, forzando inicio...');
-            resolve(true);
-          }, 12000);
-        });
-
-        await Promise.race([
-          Promise.all([this.chordsPiano.load(), this.melodyPiano.load()]),
-          timeoutPromise
-        ]);
+        await Promise.all([this.chordsPiano.load(), this.melodyPiano.load()]);
       } catch (e) {
         console.error('Error inicializando el piano:', e);
       } finally {

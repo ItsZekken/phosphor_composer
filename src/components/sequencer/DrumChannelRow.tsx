@@ -46,7 +46,7 @@ export const DrumChannelRow: React.FC<Props> = ({
   const [isInteractiveHovered, setIsInteractiveHovered] = useState(false);
 
   // Preview debounce on knob tweak
-  const previewTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const triggerDebouncedPreview = () => {
     if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
     previewTimerRef.current = setTimeout(() => {

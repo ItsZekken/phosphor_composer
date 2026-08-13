@@ -22,8 +22,12 @@ export const GlobalLoader: React.FC = () => {
       setLoadingStep('Activando Web Audio API...');
       await toneEngine.init();
 
-      setLoadingStep('Cargando muestras de piano de alta calidad...');
-      await toneEngine.setInstrument(instrumentType);
+      if (instrumentType === 'piano') {
+        setLoadingStep('Cargando muestras de piano optimizadas...');
+        await toneEngine.setInstrument('piano');
+      } else {
+        setLoadingStep('Inicializando sintetizadores virtuales...');
+      }
 
       setLoadingStep('Inicializando modelo IA MelodyRNN (Magenta)...');
       await melodyPredictor.init();
