@@ -9,33 +9,11 @@ import type { PatternDef } from '../patterns/patternTypes';
 import { loadCustomPatterns, invalidatePatternCache } from '../patterns/patternLoader';
 
 import { PRESET_DRUM_KITS, findMatchingKitId, inferCategoryFromChannel } from '../constants/drumKits';
-
-const NOTE_CLASSES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+import { NOTE_CLASSES, transposeNote, transposeChordName } from '../core/music';
 
 export type PaletteMode = 'matrix' | 'fifths' | 'cadences';
 
-function transposeNoteName(noteName: string, semitones: number): string {
-  const match = noteName.match(/^([A-G]#?|b?)([0-9])$/);
-  if (!match) return noteName;
-  const pitchClass = match[1];
-  const octave = parseInt(match[2]);
-  const currentMidi = 12 * (octave + 1) + NOTE_CLASSES.indexOf(pitchClass);
-  const newMidi = currentMidi + semitones;
-  const newOctave = Math.floor(newMidi / 12) - 1;
-  const newPitchClass = NOTE_CLASSES[((newMidi % 12) + 12) % 12];
-  return `${newPitchClass}${newOctave}`;
-}
-
-function transposeChordName(chordName: string, semitones: number): string {
-  const match = chordName.match(/^([A-G]#?|b?)(m|maj7|min7|7|maj|min|dim|aug|m7b5|sus4|sus2)?$/);
-  if (!match) return chordName;
-  const root = match[1];
-  const type = match[2] || '';
-  const rootVal = NOTE_CLASSES.indexOf(root);
-  if (rootVal === -1) return chordName;
-  const newRootVal = (((rootVal + semitones) % 12) + 12) % 12;
-  return `${NOTE_CLASSES[newRootVal]}${type}`;
-}
+const transposeNoteName = transposeNote;
 
 interface SongStore {
   bpm: number;

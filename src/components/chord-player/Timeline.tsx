@@ -5,11 +5,10 @@ import type { ChordBlock } from '../../utils/typeDefinitions';
 import { isChordInScale, getChordRomanDegree } from '../../engine/scaleDefinitions';
 import { getChordRole } from './ChordPalette';
 import { ChordPropertiesPanel } from './ChordPropertiesPanel';
-import { ConfirmModal } from '../ui/ConfirmModal';
 import { CustomSelect } from '../ui/CustomSelect';
 import { ChannelInstrumentControl } from '../ui/ChannelInstrumentControl';
 import { ContextMenuContainer } from '../ui/ContextMenuContainer';
-import { Plus, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Trash2, GripVertical, Settings, Music } from 'lucide-react';
+import { Plus, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Trash2 } from 'lucide-react';
 import { toneEngine } from '../../audio/toneEngine';
 import { ChannelQuickControl } from '../ui/ChannelQuickControl';
 
@@ -52,9 +51,7 @@ export const Timeline: React.FC = () => {
     removeStyleMarker,
     updateStyleMarker,
     customPatterns,
-    channels,
-    setChannelInstrument,
-    openSynthConfigForChannel
+    setDraggingStyle
   } = useSongStore(useShallow(state => ({
     chordBlocks: state.chordBlocks,
     melodyNotes: state.melodyNotes,
@@ -73,9 +70,6 @@ export const Timeline: React.FC = () => {
     removeStyleMarker: state.removeStyleMarker,
     updateStyleMarker: state.updateStyleMarker,
     customPatterns: state.customPatterns,
-    channels: state.channels,
-    setChannelInstrument: state.setChannelInstrument,
-    openSynthConfigForChannel: state.openSynthConfigForChannel,
     setDraggingStyle: state.setDraggingStyle
   })));
 
@@ -348,7 +342,7 @@ export const Timeline: React.FC = () => {
             if (stylePattern) {
               const existing = styleMarkers.find(m => m.beat === dropBeat);
               if (!existing) {
-                addStyleMarker(dropBeat, stylePattern);
+                addStyleMarker({ id: Math.random().toString(36).substr(2, 9), beat: dropBeat, pattern: stylePattern });
               } else {
                 updateStyleMarker(existing.id, { pattern: stylePattern });
               }
@@ -369,7 +363,7 @@ export const Timeline: React.FC = () => {
             } else if (draggingStyle) {
               const existing = styleMarkers.find(m => m.beat === dropBeat);
               if (!existing) {
-                addStyleMarker(dropBeat, draggingStyle);
+                addStyleMarker({ id: Math.random().toString(36).substr(2, 9), beat: dropBeat, pattern: draggingStyle });
               } else {
                 updateStyleMarker(existing.id, { pattern: draggingStyle });
               }
@@ -434,7 +428,7 @@ export const Timeline: React.FC = () => {
                 const dropBeat = Math.max(0, Math.round(dropX / BEAT_WIDTH));
                 const existing = styleMarkers.find(m => m.beat === dropBeat);
                 if (!existing) {
-                  addStyleMarker(dropBeat, stylePattern);
+                  addStyleMarker({ id: Math.random().toString(36).substr(2, 9), beat: dropBeat, pattern: stylePattern });
                 } else {
                   updateStyleMarker(existing.id, { pattern: stylePattern });
                 }
@@ -449,7 +443,7 @@ export const Timeline: React.FC = () => {
                 const dropBeat = Math.max(0, Math.round(dropX / BEAT_WIDTH));
                 const existing = styleMarkers.find(m => m.beat === dropBeat);
                 if (!existing) {
-                  addStyleMarker(dropBeat, draggingStyle);
+                  addStyleMarker({ id: Math.random().toString(36).substr(2, 9), beat: dropBeat, pattern: draggingStyle });
                 } else {
                   updateStyleMarker(existing.id, { pattern: draggingStyle });
                 }

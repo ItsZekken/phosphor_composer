@@ -6,14 +6,13 @@ import { NOTE_CLASSES } from '../../engine/scaleDefinitions';
 import { melodyPredictor } from '../../magenta/melodyPredictor';
 import { autoCorrelate, hzToMidi } from '../../utils/pitchDetector';
 import type { MelodyNote } from '../../utils/typeDefinitions';
-import { Mic, Trash, Sparkles, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Copy, Trash2, Search, ChevronRight, Plus, Settings, Music } from 'lucide-react';
+import { Mic, Trash, Sparkles, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Copy, Trash2, Search, ChevronRight, Plus } from 'lucide-react';
 import { ContextMenuContainer } from '../ui/ContextMenuContainer';
 import { ScaleFinderSection } from './ScaleFinderSection';
 import { ChannelQuickControl } from '../ui/ChannelQuickControl';
 import { useGridZoom } from '../../hooks/useGridZoom';
 import { SharedTimelineRuler } from '../shared/SharedTimelineRuler';
 import { ConfirmModal } from '../ui/ConfirmModal';
-import { CustomSelect } from '../ui/CustomSelect';
 import { ChannelInstrumentControl } from '../ui/ChannelInstrumentControl';
 
 const MIN_MIDI = 24; // C1
@@ -348,11 +347,8 @@ export const PianoRollView = () => {
     renamePianoRollTrack,
     setActiveTrackId,
     updateTrackViewport,
-    openSynthConfigForChannel,
     clipboardNotes,
-    setClipboardNotes,
-    channels,
-    setChannelInstrument
+    setClipboardNotes
   } = useSongStore(useShallow(state => ({
     melodyNotes: state.melodyNotes,
     addMelodyNote: state.addMelodyNote,
@@ -379,11 +375,8 @@ export const PianoRollView = () => {
     renamePianoRollTrack: state.renamePianoRollTrack,
     setActiveTrackId: state.setActiveTrackId,
     updateTrackViewport: state.updateTrackViewport,
-    openSynthConfigForChannel: state.openSynthConfigForChannel,
     clipboardNotes: state.clipboardNotes,
-    setClipboardNotes: state.setClipboardNotes,
-    channels: state.channels,
-    setChannelInstrument: state.setChannelInstrument
+    setClipboardNotes: state.setClipboardNotes
   })));
 
   const containerRef = useRef<HTMLDivElement>(null);

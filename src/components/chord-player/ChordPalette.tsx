@@ -285,8 +285,6 @@ const TransposedMatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggesti
 
 // ------- Main Component -------
 
-import { Settings } from 'lucide-react';
-
 export const ChordPalette: React.FC = () => {
   const {
     key,
@@ -299,10 +297,7 @@ export const ChordPalette: React.FC = () => {
     setDraggingChord,
     isAutoSuggestions,
     detectedKey,
-    isAutoKey,
-    pattern,
-    setPattern,
-    openSynthConfigForChannel
+    isAutoKey
   } = useSongStore(useShallow(state => ({
     key: state.key,
     scale: state.scale,
@@ -314,10 +309,7 @@ export const ChordPalette: React.FC = () => {
     setDraggingChord: state.setDraggingChord,
     isAutoSuggestions: state.isAutoSuggestions,
     detectedKey: state.detectedKey,
-    isAutoKey: state.isAutoKey,
-    pattern: state.pattern,
-    setPattern: state.setPattern,
-    openSynthConfigForChannel: state.openSynthConfigForChannel
+    isAutoKey: state.isAutoKey
   })));
 
   const [isMouseOutside, setIsMouseOutside] = React.useState(false);

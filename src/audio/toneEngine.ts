@@ -1,10 +1,19 @@
 import * as Tone from 'tone';
 import { Piano } from '@tonejs/piano';
 import { useSongStore } from '../store/songStore';
-import { getChordNotes, invertChord, applyVoicing, NOTE_CLASSES, SCALE_INTERVALS } from '../engine/scaleDefinitions';
+import {
+  getChordNotes,
+  NOTE_CLASSES,
+  SCALE_INTERVALS,
+  shiftOctave,
+  getBlockNotes,
+  resolvePatternNoteToChord
+} from '../core/music';
 import type { PatternDef } from '../patterns/patternTypes';
 import { flattenPatternChain } from '../utils/typeDefinitions';
 import { audioBufferToWav } from '../utils/wavEncoder';
+
+const shiftNoteOctave = shiftOctave;
 
 // Helper debounce simple para evitar llamadas excesivas a syncTimeline
 function debounce<T extends (...args: unknown[]) => void>(fn: T, delay: number): T {
@@ -33,16 +42,6 @@ if (Tone.ToneAudioBuffer && typeof Tone.ToneAudioBuffer.load === 'function') {
     }
     return originalLoad.call(this, url);
   };
-}
-
-function shiftNoteOctave(noteName: string, octaves: number): string {
-  if (octaves === 0) return noteName;
-  const match = noteName.match(/^([A-G]#?|b?)([0-9])$/);
-  if (!match) return noteName;
-  const pitchClass = match[1];
-  const octave = parseInt(match[2]);
-  const newOctave = Math.max(0, Math.min(8, octave + octaves));
-  return `${pitchClass}${newOctave}`;
 }
 
 // Mapeos para entrada de teclado (melodía)
@@ -74,7 +73,7 @@ const CHROMATIC_KEY_MAP: Record<string, number> = {
 
 class ToneEngine {
   private chordSynth: Tone.PolySynth;
-  private melodySynth: Tone.Synth;
+  private melodySynth: Tone.PolySynth;
   private metroSynth: Tone.Synth; // Synth dedicado para el metrónomo
   private chordsPiano: Piano | null = null;
   private melodyPiano: Piano | null = null;
@@ -112,6 +111,7 @@ class ToneEngine {
   // --- Caché de estado del store para el hot path de audio (evita getState() en keyDown/keyUp) ---
   private cachedIsKeyboardMelodyEnabled = true;
   private cachedIsKeyboardChromatic = false;
+  private cachedKeyboardCenterNote = 'C4';
   private cachedKey = 'C';
   private cachedScale = 'major';
   private cachedBpm = 120;
@@ -251,7 +251,7 @@ class ToneEngine {
     this.chordSynth.connect(this.synthFilter);
     this.chordSynth.volume.value = -12;
 
-    this.melodySynth = new Tone.Synth({
+    this.melodySynth = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: 'sine' },
       envelope: {
         attack: 0.05,
@@ -601,7 +601,7 @@ class ToneEngine {
       this.chordSynth.releaseAll();
     } catch (_) {}
     try {
-      this.melodySynth.triggerRelease();
+      this.melodySynth.releaseAll();
     } catch (_) {}
     if (this.chordsPiano) {
       try {
@@ -1036,8 +1036,9 @@ class ToneEngine {
       } else {
         const synth = this.getChannelSynth(targetChannelId);
         if (this.activePressedNotes.size === 0) {
-          synth.triggerRelease(Tone.now());
+          synth.releaseAll();
         } else {
+          synth.triggerRelease(noteName, Tone.now());
           const nextNote = this.activePressedNotesList[this.activePressedNotesList.length - 1];
           synth.triggerAttack(nextNote, Tone.now());
         }
@@ -1161,18 +1162,6 @@ class ToneEngine {
     const val = rootVal + intervals[scaleIndex];
     const noteClass = NOTE_CLASSES[val % 12];
     const calculatedOctave = baseOctave + octaveOffset + Math.floor(val / 12);
-    
-    return `${noteClass}${calculatedOctave}`;
-  }
-
-  private getChromaticNoteName(key: string, semitones: number): string {
-    const rootVal = NOTE_CLASSES.indexOf(key as any);
-    const val = rootVal + semitones;
-    
-    const baseOctave = 4;
-    
-    const noteClass = NOTE_CLASSES[val % 12];
-    const calculatedOctave = baseOctave + Math.floor(val / 12);
     
     return `${noteClass}${calculatedOctave}`;
   }
@@ -1605,82 +1594,13 @@ class ToneEngine {
     }
   }
 
-  /**
-   * Resuelve una nota de patrón MIDI (normalizada contra C major) a la armonía del acorde activo.
-   * Utiliza un mapeo de grados de la triada/séptima de C major a la triada/séptima del acorde activo,
-   * preservando las alteraciones y notas de paso de forma musical.
-   */
   private resolvePatternNoteToChord(
     pn: { semitoneFromRoot: number; octaveOffset: number; voice: string },
     chordName: string,
     refOctave: number
   ): string {
-    const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-
-    let targetRefOctave = refOctave;
-    if (pn.voice === 'chord') {
-      const chordOctaveShift = useSongStore.getState().chordOctaveShift || 0;
-      targetRefOctave += chordOctaveShift;
-    }
-
-    // 1. Obtener las notas básicas del acorde activo en la octava de referencia
-    const activeChordNotes = getChordNotes(chordName, targetRefOctave);
-    if (activeChordNotes.length === 0) {
-      // Fallback simple si falla
-      const rootMatch = chordName.split('/')[0].match(/^([A-G]#?)/);
-      const rootName = rootMatch ? rootMatch[1] : 'C';
-      const rootPC = NOTE_NAMES.indexOf(rootName);
-      const targetPC = (rootPC + pn.semitoneFromRoot) % 12;
-      const targetOctave = targetRefOctave + pn.octaveOffset + Math.floor((rootPC + pn.semitoneFromRoot) / 12);
-      return `${NOTE_NAMES[targetPC]}${targetOctave}`;
-    }
-
-    // 3. Crear el array de notas del acorde activo en formato de semitonos relativos a su tónica
-    const rootNoteName = activeChordNotes[0].replace(/[0-9]/g, '');
-    const rootPC = NOTE_NAMES.indexOf(rootNoteName);
-
-    const activeSemitones = activeChordNotes.map(n => {
-      const pc = NOTE_NAMES.indexOf(n.replace(/[0-9]/g, ''));
-      const oct = parseInt(n.replace(/[^0-9]/g, ''));
-      const relativeMidi = (pc + 12 * oct) - (rootPC + 12 * targetRefOctave);
-      return relativeMidi;
-    });
-
-    // Asegurar que tenemos al menos 4 elementos en activeSemitones añadiendo la octava (root + 12)
-    if (activeSemitones.length < 4) {
-      activeSemitones.push(activeSemitones[0] + 12);
-    }
-
-    // 4. Mapear semitonos en C major a grados de la triada/séptima
-    const targetSemitone = pn.semitoneFromRoot;
-    let targetBaseIdx = 0;
-    let refBaseSemitone = 0;
-
-    if (targetSemitone <= 2) {
-      targetBaseIdx = 0; // Tónica
-      refBaseSemitone = 0;
-    } else if (targetSemitone <= 5) {
-      targetBaseIdx = 1; // Tercera (o cuarta en sus4)
-      refBaseSemitone = 4;
-    } else if (targetSemitone <= 8) {
-      targetBaseIdx = 2; // Quinta
-      refBaseSemitone = 7;
-    } else {
-      targetBaseIdx = 3; // Séptima (o tensión octava)
-      refBaseSemitone = 11;
-    }
-
-    // 5. Aplicar la diferencia (offset) a la nota del acorde activo en ese grado
-    const offset = targetSemitone - refBaseSemitone;
-    const activeBaseSemitone = activeSemitones[targetBaseIdx];
-    const finalRelativeSemitone = activeBaseSemitone + offset;
-
-    // 6. Convertir de nuevo a nombre de nota y octava absoluta
-    const finalMidi = (rootPC + 12 * targetRefOctave) + finalRelativeSemitone + (12 * pn.octaveOffset);
-    const finalPC = ((finalMidi % 12) + 12) % 12;
-    const finalOctave = Math.floor(finalMidi / 12) - 1;
-
-    return `${NOTE_NAMES[finalPC]}${finalOctave}`;
+    const chordOctaveShift = useSongStore.getState().chordOctaveShift || 0;
+    return resolvePatternNoteToChord(pn, chordName, refOctave, chordOctaveShift);
   }
 
   /**
@@ -1732,40 +1652,14 @@ class ToneEngine {
   }
 
   private getBlockNotes(block: any, chordOctaveShift = 0): string[] {
-    if (block.type === 'silence' || block.type === 'break') {
-      return [];
-    }
-
-    let baseNotes = getChordNotes(block.chord, 4);
-    if (baseNotes.length === 0) return [];
-
-    if (block.voicing) {
-      baseNotes = applyVoicing(baseNotes, block.voicing);
-    }
-
-    if (block.inversion) {
-      baseNotes = invertChord(baseNotes, block.inversion);
-    }
-
-    if (chordOctaveShift !== 0) {
-      baseNotes = baseNotes.map(note => shiftNoteOctave(note, chordOctaveShift));
-    }
-
-    // Tónica del acorde como bajo por defecto
-    const rootNoteMatch = block.chord.match(/^([A-G]#?)/);
-    const defaultBass = rootNoteMatch ? `${rootNoteMatch[1]}2` : baseNotes[0].replace(/[0-9]/g, '2');
-    const bassNote = block.bassNote ? `${block.bassNote}2` : defaultBass;
-
-    if (block.type === 'bass-only') {
-      return [bassNote];
-    }
-
-    if (block.type === 'chord-only') {
-      return baseNotes;
-    }
-
-    // Por defecto 'play': Bajo + Acorde
-    return [bassNote, ...baseNotes];
+    return getBlockNotes({
+      chord: block.chord,
+      voicing: block.voicing,
+      inversion: block.inversion,
+      octaveShift: chordOctaveShift,
+      type: block.type,
+      bassNote: block.bassNote
+    });
   }
 
   private syncTimeline() {
@@ -1821,7 +1715,7 @@ class ToneEngine {
 
     if (!usePiano && this.activeMelodyNotesSet.size === 0) {
       try {
-        this.melodySynth.triggerRelease(now);
+        this.melodySynth.releaseAll();
       } catch (_) {}
     }
     useSongStore.getState().setActiveMelodyNotes(Array.from(this.activeMelodyNotesSet));
@@ -1966,7 +1860,7 @@ class ToneEngine {
    * Registra y gestiona una nota activa para actualizar la UI en tiempo real
    * mediante un setTimeout preciso sincronizado con la reproducción de Tone.js.
    */
-  private trackNote(note: string, durationSeconds: number, startTime?: number, type: 'harmony' | 'melody' = 'harmony') {
+  private trackNote(note: string, durationSeconds: number, startTime?: number, type: 'harmony' | 'melody' | string = 'harmony') {
     const now = Tone.now();
     const delayMs = startTime !== undefined ? Math.max(0, (startTime - now) * 1000) : 0;
     const durationMs = durationSeconds * 1000;
@@ -1978,7 +1872,7 @@ class ToneEngine {
         return;
       }
 
-      if (type === 'melody') {
+      if (type !== 'harmony') {
         // --- Melodía: usa el set y timers separados ---
         const existingTimer = this.melodyNoteActiveTimers.get(note);
         if (existingTimer) clearTimeout(existingTimer);
