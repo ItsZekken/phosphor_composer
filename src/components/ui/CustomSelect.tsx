@@ -65,6 +65,15 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
+  useEffect(() => {
+    if (isOpen && menuRef.current) {
+      const activeEl = menuRef.current.querySelector('.style-item-row.active') as HTMLElement;
+      if (activeEl) {
+        activeEl.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [isOpen]);
+
   useLayoutEffect(() => {
     if (activeGroup && subMenuRef.current && menuRef.current) {
       const menuRect = menuRef.current.getBoundingClientRect();
