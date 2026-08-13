@@ -11,7 +11,8 @@ import {
 } from '../core/music';
 import type { PatternDef } from '../patterns/patternTypes';
 import { flattenPatternChain } from '../utils/typeDefinitions';
-import { audioBufferToWav } from '../utils/wavEncoder';
+import { renderSessionToWav } from '../core/audio';
+import { serializeSession } from '../core/session';
 
 const shiftNoteOctave = shiftOctave;
 
@@ -1941,219 +1942,44 @@ class ToneEngine {
    */
   public exportToWav(
     onProgress: (elapsed: number, total: number) => void,
-    onComplete: (blob: Blob) => void,
+    onComplete: (wavBlob: Blob) => void,
     onError: (err: Error) => void
   ): () => void {
-
-    // --- Validación rápida (síncrona) ---
     const state = useSongStore.getState();
-    this.updateCachedMaxBeat(state);
-    const maxBeat = this.cachedMaxBeat;
-
-    if (maxBeat <= 0) {
-      setTimeout(() => onError(new Error('La canción está vacía.')), 0);
-      return () => {};
-    }
-
-    // --- Guardar estado previo ---
-    const prevIsPlaying   = state.isPlaying;
-    const prevIsLooping   = state.isLooping;
-    const prevMetroActive = state.isMetronomeActive;
-    const prevBeat        = state.currentBeat;
-
-    if (prevIsPlaying) {
-      Tone.Transport.pause();
-      this.silence();
-      state.setPlaying(false);
-    }
-
     state.setIsExporting(true);
     state.setExportProgress(0);
 
-    const totalSeconds  = maxBeat * (60 / state.bpm);
-    const recordSeconds = totalSeconds + 1.0; // +1s cola para releases
+    let cancelled = false;
 
-    let cancelled    = false;
-    let cleanupDone  = false;
-    let progressInterval: ReturnType<typeof setInterval> | null = null;
-    let stopTimeout:      ReturnType<typeof setTimeout>  | null = null;
-    let prevMetroVolume = this.metroSynth.volume.value;
-    let mediaRecorderRef: MediaRecorder | null = null;
-    // Referencia a la función que desconecta los panners del stream de grabación.
-    // Se asigna dentro del IIFE cuando el nodo está disponible.
-    let disconnectFromStream: (() => void) | null = null;
-
-    // cleanup idempotente: se puede llamar desde cancel() y desde onstop sin problema
-    const cleanup = () => {
-      if (cleanupDone) return;
-      cleanupDone = true;
-      if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
-      if (stopTimeout)      { clearTimeout(stopTimeout);       stopTimeout = null; }
-      if (disconnectFromStream) { disconnectFromStream(); disconnectFromStream = null; }
-      this.metroSynth.volume.value = prevMetroVolume;
-      useSongStore.getState().setLooping(prevIsLooping);
-      useSongStore.getState().setMetronomeActive(prevMetroActive);
-      useSongStore.getState().setCurrentBeat(prevBeat);
-      Tone.Transport.loop = prevIsLooping;
-      useSongStore.getState().setIsExporting(false);
-      useSongStore.getState().setExportProgress(0);
-    };
-
-    // cancel() disponible SINCRÓNICAMENTE desde la llamada original
-    const cancel = () => {
-      if (cleanupDone) return;
-      cancelled = true;
-      Tone.Transport.stop();
-      this.silence();
-      useSongStore.getState().setPlaying(false);
-      if (mediaRecorderRef && mediaRecorderRef.state !== 'inactive') {
-        try { mediaRecorderRef.stop(); } catch (_) {}
-      }
-      cleanup();
-    };
-
-    // --- Lógica async en IIFE con try-catch total ---
     (async () => {
       try {
-        if (!this.isInitialized) await this.init();
-
-        const audioCtx = Tone.getContext().rawContext as AudioContext;
-        const mediaStreamDest = audioCtx.createMediaStreamDestination();
-
-        // Configurar disconnectFromStream para que cancel() la pueda llamar
-        disconnectFromStream = () => {
-          this.channelNodes.forEach(({ pannerNode }) => {
-            try {
-              // pannerNode.output ES el StereoPannerNode nativo en Tone.js v15
-              const nativePanner = (pannerNode as unknown as { output: AudioNode }).output;
-              nativePanner.disconnect(mediaStreamDest);
-            } catch (_) {}
-          });
-        };
-
-        // 1) Parar drum players (limpiar audio residual)
-        this.drumPlayers.forEach(({ player }) => {
-          try { player.stop(); } catch (_) {}
-        });
-
-        // 2) Silenciar metro y deshabilitar loop DIRECTAMENTE en Tone.js
-        //    (sin pasar por el store para no disparar syncTimelineDebounced)
-        prevMetroVolume = this.metroSynth.volume.value;
-        Tone.Transport.loop = false;
-        this.metroSynth.volume.value = -Infinity;
-
-        // 3) Actualizar store solo para la UI
-        useSongStore.getState().setLooping(false);
-        useSongStore.getState().setMetronomeActive(false);
-
-        // 4) Sincronizar timeline una sola vez de forma directa
-        this.syncTimeline();
-
-        // 5) Esperar a que el debounce de 50ms se ejecute y termine
-        await new Promise<void>(resolve => setTimeout(resolve, 200));
-        if (cancelled) { cleanup(); return; }
-
-        // 6) TAP NATIVO: conectar cada panner al stream de grabación.
-        //    El fan-out Web Audio API permite que el audio fluya TANTO a los altavoces
-        //    (conexión existente) COMO al MediaStreamDestinationNode (grabación).
-        this.channelNodes.forEach(({ pannerNode }) => {
-          try {
-            const nativePanner = (pannerNode as unknown as { output: AudioNode }).output;
-            nativePanner.connect(mediaStreamDest);
-          } catch (e) {
-            console.warn('[Export] No se pudo conectar canal al stream de grabación:', e);
+        const session = serializeSession(state);
+        const wavBlob = await renderSessionToWav(session, state.customPatterns || [], {
+          onProgress: (elapsed, total) => {
+            if (cancelled) return;
+            const progress = total > 0 ? Math.min(1, elapsed / total) : 1;
+            onProgress(elapsed, total);
+            useSongStore.getState().setExportProgress(progress);
           }
         });
 
-        // 7) Configurar MediaRecorder
-        const chunks: BlobPart[] = [];
-        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : MediaRecorder.isTypeSupported('audio/webm')
-            ? 'audio/webm'
-            : '';
-
-        const recorder = new MediaRecorder(
-          mediaStreamDest.stream,
-          mimeType ? { mimeType } : undefined
-        );
-        mediaRecorderRef = recorder;
-
-        recorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) chunks.push(e.data);
-        };
-
-        recorder.onstop = async () => {
-          cleanup();
-          if (cancelled) return;
-
-          try {
-            const blobType = recorder.mimeType || 'audio/webm';
-            const webmBlob = new Blob(chunks, { type: blobType });
-            if (webmBlob.size === 0) {
-              throw new Error('La grabación resultó vacía. Verifica que el AudioContext esté activo.');
-            }
-
-            const arrayBuffer = await webmBlob.arrayBuffer();
-
-            const decodeCtx   = new AudioContext({ sampleRate: audioCtx.sampleRate });
-            const audioBuffer = await decodeCtx.decodeAudioData(arrayBuffer);
-            await decodeCtx.close();
-
-            const wavBuffer = audioBufferToWav(audioBuffer);
-            onComplete(new Blob([wavBuffer], { type: 'audio/wav' }));
-          } catch (err) {
-            onError(err instanceof Error ? err : new Error(String(err)));
-          }
-        };
-
-        // 8) Reset de posición y contadores de seguimiento
-        Tone.Transport.seconds = 0;
-        useSongStore.getState().setCurrentBeat(0);
-        this.lastTriggeredBeat      = -1;
-        this.lastTriggeredChordId   = '';
-        this.lastTriggeredChordName = '';
-        this.lastTriggeredVoicing   = '';
-        this.lastTriggeredInversion = 0;
-        this.lastTriggeredDrumStep  = -1;
-        this.lastTriggeredDrumBeat  = -1;
-
-        // 9) Arrancar grabación y transport
-        recorder.start(100); // chunk cada 100ms
-        Tone.Transport.start();
-        useSongStore.getState().setPlaying(true);
-
-        const startTime = Date.now();
-
-        // Tick de progreso
-        progressInterval = setInterval(() => {
-          const elapsed  = (Date.now() - startTime) / 1000;
-          const progress = Math.min(elapsed / recordSeconds, 1);
-          onProgress(elapsed, recordSeconds);
-          useSongStore.getState().setExportProgress(progress);
-        }, 250);
-
-        // Auto-detención al final
-        stopTimeout = setTimeout(() => {
-          if (cancelled) return;
-          Tone.Transport.stop();
-          this.silence();
-          useSongStore.getState().setPlaying(false);
-          if (recorder.state !== 'inactive') {
-            try { recorder.stop(); } catch (_) {}
-          }
-        }, recordSeconds * 1000);
-
+        if (cancelled) return;
+        useSongStore.getState().setIsExporting(false);
+        useSongStore.getState().setExportProgress(1);
+        onComplete(wavBlob);
       } catch (err) {
-        // Error no manejado en el setup: limpiar UI y notificar
-        console.error('[Export] Error en exportToWav:', err);
-        cleanup();
-        onError(err instanceof Error ? err : new Error(`Error al iniciar export: ${err}`));
+        if (cancelled) return;
+        useSongStore.getState().setIsExporting(false);
+        useSongStore.getState().setExportProgress(0);
+        onError(err instanceof Error ? err : new Error(String(err)));
       }
     })();
 
-    // ← Se devuelve sincrónicamente; la grabación corre en segundo plano
-    return cancel;
+    return () => {
+      cancelled = true;
+      useSongStore.getState().setIsExporting(false);
+      useSongStore.getState().setExportProgress(0);
+    };
   }
 
   public dispose() {
