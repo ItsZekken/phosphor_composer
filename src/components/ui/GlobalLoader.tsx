@@ -9,19 +9,17 @@ export const GlobalLoader: React.FC = () => {
   const setIsAudioLoading = useSongStore(state => state.setIsAudioLoading);
   const instrumentType = useSongStore(state => state.instrumentType);
 
-  const [bootPhase, setBootPhase] = useState<'warmup' | 'calibrating' | 'ready' | 'hidden'>('warmup');
+  // 'closed': pantalla en negro con logo en el centro
+  // 'opening': división horizontal que se abre hacia arriba y hacia abajo
+  // 'hidden': componente desmontado
+  const [bootPhase, setBootPhase] = useState<'closed' | 'opening' | 'hidden'>('closed');
 
   useEffect(() => {
     let isMounted = true;
 
     const autoBoot = async () => {
-      // Fase 1: CRT Warmup (Línea de fósforo horizontal)
-      await new Promise(r => setTimeout(r, 180));
-      if (!isMounted) return;
-
-      setBootPhase('calibrating');
-
       try {
+        // Inicializar audio y Magenta
         await toneEngine.init();
         if (!isMounted) return;
 
@@ -30,17 +28,22 @@ export const GlobalLoader: React.FC = () => {
         }
 
         await melodyPredictor.init();
-
         if (!isMounted) return;
-        setBootPhase('ready');
 
-        // Fase 3: Fade out suave a la interfaz
+        // Breve pausa para contemplar el logo antes de abrir la cortina
+        await new Promise(r => setTimeout(r, 300));
+        if (!isMounted) return;
+
+        // Iniciar apertura horizontal desde el centro hacia arriba y abajo
+        setBootPhase('opening');
+
+        // Al terminar la animación de apertura, desbloquear la app
         setTimeout(() => {
           if (!isMounted) return;
           setIsEngineReady(true);
           setIsAudioLoading(false);
           setBootPhase('hidden');
-        }, 350);
+        }, 550);
 
       } catch (e) {
         console.warn('Auto-boot advertencia (audio continuará bajo demanda):', e);
@@ -63,62 +66,81 @@ export const GlobalLoader: React.FC = () => {
     return null;
   }
 
+  const isOpening = bootPhase === 'opening';
+
   return (
     <div
-      className={`global-crt-loader-overlay ${bootPhase}`}
+      className="global-curtain-container"
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: '#0a080e',
         zIndex: 99999,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        transition: 'opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s ease',
-        opacity: bootPhase === 'ready' ? 0 : 1,
-        pointerEvents: bootPhase === 'ready' ? 'none' : 'all'
+        pointerEvents: isOpening ? 'none' : 'all',
+        overflow: 'hidden'
       }}
     >
-      {/* Rayo central de encendido CRT */}
+      {/* Panel Superior Negro: Se abre hacia arriba desde el centro */}
       <div
-        className="crt-power-beam"
+        className="curtain-top"
         style={{
           position: 'absolute',
-          width: bootPhase === 'warmup' ? '100vw' : '0px',
-          height: bootPhase === 'warmup' ? '2px' : '0px',
-          background: '#00e5ff',
-          boxShadow: '0 0 20px #00e5ff, 0 0 40px #863bff',
-          transition: 'all 0.22s ease-out'
+          top: 0,
+          left: 0,
+          right: 0,
+          height: '50vh',
+          backgroundColor: '#07050a',
+          transform: isOpening ? 'translateY(-100%)' : 'translateY(0%)',
+          transition: 'transform 0.5s cubic-bezier(0.77, 0, 0.175, 1)',
+          borderBottom: '1px solid rgba(134, 59, 255, 0.15)'
         }}
       />
 
-      {/* Solo el Logo con halo de neón y giro suave */}
+      {/* Panel Inferior Negro: Se abre hacia abajo desde el centro */}
+      <div
+        className="curtain-bottom"
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: '50vh',
+          backgroundColor: '#07050a',
+          transform: isOpening ? 'translateY(100%)' : 'translateY(0%)',
+          transition: 'transform 0.5s cubic-bezier(0.77, 0, 0.175, 1)',
+          borderTop: '1px solid rgba(134, 59, 255, 0.15)'
+        }}
+      />
+
+      {/* Logo Central: Aparece en negro y se desvanece suavemente al abrirse */}
       <div
         style={{
-          position: 'relative',
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: `translate(-50%, -50%) scale(${isOpening ? 1.15 : 1})`,
+          opacity: isOpening ? 0 : 1,
+          transition: 'opacity 0.4s ease-out, transform 0.45s ease-out',
+          zIndex: 100000,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          transform: bootPhase === 'warmup' ? 'scale(0.8)' : 'scale(1)',
-          opacity: bootPhase === 'warmup' ? 0 : 1,
-          transition: 'all 0.35s cubic-bezier(0.16, 1, 0.3, 1)'
+          pointerEvents: 'none'
         }}
       >
-        <PhosphorLogo size={72} animated />
-        
-        {/* Anillo de giro de neón sutil */}
+        <PhosphorLogo size={76} animated />
+
+        {/* Halo de neón giratorio */}
         <div
           style={{
             position: 'absolute',
-            width: '96px',
-            height: '96px',
+            width: '100px',
+            height: '100px',
             borderRadius: '50%',
             border: '2px solid transparent',
             borderTopColor: '#00e5ff',
             borderRightColor: '#863bff',
             animation: 'spin 0.9s linear infinite',
-            filter: 'drop-shadow(0 0 8px rgba(0, 229, 255, 0.5))'
+            filter: 'drop-shadow(0 0 10px rgba(0, 229, 255, 0.4))'
           }}
         />
       </div>
