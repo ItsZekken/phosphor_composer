@@ -21,6 +21,11 @@ export interface CustomSelectProps {
   style?: React.CSSProperties;
   labelPrefix?: string;
   renderButton?: (selectedOption: SelectOption | undefined) => React.ReactNode;
+  draggable?: boolean;
+  onDragStart?: (e: React.DragEvent<HTMLDivElement>) => void;
+  onMouseDown?: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onOptionDragStart?: (value: string, e: React.DragEvent<HTMLDivElement>) => void;
+  onOptionMouseDown?: (value: string, e: React.MouseEvent<HTMLDivElement>) => void;
 }
 
 export const CustomSelect: React.FC<CustomSelectProps> = ({
@@ -32,7 +37,12 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   className = '', 
   style, 
   labelPrefix, 
-  renderButton
+  renderButton,
+  draggable,
+  onDragStart,
+  onMouseDown,
+  onOptionDragStart,
+  onOptionMouseDown
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
@@ -85,27 +95,33 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   selectedOption = selectedOption || { value, label: value };
 
   return (
-    <div ref={containerRef} className={`custom-select-container ${className}`} style={{ position: 'relative', ...style }}>
+    <div ref={containerRef} className={`custom-select-container ${className}`} style={{ position: 'relative', zIndex: isOpen ? 9999 : 1, ...style }}>
       {renderButton ? renderButton(selectedOption) : (
-        <button
+        <div
+          role="button"
+          tabIndex={disabled ? -1 : 0}
           className={`custom-select-btn ${isOpen ? 'active' : ''}`}
-          disabled={disabled}
+          draggable={draggable}
+          onDragStart={onDragStart}
+          onMouseDown={onMouseDown}
           onClick={(e) => {
+            if (disabled) return;
             e.stopPropagation();
             setIsOpen(!isOpen);
             setActiveGroup(null);
           }}
-          style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 8px', minHeight: '28px' }}
+          title={draggable ? 'Haz clic para seleccionar o arrastra el valor' : ''}
+          style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 8px', minHeight: '28px', cursor: draggable ? 'grab' : 'pointer', userSelect: 'none', WebkitUserSelect: 'none', opacity: disabled ? 0.5 : 1 }}
         >
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.8rem' }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.8rem', userSelect: 'none', pointerEvents: 'none' }}>
             {labelPrefix ? `${labelPrefix} ` : ''}{selectedOption.label}
           </span>
-          <ChevronDown size={14} style={{ flexShrink: 0, marginLeft: '6px', opacity: 0.6 }} />
-        </button>
+          <ChevronDown size={14} style={{ flexShrink: 0, marginLeft: '6px', opacity: 0.6, pointerEvents: 'none' }} />
+        </div>
       )}
 
       {isOpen && !disabled && (
-        <div ref={menuRef} className="style-popover-panel" style={{ width: 'max-content', minWidth: '100%', position: 'absolute', zIndex: 1000, top: '100%', left: 0, marginTop: '4px', padding: '4px' }}>
+        <div ref={menuRef} className="style-popover-panel" style={{ width: 'max-content', minWidth: '100%', position: 'absolute', zIndex: 99999, top: '100%', left: 0, marginTop: '4px', padding: '4px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}>
           
           {options && (
             <div className="style-list-group" style={{ maxHeight: '250px', overflowY: 'auto' }}>
@@ -113,13 +129,23 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
                 <div 
                   key={opt.value}
                   className={`style-item-row ${value === opt.value ? 'active' : ''}`}
+                  draggable={draggable}
+                  onDragStart={(e) => {
+                    if (onOptionDragStart) onOptionDragStart(opt.value, e);
+                    else if (onDragStart) onDragStart(e);
+                  }}
+                  onMouseDown={(e) => {
+                    if (onOptionMouseDown) onOptionMouseDown(opt.value, e);
+                    else if (onMouseDown) onMouseDown(e);
+                  }}
                   onClick={(e) => {
                     e.stopPropagation();
                     onChange(opt.value);
                     setIsOpen(false);
                   }}
+                  style={{ userSelect: 'none', WebkitUserSelect: 'none', cursor: draggable ? 'grab' : 'pointer' }}
                 >
-                  <span className="style-name" style={{ fontSize: '0.8rem' }}>{opt.label}</span>
+                  <span className="style-name" style={{ fontSize: '0.8rem', userSelect: 'none', pointerEvents: 'none' }}>{opt.label}</span>
                   {value === opt.value && <span className="style-led active" />}
                 </div>
               ))}
@@ -151,8 +177,9 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
                         marginRight: subMenuDirection === 'left' ? '4px' : '0',
                         width: 'max-content',
                         minWidth: '150px',
-                        zIndex: 1001,
-                        padding: '4px'
+                        zIndex: 99999,
+                        padding: '4px',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
                       }}
                     >
                       <div className="style-list-group" style={{ maxHeight: '250px', overflowY: 'auto' }}>

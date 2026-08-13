@@ -43,11 +43,11 @@ export function getChordRole(chord: string, key: NoteClass, _scale: ScaleType): 
 }
 
 const ROLE_CONFIG = {
-  reposo:       { label: '🏠 Reposo',       color: 'var(--role-reposo)',       glow: 'var(--glow-reposo)' },
-  subdominante: { label: '🌊 Subdominante',  color: 'var(--role-subdominante)', glow: 'var(--glow-subdominante)' },
-  tension:      { label: '⚡ Tensión',       color: 'var(--role-tension)',      glow: 'var(--glow-tension)' },
-  spicy:        { label: '🌶️ Spicy',         color: 'var(--role-spicy)',        glow: 'var(--glow-spicy)' },
-  exotic:       { label: '✨ Exótico',       color: 'var(--role-exotic)',       glow: 'var(--glow-exotic)' },
+  reposo:       { label: 'Reposo',       color: 'var(--role-reposo)',       glow: 'var(--glow-reposo)' },
+  subdominante: { label: 'Subdominante', color: 'var(--role-subdominante)', glow: 'var(--glow-subdominante)' },
+  tension:      { label: 'Tensión',      color: 'var(--role-tension)',      glow: 'var(--glow-tension)' },
+  spicy:        { label: 'Spicy',        color: 'var(--role-spicy)',        glow: 'var(--glow-spicy)' },
+  exotic:       { label: 'Exótico',      color: 'var(--role-exotic)',       glow: 'var(--glow-exotic)' },
 };
 
 // Variaciones de acordes para la matriz por grado
@@ -475,65 +475,7 @@ export const ChordPalette: React.FC = () => {
           </div>
         </div>
 
-        {/* Botonera de Selección Rápida de Estilos e Íconos */}
-        <div className="style-icon-bar" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', padding: '6px 0', borderTop: '1px solid rgba(255,255,255,0.06)', overflowX: 'auto' }}>
-          <span style={{ fontSize: '0.72rem', fontFamily: "'Share Tech Mono', monospace", color: 'var(--accent)', marginRight: '4px', textTransform: 'uppercase' }}>Estilo:</span>
-          {[
-            { id: 'hold', label: 'Hold', icon: '──' },
-            { id: 'quarters', label: 'Negras', icon: '♩' },
-            { id: 'eighths', label: 'Corcheas', icon: '♪' },
-            { id: 'pop', label: 'Pop', icon: '🎹' },
-            { id: 'arpeggio', label: 'Arp', icon: '⬈⬊' },
-            { id: 'strum', label: 'Strum', icon: '🎸' }
-          ].map((st) => (
-            <button
-              key={st.id}
-              className={`style-icon-btn ${pattern === st.id ? 'active' : ''}`}
-              onClick={() => setPattern(st.id)}
-              title={`Estilo de acompañamiento: ${st.label}`}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                padding: '3px 10px',
-                borderRadius: '4px',
-                background: pattern === st.id ? 'rgba(0, 229, 255, 0.2)' : 'rgba(0,0,0,0.3)',
-                border: pattern === st.id ? '1px solid #00e5ff' : '1px solid rgba(255,255,255,0.08)',
-                color: pattern === st.id ? '#00e5ff' : 'var(--text-secondary)',
-                cursor: 'pointer',
-                fontSize: '0.75rem',
-                fontFamily: "'Share Tech Mono', monospace",
-                transition: 'all 0.15s ease'
-              }}
-            >
-              <span>{st.icon}</span>
-              <span>{st.label}</span>
-            </button>
-          ))}
-          <div style={{ marginLeft: 'auto' }}>
-            <button
-              className="chord-synth-config-btn"
-              onClick={() => openSynthConfigForChannel('chords')}
-              title="Configurar Sintetizador del canal de Armonía"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '3px 10px',
-                borderRadius: '4px',
-                background: 'rgba(168, 85, 247, 0.15)',
-                border: '1px solid rgba(168, 85, 247, 0.4)',
-                color: '#a855f7',
-                cursor: 'pointer',
-                fontSize: '0.75rem',
-                fontFamily: "'Share Tech Mono', monospace"
-              }}
-            >
-              <Settings size={12} />
-              <span>Config Synth</span>
-            </button>
-          </div>
-        </div>
+
       </div>
 
       <div className="palette-body-wrap">

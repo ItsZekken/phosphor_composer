@@ -38,6 +38,30 @@ export default function App() {
             parsed.drumChannels = Object.values(parsed.drumChannels);
           }
         }
+        if (parsed.melodyNotes && (!parsed.tracks || parsed.tracks.length === 0)) {
+          parsed.tracks = [{
+            id: 'track_melody_1',
+            name: 'Melodía 1',
+            channelId: 'melody',
+            color: '#ff00aa',
+            notes: parsed.melodyNotes,
+            viewport: { scrollLeft: 0, scrollTop: 600, beatWidth: 40, rowHeight: 20 }
+          }];
+        } else if (parsed.melodyNotes && parsed.tracks && parsed.tracks.length > 0) {
+          // Si tracks existe pero la pista activa o la primera pista no tiene las notas de melodyNotes, sincronizar
+          const activeId = parsed.activeTrackId || parsed.tracks[0].id;
+          parsed.tracks = parsed.tracks.map((t: any) => 
+            t.id === activeId && (!t.notes || t.notes.length === 0)
+              ? { ...t, notes: parsed.melodyNotes }
+              : t
+          );
+        }
+        if (!parsed.channelOrder) {
+          parsed.channelOrder = ['master', 'chords', 'melody', 'drums'];
+        }
+        if (!parsed.keyboardCenterNote) {
+          parsed.keyboardCenterNote = 'C4';
+        }
         useSongStore.setState(parsed);
         if (Array.isArray(parsed.drumChannels)) {
           parsed.drumChannels.forEach((ch: any) => {
@@ -83,7 +107,11 @@ export default function App() {
           currentDrumPatternEdit: state.currentDrumPatternEdit,
           isKeyboardMelodyEnabled: state.isKeyboardMelodyEnabled,
           isKeyboardChromatic: state.isKeyboardChromatic,
-          isAutoSuggestions: state.isAutoSuggestions
+          keyboardCenterNote: state.keyboardCenterNote,
+          channelOrder: state.channelOrder,
+          isAutoSuggestions: state.isAutoSuggestions,
+          tracks: state.tracks,
+          activeTrackId: state.activeTrackId
         };
         localStorage.setItem('phosphor_session', JSON.stringify(sessionToSave));
       }, 1000);

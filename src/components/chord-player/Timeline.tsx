@@ -5,8 +5,11 @@ import type { ChordBlock } from '../../utils/typeDefinitions';
 import { isChordInScale, getChordRomanDegree } from '../../engine/scaleDefinitions';
 import { getChordRole } from './ChordPalette';
 import { ChordPropertiesPanel } from './ChordPropertiesPanel';
+import { ConfirmModal } from '../ui/ConfirmModal';
+import { CustomSelect } from '../ui/CustomSelect';
+import { ChannelInstrumentControl } from '../ui/ChannelInstrumentControl';
 import { ContextMenuContainer } from '../ui/ContextMenuContainer';
-import { Plus, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Trash2 } from 'lucide-react';
+import { Plus, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Trash2, GripVertical, Settings, Music } from 'lucide-react';
 import { toneEngine } from '../../audio/toneEngine';
 import { ChannelQuickControl } from '../ui/ChannelQuickControl';
 
@@ -47,7 +50,11 @@ export const Timeline: React.FC = () => {
     styleMarkers,
     addStyleMarker,
     removeStyleMarker,
-    updateStyleMarker
+    updateStyleMarker,
+    customPatterns,
+    channels,
+    setChannelInstrument,
+    openSynthConfigForChannel
   } = useSongStore(useShallow(state => ({
     chordBlocks: state.chordBlocks,
     melodyNotes: state.melodyNotes,
@@ -64,10 +71,26 @@ export const Timeline: React.FC = () => {
     styleMarkers: state.styleMarkers,
     addStyleMarker: state.addStyleMarker,
     removeStyleMarker: state.removeStyleMarker,
-    updateStyleMarker: state.updateStyleMarker
+    updateStyleMarker: state.updateStyleMarker,
+    customPatterns: state.customPatterns,
+    channels: state.channels,
+    setChannelInstrument: state.setChannelInstrument,
+    openSynthConfigForChannel: state.openSynthConfigForChannel,
+    setDraggingStyle: state.setDraggingStyle
   })));
 
   const [trackContextMenu, setTrackContextMenu] = useState<{ x: number; y: number; beat: number } | null>(null);
+  const [selectedStyleToDrag, setSelectedStyleToDrag] = useState<string>('hold');
+
+  const allStyles = [
+    { id: 'hold', label: 'Hold' },
+    { id: 'quarters', label: 'Negras' },
+    { id: 'eighths', label: 'Corcheas' },
+    { id: 'pop', label: 'Pop' },
+    { id: 'arpeggio', label: 'Arpegio' },
+    { id: 'strum', label: 'Strum' },
+    ...customPatterns.filter((p: any) => p && p.name).map((p: any) => ({ id: p.name, label: p.name }))
+  ];
 
   const BEAT_WIDTH = 40; // píxeles por beat
 
@@ -106,13 +129,22 @@ export const Timeline: React.FC = () => {
     };
 
     window.addEventListener('mousedown', handleGlobalClick);
-    return () => window.removeEventListener('mousedown', handleGlobalClick);
+    const handleGlobalMouseUp = () => {
+      if (useSongStore.getState().draggingStyle) {
+        useSongStore.getState().setDraggingStyle(null);
+      }
+    };
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => {
+      window.removeEventListener('mousedown', handleGlobalClick);
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
   }, [selectedChordId, setSelectedChordId]);
 
   // Estados locales para arrastre fluido
   const [activeDrag, setActiveDrag] = useState<{
     id: string;
-    type: 'move' | 'resize';
+    type: 'move' | 'resize' | 'move_marker';
     startX: number;
     initialStartBeat: number;
     initialDurationBeats: number;
@@ -254,12 +286,37 @@ export const Timeline: React.FC = () => {
 
   return (
     <div className="timeline-section">
-      <div className="timeline-header-row">
-        <div className="title-undo-group">
-          <h2>Línea de Tiempo de Acordes</h2>
+      <div className="timeline-header-row" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', background: '#161b22', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <h2 className="timeline-title" style={{ margin: 0, fontSize: '0.9rem', color: '#fff' }}>Línea de Tiempo de Acordes</h2>
+        
+        {/* Instrument Select */}
+        <ChannelInstrumentControl channelId="chords" style={{ marginLeft: '12px' }} />
+
+        {/* Style Dragger */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto' }}>
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>ESTILO:</span>
+          <CustomSelect
+            value={selectedStyleToDrag}
+            onChange={(val) => setSelectedStyleToDrag(val)}
+            options={allStyles.map(s => ({ value: s.id, label: s.label }))}
+            style={{ width: '130px' }}
+            draggable={true}
+            onMouseDown={() => setDraggingStyle(selectedStyleToDrag)}
+            onDragStart={(e) => {
+              e.dataTransfer.setData('text/style-pattern', selectedStyleToDrag);
+              e.dataTransfer.effectAllowed = 'copy';
+              setDraggingStyle(selectedStyleToDrag);
+            }}
+            onOptionMouseDown={(val) => setDraggingStyle(val)}
+            onOptionDragStart={(val, e) => {
+              e.dataTransfer.setData('text/style-pattern', val);
+              e.dataTransfer.effectAllowed = 'copy';
+              setDraggingStyle(val);
+            }}
+          />
         </div>
+
         <ChannelQuickControl channelId="chords" />
-        <span className="ux-tip">Arrastra acordes • Marcadores de estilo arriba • Click derecho para editar</span>
       </div>
 
       
@@ -278,22 +335,45 @@ export const Timeline: React.FC = () => {
           onDrop={(e) => {
             e.preventDefault();
             const chord = e.dataTransfer.getData('text/plain');
-            if (!chord) return;
             const canvasRect = e.currentTarget.getBoundingClientRect();
             const dropX = e.clientX - canvasRect.left;
             const dropBeat = Math.max(0, Math.round(dropX / BEAT_WIDTH));
-            addChordBlock(chord, dropBeat, 4);
+            
+            if (chord) {
+              addChordBlock(chord, dropBeat, 4);
+              return;
+            }
+            
+            const stylePattern = e.dataTransfer.getData('text/style-pattern') || useSongStore.getState().draggingStyle;
+            if (stylePattern) {
+              const existing = styleMarkers.find(m => m.beat === dropBeat);
+              if (!existing) {
+                addStyleMarker(dropBeat, stylePattern);
+              } else {
+                updateStyleMarker(existing.id, { pattern: stylePattern });
+              }
+              setDraggingStyle(null);
+            }
           }}
           onMouseUp={(e) => {
-            const { draggingChord, setDraggingChord, addChordBlock, setSelectedChordId } = useSongStore.getState();
+            const { draggingChord, setDraggingChord, draggingStyle, setDraggingStyle, addChordBlock, setSelectedChordId } = useSongStore.getState();
+            const canvasRect = e.currentTarget.getBoundingClientRect();
+            const dropX = e.clientX - canvasRect.left;
+            const dropBeat = Math.max(0, Math.round(dropX / BEAT_WIDTH));
+            
             if (draggingChord) {
               setSelectedChordId(null);
-              const canvasRect = e.currentTarget.getBoundingClientRect();
-              const dropX = e.clientX - canvasRect.left;
-              const dropBeat = Math.max(0, Math.round(dropX / BEAT_WIDTH));
               addChordBlock(draggingChord, dropBeat, 4);
               toneEngine.playChordPreviewStop(draggingChord);
               setDraggingChord(null);
+            } else if (draggingStyle) {
+              const existing = styleMarkers.find(m => m.beat === dropBeat);
+              if (!existing) {
+                addStyleMarker(dropBeat, draggingStyle);
+              } else {
+                updateStyleMarker(existing.id, { pattern: draggingStyle });
+              }
+              setDraggingStyle(null);
             }
           }}
           onContextMenu={(e) => {
@@ -339,59 +419,115 @@ export const Timeline: React.FC = () => {
               zIndex: 5,
               cursor: 'pointer'
             }}
-            onClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              const clickX = e.clientX - rect.left;
-              const beat = Math.max(0, Math.floor(clickX / BEAT_WIDTH));
-              const existing = styleMarkers.find((m) => m.beat === beat);
-              if (!existing) {
-                addStyleMarker({
-                  id: `sm_${Math.random().toString(36).substr(2, 9)}`,
-                  beat,
-                  pattern: 'quarters'
-                });
+            title="Arrastra estilos aquí"
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'copy';
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const stylePattern = e.dataTransfer.getData('text/style-pattern') || useSongStore.getState().draggingStyle;
+              if (stylePattern) {
+                const canvasRect = e.currentTarget.getBoundingClientRect();
+                const dropX = e.clientX - canvasRect.left;
+                const dropBeat = Math.max(0, Math.round(dropX / BEAT_WIDTH));
+                const existing = styleMarkers.find(m => m.beat === dropBeat);
+                if (!existing) {
+                  addStyleMarker(dropBeat, stylePattern);
+                } else {
+                  updateStyleMarker(existing.id, { pattern: stylePattern });
+                }
+                setDraggingStyle(null);
               }
             }}
-            title="Haz clic para agregar un marcador de estilo en este beat"
+            onMouseUp={(e) => {
+              const { draggingStyle, setDraggingStyle } = useSongStore.getState();
+              if (draggingStyle) {
+                const canvasRect = e.currentTarget.getBoundingClientRect();
+                const dropX = e.clientX - canvasRect.left;
+                const dropBeat = Math.max(0, Math.round(dropX / BEAT_WIDTH));
+                const existing = styleMarkers.find(m => m.beat === dropBeat);
+                if (!existing) {
+                  addStyleMarker(dropBeat, draggingStyle);
+                } else {
+                  updateStyleMarker(existing.id, { pattern: draggingStyle });
+                }
+                setDraggingStyle(null);
+              }
+            }}
           >
             {styleMarkers.map((marker) => {
               const markerLeft = marker.beat * BEAT_WIDTH;
+              const isDragging = activeDrag?.id === marker.id && activeDrag?.type === 'move_marker';
+              const displayLeft = isDragging ? activeDrag.currentStartBeat * BEAT_WIDTH : markerLeft;
+              
               return (
                 <div
                   key={marker.id}
                   className="style-marker-flag"
                   style={{
                     position: 'absolute',
-                    left: `${markerLeft}px`,
+                    left: `${displayLeft}px`,
                     top: '2px',
                     height: '16px',
-                    padding: '0 6px',
-                    borderRadius: '3px',
-                    background: 'rgba(0, 229, 255, 0.25)',
-                    border: '1px solid #00e5ff',
-                    color: '#00e5ff',
+                    padding: '0 4px',
+                    borderRadius: '2px',
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    borderLeft: '2px solid rgba(255, 255, 255, 0.4)',
+                    color: 'rgba(255, 255, 255, 0.8)',
                     fontSize: '0.65rem',
                     fontFamily: "'Share Tech Mono', monospace",
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '4px',
-                    zIndex: 6
+                    zIndex: 6,
+                    cursor: 'ew-resize'
                   }}
-                  onClick={(e) => {
+                  onMouseDown={(e) => {
                     e.stopPropagation();
-                    const patterns: ('hold' | 'quarters' | 'eighths' | 'pop' | 'arpeggio' | 'strum')[] = ['hold', 'quarters', 'eighths', 'pop', 'arpeggio', 'strum'];
-                    const currentIndex = patterns.indexOf(marker.pattern as any);
-                    const nextPattern = patterns[(currentIndex + 1) % patterns.length];
-                    updateStyleMarker(marker.id, { pattern: nextPattern });
+                    const startX = e.clientX;
+                    
+                    const handleMouseMove = (moveEvent: MouseEvent) => {
+                      const deltaX = moveEvent.clientX - startX;
+                      const deltaBeats = Math.round(deltaX / BEAT_WIDTH);
+                      const newBeat = Math.max(0, marker.beat + deltaBeats);
+                      setActiveDrag({ 
+                        id: marker.id, 
+                        type: 'move_marker', 
+                        startX,
+                        initialStartBeat: marker.beat,
+                        initialDurationBeats: 0,
+                        currentStartBeat: newBeat, 
+                        currentDurationBeats: 0 
+                      });
+                    };
+                    
+                    const handleMouseUp = (upEvent: MouseEvent) => {
+                      window.removeEventListener('mousemove', handleMouseMove);
+                      window.removeEventListener('mouseup', handleMouseUp);
+                      const state = useSongStore.getState();
+                      const deltaX = upEvent.clientX - startX;
+                      const deltaBeats = Math.round(deltaX / BEAT_WIDTH);
+                      const newBeat = Math.max(0, marker.beat + deltaBeats);
+                      
+                      // Check for overlap
+                      const existing = state.styleMarkers.find((m) => m.beat === newBeat && m.id !== marker.id);
+                      if (!existing && newBeat !== marker.beat) {
+                        updateStyleMarker(marker.id, { beat: newBeat });
+                      }
+                      setActiveDrag(null);
+                    };
+                    
+                    window.addEventListener('mousemove', handleMouseMove);
+                    window.addEventListener('mouseup', handleMouseUp);
                   }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
+                  onDoubleClick={(e) => {
                     e.stopPropagation();
                     removeStyleMarker(marker.id);
                   }}
-                  title={`Marcador: ${marker.pattern} en Beat ${marker.beat} — Click para cambiar estilo, Clic Derecho para eliminar`}
+                  title={`Marcador: ${marker.pattern} en Beat ${marker.beat} — Arrastra para mover, Doble Click para eliminar`}
                 >
-                  <span>📍 {marker.pattern}</span>
+                  {marker.pattern}
                 </div>
               );
             })}

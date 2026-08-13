@@ -10,6 +10,7 @@ import { CustomSelect } from '../ui/CustomSelect';
 
 import { exportSessionToMidi, importMidiToSession } from '../../utils/midiService';
 import { ExportProgressModal } from '../ui/ExportProgressModal';
+import { ConfirmModal } from '../ui/ConfirmModal';
 
 const BeatDisplay = () => {
   const currentBeat = useSongStore(state => state.currentBeat);
@@ -87,6 +88,7 @@ export const Header = () => {
 
   // Estado local del BPM — solo escribe al store en onBlur/Enter
   const [bpmInput, setBpmInput] = useState(String(bpm));
+  const [confirmModalConfig, setConfirmModalConfig] = useState<{isOpen: boolean}>({isOpen: false});
 
   // Sincronizar si el store cambia externamente (ej: Tap BPM)
   useEffect(() => {
@@ -117,10 +119,7 @@ export const Header = () => {
   };
 
   const handleClear = () => {
-    if (window.confirm('¿Estás seguro de que quieres limpiar toda la canción?')) {
-      clearSong();
-      toneEngine.stop();
-    }
+    setConfirmModalConfig({ isOpen: true });
   };
 
   const handleTapBPM = () => {
@@ -342,7 +341,7 @@ export const Header = () => {
     <>
     <header className="app-header">
       <div className="header-brand">
-        <h1 className="phosphor-text">🎹 PHOSPHOR</h1>
+        <h1 className="phosphor-text">PHOSPHOR</h1>
         {isAudioLoading && (
           <span className="audio-loading-indicator" style={{
             fontSize: '11px',
@@ -354,7 +353,7 @@ export const Header = () => {
             border: '1px solid rgba(168, 85, 247, 0.2)',
             animation: 'pulse-badge 1.5s infinite'
           }}>
-            ⏳ Cargando...
+            Cargando...
           </span>
         )}
       </div>
@@ -429,7 +428,7 @@ export const Header = () => {
             <label>Tonalidad</label>
             {isAutoKey ? (
               <span className="auto-key-badge" title="Tónica detectada automáticamente de los acordes">
-                🎯 Auto{detectedKey ? ` · ${detectedKey}` : ''}
+                Auto{detectedKey ? ` · ${detectedKey}` : ''}
               </span>
             ) : (
               <button
@@ -528,7 +527,7 @@ export const Header = () => {
               </button>
               <div style={{ height: '1px', background: 'rgba(255,255,255,0.08)', margin: '4px 0' }} />
               <button className="export-dropdown-item" onClick={handleExportAudio}>
-                🎙️ Exportar Audio (.wav)
+                Exportar Audio (.wav)
               </button>
             </div>
           )}
@@ -572,6 +571,20 @@ export const Header = () => {
         onCancel={handleCancelExport}
       />
     )}
+
+    <ConfirmModal
+      isOpen={confirmModalConfig.isOpen}
+      title="Limpiar Canción"
+      message="¿Estás seguro de que quieres limpiar toda la canción? Se perderán todos los datos actuales."
+      confirmText="Limpiar Todo"
+      cancelText="Cancelar"
+      onConfirm={() => {
+        clearSong();
+        toneEngine.stop();
+        setConfirmModalConfig({ isOpen: false });
+      }}
+      onCancel={() => setConfirmModalConfig({ isOpen: false })}
+    />
   </>  
   );
 };

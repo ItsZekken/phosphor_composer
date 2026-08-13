@@ -6,12 +6,15 @@ import { NOTE_CLASSES } from '../../engine/scaleDefinitions';
 import { melodyPredictor } from '../../magenta/melodyPredictor';
 import { autoCorrelate, hzToMidi } from '../../utils/pitchDetector';
 import type { MelodyNote } from '../../utils/typeDefinitions';
-import { Mic, Trash, Sparkles, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Copy, Trash2, Search, ChevronRight, Plus, Settings } from 'lucide-react';
+import { Mic, Trash, Sparkles, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Copy, Trash2, Search, ChevronRight, Plus, Settings, Music } from 'lucide-react';
 import { ContextMenuContainer } from '../ui/ContextMenuContainer';
 import { ScaleFinderSection } from './ScaleFinderSection';
 import { ChannelQuickControl } from '../ui/ChannelQuickControl';
 import { useGridZoom } from '../../hooks/useGridZoom';
 import { SharedTimelineRuler } from '../shared/SharedTimelineRuler';
+import { ConfirmModal } from '../ui/ConfirmModal';
+import { CustomSelect } from '../ui/CustomSelect';
+import { ChannelInstrumentControl } from '../ui/ChannelInstrumentControl';
 
 const MIN_MIDI = 24; // C1
 const MAX_MIDI = 96; // C7
@@ -347,7 +350,9 @@ export const PianoRollView = () => {
     updateTrackViewport,
     openSynthConfigForChannel,
     clipboardNotes,
-    setClipboardNotes
+    setClipboardNotes,
+    channels,
+    setChannelInstrument
   } = useSongStore(useShallow(state => ({
     melodyNotes: state.melodyNotes,
     addMelodyNote: state.addMelodyNote,
@@ -376,7 +381,9 @@ export const PianoRollView = () => {
     updateTrackViewport: state.updateTrackViewport,
     openSynthConfigForChannel: state.openSynthConfigForChannel,
     clipboardNotes: state.clipboardNotes,
-    setClipboardNotes: state.setClipboardNotes
+    setClipboardNotes: state.setClipboardNotes,
+    channels: state.channels,
+    setChannelInstrument: state.setChannelInstrument
   })));
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -398,6 +405,9 @@ export const PianoRollView = () => {
   // Menú contextual flotante del Piano Roll
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: 'notes' | 'canvas'; beat?: number; midi?: number } | null>(null);
   const [isScaleFinderOpen, setIsScaleFinderOpen] = useState(false);
+  const [confirmModalConfig, setConfirmModalConfig] = useState<{isOpen: boolean, trackId: string, trackName: string, type: 'track' | 'clear'}>({isOpen: false, trackId: '', trackName: '', type: 'track'});
+  const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
+  const [editingTrackName, setEditingTrackName] = useState<string>('');
 
   // Referencias para la grabación de audio
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -1116,17 +1126,14 @@ export const PianoRollView = () => {
   };
 
   const handleClearMelody = () => {
-    if (window.confirm('¿Quieres borrar todas las notas de la melodía?')) {
-      useSongStore.setState({ melodyNotes: [] });
-      setSelectedNoteIds([]);
-    }
+    setConfirmModalConfig({ isOpen: true, trackId: '', trackName: '', type: 'clear' });
   };
 
 
   return (
     <div className="piano-roll-view">
       {/* Barra de Pistas Multicanal de Piano Roll */}
-      <div className="piano-roll-tabs-bar" style={{ display: 'flex', gap: '6px', padding: '8px 12px', background: 'rgba(15, 15, 22, 0.95)', borderBottom: '1px solid var(--border-color)', alignItems: 'center', overflowX: 'auto' }}>
+      <div className="piano-roll-tabs-bar" style={{ display: 'flex', gap: '4px', padding: '8px 12px', background: 'rgba(15, 15, 22, 0.95)', borderBottom: '1px solid var(--border-color)', alignItems: 'center', flexWrap: 'wrap' }}>
         {tracks.map((track) => {
           const isActive = track.id === activeTrackId;
           return (
@@ -1137,39 +1144,83 @@ export const PianoRollView = () => {
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '8px',
-                padding: '4px 12px',
-                borderRadius: '6px',
-                background: isActive ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.3)',
-                border: isActive ? `1px solid ${track.color}` : '1px solid rgba(255,255,255,0.06)',
+                padding: '6px 14px',
+                background: isActive ? 'rgba(30, 32, 40, 1)' : 'rgba(0,0,0,0.3)',
+                borderTop: isActive ? `2px solid ${track.color}` : '1px solid rgba(255,255,255,0.06)',
+                borderRight: '1px solid rgba(255,255,255,0.06)',
+                borderLeft: '1px solid rgba(255,255,255,0.06)',
+                borderBottom: isActive ? 'none' : '1px solid rgba(255,255,255,0.06)',
                 color: isActive ? '#fff' : 'var(--text-secondary)',
                 cursor: 'pointer',
                 fontSize: '0.8rem',
                 fontFamily: "'Share Tech Mono', monospace",
-                transition: 'all 0.15s ease'
+                transition: 'background 0.15s ease'
               }}
               onClick={() => setActiveTrackId(track.id)}
             >
               <span className="track-tab-dot" style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: track.color, boxShadow: isActive ? `0 0 6px ${track.color}` : 'none' }} />
-              <span
-                className="track-tab-name"
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  const newName = prompt('Nombre de la pista:', track.name);
-                  if (newName && newName.trim()) {
-                    renamePianoRollTrack(track.id, newName.trim());
-                  }
-                }}
-                title="Doble click para renombrar pista"
-              >
-                {track.name}
-              </span>
+              {editingTrackId === track.id ? (
+                <input
+                  type="text"
+                  value={editingTrackName}
+                  onChange={(e) => setEditingTrackName(e.target.value)}
+                  onBlur={() => {
+                    if (editingTrackName.trim()) {
+                      renamePianoRollTrack(track.id, editingTrackName.trim());
+                    }
+                    setEditingTrackId(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      if (editingTrackName.trim()) {
+                        renamePianoRollTrack(track.id, editingTrackName.trim());
+                      }
+                      setEditingTrackId(null);
+                    } else if (e.key === 'Escape') {
+                      setEditingTrackId(null);
+                    }
+                  }}
+                  autoFocus
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    borderBottom: '1px solid #00e5ff',
+                    color: 'inherit',
+                    fontFamily: 'inherit',
+                    fontSize: 'inherit',
+                    outline: 'none',
+                    width: `${Math.max(50, editingTrackName.length * 8)}px`,
+                    padding: '0 2px'
+                  }}
+                />
+              ) : (
+                <span
+                  className="track-tab-name"
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setEditingTrackId(track.id);
+                    setEditingTrackName(track.name);
+                  }}
+                  title="Doble click para renombrar pista"
+                >
+                  {track.name}
+                </span>
+              )}
               {tracks.length > 1 && (
                 <button
                   className="track-tab-close-btn"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (window.confirm(`¿Eliminar la pista "${track.name}"?`)) {
+                    if (track.notes.length === 0) {
+                      const trackIndex = tracks.findIndex(t => t.id === track.id);
+                      if (isActive) {
+                        const newActiveTrack = tracks[trackIndex - 1] || tracks[trackIndex + 1];
+                        if (newActiveTrack) setActiveTrackId(newActiveTrack.id);
+                      }
                       removePianoRollTrack(track.id);
+                    } else {
+                      setConfirmModalConfig({ isOpen: true, trackId: track.id, trackName: track.name, type: 'track' });
                     }
                   }}
                   style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: '12px', padding: '0 2px' }}
@@ -1189,7 +1240,6 @@ export const PianoRollView = () => {
             alignItems: 'center',
             gap: '4px',
             padding: '4px 10px',
-            borderRadius: '6px',
             background: 'rgba(0, 229, 255, 0.1)',
             border: '1px solid rgba(0, 229, 255, 0.3)',
             color: '#00e5ff',
@@ -1197,39 +1247,17 @@ export const PianoRollView = () => {
             fontSize: '0.75rem',
             fontFamily: "'Share Tech Mono', monospace"
           }}
-          title="Añadir nueva pista de Piano Roll con canal en el mezclador"
+          title="Añadir nueva pista"
         >
           <Plus size={14} />
           <span>Nueva Pista</span>
         </button>
 
-        {/* Botón de Sintetizador Dedicado */}
-        <div style={{ marginLeft: 'auto' }}>
-          <button
-            className="control-btn track-synth-config-btn"
-            onClick={() => {
-              const activeTrack = tracks.find(t => t.id === activeTrackId);
-              openSynthConfigForChannel(activeTrack ? activeTrack.channelId : 'melody');
-            }}
-            title="Configurar Sintetizador de esta pista"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '4px 12px',
-              fontSize: '0.78rem',
-              fontFamily: "'Share Tech Mono', monospace",
-              background: 'rgba(168, 85, 247, 0.15)',
-              border: '1px solid rgba(168, 85, 247, 0.4)',
-              color: '#a855f7',
-              borderRadius: '6px',
-              cursor: 'pointer'
-            }}
-          >
-            <Settings size={14} />
-            <span>Config Synth</span>
-          </button>
-        </div>
+        {(() => {
+          const activeTrack = tracks.find(t => t.id === activeTrackId);
+          const activeChannelId = activeTrack ? activeTrack.channelId : 'melody';
+          return <ChannelInstrumentControl channelId={activeChannelId} style={{ marginLeft: 'auto' }} />;
+        })()}
       </div>
 
       {/* Barra de herramientas */}
@@ -1568,9 +1596,7 @@ export const PianoRollView = () => {
             type="button"
             className="menu-danger"
             onClick={() => {
-              if (window.confirm('¿Borrar todas las notas de la melodía?')) {
-                setMelodyNotes([]);
-              }
+              setConfirmModalConfig({isOpen: true, trackId: '', trackName: '', type: 'clear'});
               setContextMenu(null);
             }}
           >
@@ -1578,6 +1604,31 @@ export const PianoRollView = () => {
           </button>
         </ContextMenuContainer>
       )}
+
+      <ConfirmModal
+        isOpen={confirmModalConfig.isOpen}
+        title={confirmModalConfig.type === 'clear' ? 'Borrar Melodía' : 'Eliminar Pista'}
+        message={confirmModalConfig.type === 'clear' 
+          ? '¿Estás seguro que deseas borrar todas las notas de la melodía actual? Las notas se perderán.'
+          : `¿Estás seguro que deseas eliminar la pista "${confirmModalConfig.trackName}"? Las notas que contiene se perderán.`}
+        confirmText={confirmModalConfig.type === 'clear' ? 'Borrar todo' : 'Eliminar'}
+        cancelText="Cancelar"
+        onConfirm={() => {
+          if (confirmModalConfig.type === 'clear') {
+            useSongStore.setState({ melodyNotes: [] });
+            setMelodyNotes([]);
+          } else {
+            const trackIndex = tracks.findIndex(t => t.id === confirmModalConfig.trackId);
+            if (activeTrackId === confirmModalConfig.trackId) {
+              const newActiveTrack = tracks[trackIndex - 1] || tracks[trackIndex + 1];
+              if (newActiveTrack) setActiveTrackId(newActiveTrack.id);
+            }
+            removePianoRollTrack(confirmModalConfig.trackId);
+          }
+          setConfirmModalConfig({ isOpen: false, trackId: '', trackName: '', type: 'track' });
+        }}
+        onCancel={() => setConfirmModalConfig({ isOpen: false, trackId: '', trackName: '', type: 'track' })}
+      />
     </div>
   );
 };

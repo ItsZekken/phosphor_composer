@@ -63,6 +63,8 @@ interface SongStore {
   exportProgress: number; // 0.0 – 1.0
   instrumentType: 'synth' | 'piano';
   draggingChord: string | null;
+  draggingStyle: string | null;
+  setDraggingStyle: (draggingStyle: string | null) => void;
   timeSignature: '4/4' | '3/4' | '6/8';
   pattern: string;
   customPatterns: PatternDef[];
@@ -73,6 +75,11 @@ interface SongStore {
   chordOctaveShift: number; // Transposición global de acordes por octavas
   isKeyboardMelodyEnabled: boolean;
   isKeyboardChromatic: boolean;
+  keyboardCenterNote: string;
+  setKeyboardCenterNote: (keyboardCenterNote: string) => void;
+  channelOrder: string[];
+  setChannelOrder: (channelOrder: string[]) => void;
+  reorderChannels: (fromIndex: number, toIndex: number) => void;
   isSynthModalOpen: boolean;
   synthSettings: {
     waveType: 'sine' | 'triangle' | 'square' | 'sawtooth';
@@ -347,6 +354,20 @@ export const useSongStore = create<SongStore>()(
   chordOctaveShift: 0,
   isKeyboardMelodyEnabled: true,
   isKeyboardChromatic: false,
+  keyboardCenterNote: 'C4',
+  setKeyboardCenterNote: (keyboardCenterNote) => set({ keyboardCenterNote }),
+  channelOrder: ['master', 'chords', 'melody', 'drums'],
+  setChannelOrder: (channelOrder) => set({ channelOrder }),
+  reorderChannels: (fromIndex, toIndex) => set((state) => {
+    const currentOrder = (state.channelOrder && Array.isArray(state.channelOrder) && state.channelOrder.length > 0)
+      ? state.channelOrder
+      : ['master', ...Object.keys(state.channels || {}).filter(k => k !== 'master')];
+    const newOrder = [...currentOrder];
+    if (fromIndex < 0 || fromIndex >= newOrder.length || toIndex < 0 || toIndex >= newOrder.length) return state;
+    const [moved] = newOrder.splice(fromIndex, 1);
+    newOrder.splice(toIndex, 0, moved);
+    return { channelOrder: newOrder };
+  }),
   isSynthModalOpen: false,
   isAutoSuggestions: false,
   isMixerOpen: false,
@@ -401,9 +422,11 @@ export const useSongStore = create<SongStore>()(
       viewport: { scrollLeft: 0, scrollTop: 600, beatWidth: 40, rowHeight: 20 }
     };
 
+    const currentOrder = state.channelOrder || ['master', 'chords', 'melody', 'drums'];
     return {
       channels: { ...state.channels, [channelId]: newChannel },
       tracks: [...state.tracks, newTrack],
+      channelOrder: [...currentOrder, channelId],
       activeTrackId: trackId
     };
   }),
@@ -414,13 +437,16 @@ export const useSongStore = create<SongStore>()(
     const nextTracks = state.tracks.filter(t => t.id !== id);
     const nextActiveId = state.activeTrackId === id ? nextTracks[0].id : state.activeTrackId;
     const nextChannels = { ...state.channels };
-    if (track && track.channelId !== 'melody') {
+    if (track) {
       delete nextChannels[track.channelId];
     }
+    const currentOrder = state.channelOrder || Object.keys(state.channels || {});
+    const nextChannelOrder = currentOrder.filter(chId => chId !== track?.channelId);
     return {
       tracks: nextTracks,
       activeTrackId: nextActiveId,
-      channels: nextChannels
+      channels: nextChannels,
+      channelOrder: nextChannelOrder
     };
   }),
 
@@ -782,6 +808,8 @@ export const useSongStore = create<SongStore>()(
     toneEngine.setInstrument(instrumentType);
   },
   draggingChord: null,
+  draggingStyle: null,
+  setDraggingStyle: (draggingStyle) => set({ draggingStyle }),
   setDraggingChord: (draggingChord) => set({ draggingChord }),
   setTimeSignature: (timeSignature) => set({ timeSignature }),
   setPattern: (pattern) => set({ pattern }),
@@ -985,17 +1013,63 @@ export const useSongStore = create<SongStore>()(
     get().updateSuggestions();
   },
 
-  clearSong: () => set({
-    chordBlocks: [],
-    melodyNotes: [],
-    drumChannels: DEFAULT_DRUM_CHANNELS,
-    userDrumPatternEdit: 0,
-    currentDrumPatternEdit: 0,
-    selectedChordId: null,
-    currentBeat: 0,
-    isPlaying: false,
-    detectedKey: null
-  }),
+  clearSong: () => {
+    try {
+      toneEngine.stop();
+      toneEngine.silence();
+    } catch (_) {}
+
+    try {
+      localStorage.removeItem('phosphor_session');
+    } catch (_) {}
+
+    set({
+      bpm: 100,
+      key: 'C',
+      scale: 'major',
+      isAutoKey: false,
+      detectedKey: null,
+      chordBlocks: [],
+      melodyNotes: [],
+      styleMarkers: [],
+      patternChain: [],
+      isPatternRepeatOn: false,
+      selectedChordId: null,
+      currentBeat: 0,
+      playbackStep: 0,
+      isPlaying: false,
+      activeNotes: [],
+      activeMelodyNotes: [],
+      ghostNotes: [],
+      chordSuggestions: [],
+      swing: 0,
+      sustain: false,
+      chordOctaveShift: 0,
+      keyboardCenterNote: 'C4',
+      userDrumPatternEdit: 0,
+      currentDrumPatternEdit: 0,
+      activeDrumKitId: 'kit_1',
+      drumChannels: DEFAULT_DRUM_CHANNELS,
+      channels: DEFAULT_CHANNELS,
+      channelOrder: ['master', 'chords', 'melody', 'drums'],
+      tracks: [
+        {
+          id: 'track_melody_1',
+          name: 'Melodía 1',
+          channelId: 'melody',
+          color: '#ff00aa',
+          notes: [],
+          viewport: { scrollLeft: 0, scrollTop: 600, beatWidth: 40, rowHeight: 20 }
+        }
+      ],
+      activeTrackId: 'track_melody_1'
+    });
+
+    try {
+      toneEngine.syncChannels(DEFAULT_CHANNELS);
+    } catch (_) {}
+    get().updateSuggestions();
+  },
 
   importSong: (session) => {
     toneEngine.stop();

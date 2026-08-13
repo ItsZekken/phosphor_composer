@@ -38,7 +38,7 @@ const CADENCES: Cadence[] = [
   },
   {
     name: 'I – IV – V – I',
-    emoji: '🎸',
+    emoji: '',
     role: 'reposo',
     degrees: [
       { interval: 0, quality: '' },

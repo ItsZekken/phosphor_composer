@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { useSongStore } from '../../store/songStore';
+import { toneEngine } from '../../audio/toneEngine';
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -21,12 +22,18 @@ const PianoKey = React.memo(({
   keyDef, 
   isMelody, 
   isHarmony, 
-  style 
+  isCenterNote,
+  style,
+  onSetCenterNote,
+  activeChannelId
 }: { 
   keyDef: KeyDef, 
   isMelody: boolean, 
   isHarmony: boolean, 
-  style?: React.CSSProperties 
+  isCenterNote: boolean,
+  style?: React.CSSProperties,
+  onSetCenterNote: (noteName: string) => void,
+  activeChannelId: string
 }) => {
   const activeClass = isMelody ? 'active-melody' : isHarmony ? 'active' : '';
   const isBlack = keyDef.isBlack;
@@ -36,9 +43,37 @@ const PianoKey = React.memo(({
     <div
       className={className}
       style={style}
-      title={keyDef.noteName}
+      title={`${keyDef.noteName} (Click izq: probar | Click dcho: definir como nota central)`}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onSetCenterNote(keyDef.noteName);
+      }}
+      onMouseDown={(e) => {
+        if (e.button === 0) {
+          toneEngine.playNotePreview(keyDef.noteName, activeChannelId);
+        }
+      }}
     >
       {!isBlack && keyDef.label && <span className="key-label">{keyDef.label}</span>}
+      {isCenterNote && (
+        <span 
+          className="center-note-dot" 
+          style={{
+            position: 'absolute',
+            bottom: isBlack ? '4px' : '3px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: '5px',
+            height: '5px',
+            borderRadius: '50%',
+            backgroundColor: isBlack ? '#9a88b5' : '#382a4d',
+            boxShadow: isBlack ? '0 0 2px rgba(255,255,255,0.4)' : '0 0 2px rgba(0,0,0,0.5)',
+            zIndex: 15,
+            pointerEvents: 'none'
+          }} 
+        />
+      )}
     </div>
   );
 });
@@ -46,6 +81,13 @@ const PianoKey = React.memo(({
 export const PianoVisualizer: React.FC = () => {
   const activeNotes = useSongStore(state => state.activeNotes);
   const activeMelodyNotes = useSongStore(state => state.activeMelodyNotes);
+  const keyboardCenterNote = useSongStore(state => state.keyboardCenterNote);
+  const setKeyboardCenterNote = useSongStore(state => state.setKeyboardCenterNote);
+  const activeTrackId = useSongStore(state => state.activeTrackId);
+  const tracks = useSongStore(state => state.tracks);
+
+  const activeTrack = useMemo(() => tracks.find(t => t.id === activeTrackId), [tracks, activeTrackId]);
+  const activeChannelId = activeTrack ? activeTrack.channelId : 'melody';
 
   // Generar 85 notas desde C1 (24) hasta C8 (108) (7 octavas completas)
   const keys = useMemo(() => {
@@ -64,6 +106,7 @@ export const PianoVisualizer: React.FC = () => {
   // Sets normalizados para búsqueda rápida O(1)
   const harmonySet = useMemo(() => new Set(activeNotes.map(normalizeNote)), [activeNotes]);
   const melodySet = useMemo(() => new Set(activeMelodyNotes.map(normalizeNote)), [activeMelodyNotes]);
+  const normalizedCenter = useMemo(() => normalizeNote(keyboardCenterNote || 'C4'), [keyboardCenterNote]);
 
   // Agrupar las teclas blancas para calcular el posicionamiento relativo de las negras
   const whiteKeys = keys.filter(k => !k.isBlack);
@@ -77,6 +120,7 @@ export const PianoVisualizer: React.FC = () => {
             const normalized = normalizeNote(key.noteName);
             const isMelody = melodySet.has(normalized);
             const isHarmony = harmonySet.has(normalized);
+            const isCenterNote = normalized === normalizedCenter;
             
             return (
               <PianoKey 
@@ -84,6 +128,9 @@ export const PianoVisualizer: React.FC = () => {
                 keyDef={key}
                 isMelody={isMelody}
                 isHarmony={isHarmony}
+                isCenterNote={isCenterNote}
+                onSetCenterNote={setKeyboardCenterNote}
+                activeChannelId={activeChannelId}
               />
             );
           })}
@@ -105,6 +152,7 @@ export const PianoVisualizer: React.FC = () => {
             const normalized = normalizeNote(key.noteName);
             const isMelody = melodySet.has(normalized);
             const isHarmony = harmonySet.has(normalized);
+            const isCenterNote = normalized === normalizedCenter;
 
             // Ajuste fino para centrar la tecla negra
             const style = {
@@ -118,7 +166,10 @@ export const PianoVisualizer: React.FC = () => {
                 keyDef={key}
                 isMelody={isMelody}
                 isHarmony={isHarmony}
+                isCenterNote={isCenterNote}
                 style={style}
+                onSetCenterNote={setKeyboardCenterNote}
+                activeChannelId={activeChannelId}
               />
             );
           })}

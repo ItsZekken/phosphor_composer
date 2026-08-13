@@ -136,7 +136,10 @@ class ToneEngine {
     let chordsMax = 4;
     (s.chordBlocks || []).forEach((b: any) => { chordsMax = Math.max(chordsMax, b.startBeat + b.durationBeats); });
     let melodyMax = 4;
-    (s.melodyNotes || []).forEach((n: any) => { melodyMax = Math.max(melodyMax, n.startBeat + n.durationBeats); });
+    const allTracks = (s.tracks && s.tracks.length > 0) ? s.tracks : [{ notes: s.melodyNotes || [] }];
+    allTracks.forEach((t: any) => {
+      (t.notes || []).forEach((n: any) => { melodyMax = Math.max(melodyMax, n.startBeat + n.durationBeats); });
+    });
     
     let newMax = Math.max(chordsMax, melodyMax);
     
@@ -158,6 +161,7 @@ class ToneEngine {
   private channelMeters = new Map<string, Tone.Meter>();
   private analyserNode: Tone.Analyser = new Tone.Analyser('waveform', 512);
   private trackSynths = new Map<string, Tone.PolySynth>();
+  private trackFilters = new Map<string, Tone.Filter>();
 
   private getChannelNode(id: string) {
     let node = this.channelNodes.get(id);
@@ -337,6 +341,7 @@ class ToneEngine {
     const initialState = useSongStore.getState();
     this.cachedIsKeyboardMelodyEnabled = initialState.isKeyboardMelodyEnabled;
     this.cachedIsKeyboardChromatic = initialState.isKeyboardChromatic;
+    this.cachedKeyboardCenterNote = initialState.keyboardCenterNote || 'C4';
     this.cachedKey = initialState.key;
     this.cachedScale = initialState.scale;
     this.cachedBpm = initialState.bpm;
@@ -496,42 +501,45 @@ class ToneEngine {
   /**
    * Actualiza los parámetros de sonido del Sintetizador Virtual de forma reactiva.
    */
-  public updateSynthSettings(settings: any) {
+  public updateSynthSettings(settings: any, channelId?: string) {
     if (!this.isInitialized) return;
     
     try {
-      this.chordSynth.set({
-        oscillator: { type: settings.waveType },
-        envelope: {
-          attack: settings.envelope.attack,
-          decay: settings.envelope.decay,
-          sustain: settings.envelope.sustain,
-          release: settings.envelope.release
-        },
-        detune: settings.detune
-      });
-
-      this.melodySynth.set({
-        oscillator: { type: settings.waveType },
-        envelope: {
-          attack: settings.envelope.attack,
-          decay: settings.envelope.decay,
-          sustain: settings.envelope.sustain,
-          release: settings.envelope.release
-        },
-        detune: settings.detune
-      });
-
-      if (this.synthFilter) {
-        if (settings.filter.enabled) {
-          this.synthFilter.type = settings.filter.type;
-          this.synthFilter.frequency.value = settings.filter.frequency;
-          this.synthFilter.Q.value = settings.filter.Q;
-        } else {
-          this.synthFilter.type = 'lowpass';
-          this.synthFilter.frequency.value = 20000;
-          this.synthFilter.Q.value = 1;
+      const applyToSynthAndFilter = (synth: Tone.PolySynth, filter?: Tone.Filter) => {
+        synth.set({
+          oscillator: { type: settings.waveType },
+          envelope: {
+            attack: settings.envelope.attack,
+            decay: settings.envelope.decay,
+            sustain: settings.envelope.sustain,
+            release: settings.envelope.release
+          },
+          detune: settings.detune
+        });
+        if (filter) {
+          if (settings.filter && settings.filter.enabled) {
+            filter.type = settings.filter.type;
+            filter.frequency.value = settings.filter.frequency;
+            filter.Q.value = settings.filter.Q;
+          } else {
+            filter.type = 'lowpass';
+            filter.frequency.value = 20000;
+            filter.Q.value = 1;
+          }
         }
+      };
+
+      if (channelId) {
+        const synth = this.getChannelSynth(channelId);
+        const filter = this.trackFilters.get(channelId);
+        applyToSynthAndFilter(synth, filter);
+      } else {
+        applyToSynthAndFilter(this.chordSynth, this.synthFilter);
+        applyToSynthAndFilter(this.melodySynth, this.synthFilter);
+        this.trackSynths.forEach((synth, chId) => {
+          const filter = this.trackFilters.get(chId);
+          applyToSynthAndFilter(synth, filter);
+        });
       }
     } catch (e) {
       console.error('Error actualizando ajustes del sintetizador:', e);
@@ -887,19 +895,46 @@ class ToneEngine {
     useSongStore.getState().setActiveNotes(Array.from(this.activeNotesSet));
   }
 
-  public playNotePreview(noteName: string) {
+  public getChannelSynth(channelId: string): Tone.PolySynth {
+    if (channelId === 'melody') return this.melodySynth;
+    let synth = this.trackSynths.get(channelId);
+    if (!synth) {
+      synth = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: 'sine' },
+        envelope: { attack: 0.05, decay: 0.2, sustain: 0.6, release: 0.4 }
+      });
+      const filter = new Tone.Filter({
+        type: 'lowpass',
+        frequency: 5000,
+        Q: 1
+      });
+      const channelNode = this.getChannelNode(channelId);
+      synth.connect(filter);
+      filter.connect(channelNode.volumeNode);
+      this.trackSynths.set(channelId, synth);
+      this.trackFilters.set(channelId, filter);
+    }
+    return synth;
+  }
+
+  public playNotePreview(noteName: string, channelId?: string) {
     if (!this.isInitialized) this.init();
-    const usePiano = this.isMelodyPianoActive();
-    
+    const state = useSongStore.getState();
+    const activeTrack = state.tracks.find(t => t.id === state.activeTrackId);
+    const targetChannelId = channelId || (activeTrack ? activeTrack.channelId : 'melody');
+    const channelConfig = state.channels[targetChannelId];
+    const usePiano = channelConfig ? channelConfig.instrument === 'piano' : this.isMelodyPianoActive();
+
     try {
       if (usePiano && this.melodyPiano && this.melodyPiano.loaded) {
         const now = Tone.now();
         this.melodyPiano.keyDown({ note: noteName, time: now, velocity: 0.8 });
         this.melodyPiano.keyUp({ note: noteName, time: now + 0.3 });
       } else {
-        this.melodySynth.triggerAttackRelease(noteName, '8n');
+        const synth = this.getChannelSynth(targetChannelId);
+        synth.triggerAttackRelease(noteName, '8n');
       }
-      this.trackNote(noteName, 0.3, undefined, 'melody');
+      this.trackNote(noteName, 0.3, undefined, targetChannelId);
     } catch (e) {
       console.warn('Error tocando nota preview:', e);
     }
@@ -965,11 +1000,17 @@ class ToneEngine {
       this.activePressedNotesList = this.activePressedNotesList.filter(n => n !== noteName);
       this.activePressedNotesList.push(noteName);
 
-      const usePiano = this.isMelodyPianoActive();
+      const state = useSongStore.getState();
+      const activeTrack = state.tracks.find(t => t.id === state.activeTrackId);
+      const targetChannelId = activeTrack ? activeTrack.channelId : 'melody';
+      const channelConfig = state.channels[targetChannelId];
+      const usePiano = channelConfig ? channelConfig.instrument === 'piano' : this.isMelodyPianoActive();
+
       if (usePiano && this.melodyPiano && this.melodyPiano.loaded) {
         this.melodyPiano.keyDown({ note: noteName, time: Tone.now(), velocity: 0.8 });
       } else {
-        this.melodySynth.triggerAttack(noteName, Tone.now());
+        const synth = this.getChannelSynth(targetChannelId);
+        synth.triggerAttack(noteName, Tone.now());
       }
       this.trackNoteStart(noteName);
     } catch (e) {
@@ -984,15 +1025,21 @@ class ToneEngine {
       this.activePressedNotes.delete(noteName);
       this.activePressedNotesList = this.activePressedNotesList.filter(n => n !== noteName);
 
-      const usePiano = this.isMelodyPianoActive();
+      const state = useSongStore.getState();
+      const activeTrack = state.tracks.find(t => t.id === state.activeTrackId);
+      const targetChannelId = activeTrack ? activeTrack.channelId : 'melody';
+      const channelConfig = state.channels[targetChannelId];
+      const usePiano = channelConfig ? channelConfig.instrument === 'piano' : this.isMelodyPianoActive();
+
       if (usePiano && this.melodyPiano && this.melodyPiano.loaded) {
         this.melodyPiano.keyUp({ note: noteName, time: Tone.now() });
       } else {
+        const synth = this.getChannelSynth(targetChannelId);
         if (this.activePressedNotes.size === 0) {
-          this.melodySynth.triggerRelease(Tone.now());
+          synth.triggerRelease(Tone.now());
         } else {
           const nextNote = this.activePressedNotesList[this.activePressedNotesList.length - 1];
-          this.melodySynth.triggerAttack(nextNote, Tone.now());
+          synth.triggerAttack(nextNote, Tone.now());
         }
       }
       this.trackNoteStop(noteName);
@@ -1037,19 +1084,32 @@ class ToneEngine {
     if (e.repeat) return;
 
     const key = e.key.toLowerCase();
+    const state = useSongStore.getState();
+    if (state.isKeyboardMelodyEnabled !== this.cachedIsKeyboardMelodyEnabled ||
+          state.isKeyboardChromatic !== this.cachedIsKeyboardChromatic ||
+          state.keyboardCenterNote !== this.cachedKeyboardCenterNote) {
+        this.cachedIsKeyboardMelodyEnabled = state.isKeyboardMelodyEnabled;
+        this.cachedIsKeyboardChromatic = state.isKeyboardChromatic;
+        this.cachedKeyboardCenterNote = state.keyboardCenterNote || 'C4';
+      }
+    const centerMidi = Tone.Frequency(this.cachedKeyboardCenterNote || 'C4').toMidi();
+    const offsetSemitones = centerMidi - 60; // Offset relativo a C4
 
     if (this.cachedIsKeyboardChromatic) {
       const semitones = CHROMATIC_KEY_MAP[key];
       if (semitones !== undefined) {
         e.preventDefault();
-        const noteName = this.getChromaticNoteName(this.cachedKey, semitones);
+        const baseMidi = 60 + semitones + offsetSemitones;
+        const noteName = Tone.Frequency(baseMidi, 'midi').toNote();
         this.startNote(noteName);
       }
     } else {
       const scaleIndex = DIATONIC_KEY_MAP[key];
       if (scaleIndex !== undefined) {
         e.preventDefault();
-        const noteName = this.getDiatonicNoteName(this.cachedKey, this.cachedScale, scaleIndex);
+        const baseNote = this.getDiatonicNoteName(this.cachedKey, this.cachedScale, scaleIndex);
+        const noteMidi = Tone.Frequency(baseNote).toMidi() + offsetSemitones;
+        const noteName = Tone.Frequency(noteMidi, 'midi').toNote();
         this.startNote(noteName);
       }
     }
@@ -1064,21 +1124,25 @@ class ToneEngine {
       return;
     }
 
-    // S4: Leer de caché en lugar de getState()
     if (!this.cachedIsKeyboardMelodyEnabled) return;
 
     const key = e.key.toLowerCase();
+    const centerMidi = Tone.Frequency(this.cachedKeyboardCenterNote || 'C4').toMidi();
+    const offsetSemitones = centerMidi - 60;
 
     if (this.cachedIsKeyboardChromatic) {
       const semitones = CHROMATIC_KEY_MAP[key];
       if (semitones !== undefined) {
-        const noteName = this.getChromaticNoteName(this.cachedKey, semitones);
+        const baseMidi = 60 + semitones + offsetSemitones;
+        const noteName = Tone.Frequency(baseMidi, 'midi').toNote();
         this.stopNote(noteName);
       }
     } else {
       const scaleIndex = DIATONIC_KEY_MAP[key];
       if (scaleIndex !== undefined) {
-        const noteName = this.getDiatonicNoteName(this.cachedKey, this.cachedScale, scaleIndex);
+        const baseNote = this.getDiatonicNoteName(this.cachedKey, this.cachedScale, scaleIndex);
+        const noteMidi = Tone.Frequency(baseNote).toMidi() + offsetSemitones;
+        const noteName = Tone.Frequency(noteMidi, 'midi').toNote();
         this.stopNote(noteName);
       }
     }
@@ -1728,11 +1792,15 @@ class ToneEngine {
     const currentBeat = state.currentBeat;
     const now = Tone.now();
 
-    // 1. Liberar notas de melodía que ya no están programadas en la melodía actual para este beat
+    // 1. Liberar notas de melodía que ya no están programadas en ninguna pista para este beat
+    const allMelodyNotes = (state.tracks && state.tracks.length > 0)
+      ? state.tracks.flatMap((t: any) => t.notes || [])
+      : (state.melodyNotes || []);
+
     const stillActiveMelodyNotes = new Set(
-      state.melodyNotes
-        .filter(n => currentBeat >= n.startBeat && currentBeat < n.startBeat + n.durationBeats)
-        .map(n => n.note)
+      allMelodyNotes
+        .filter((n: any) => currentBeat >= n.startBeat && currentBeat < n.startBeat + n.durationBeats)
+        .map((n: any) => n.note)
     );
 
     Array.from(this.activeMelodyNotesSet).forEach(note => {
@@ -1814,17 +1882,7 @@ class ToneEngine {
                 console.error('Error tocando nota de piano:', e);
               }
             } else {
-              let synth = this.trackSynths.get(track.channelId);
-              if (!synth) {
-                synth = new Tone.PolySynth(Tone.Synth, {
-                  oscillator: { type: 'sine' },
-                  envelope: { attack: 0.05, decay: 0.2, sustain: 0.6, release: 0.4 }
-                });
-                const channelNode = this.getChannelNode(track.channelId);
-                synth.connect(this.synthFilter);
-                this.synthFilter.connect(channelNode.volumeNode);
-                this.trackSynths.set(track.channelId, synth);
-              }
+              const synth = this.getChannelSynth(track.channelId);
 
               if (channelConfig?.synthSettings) {
                 try {

@@ -3541,10 +3541,10 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 .mixer-drawer {
-  width: 440px;
-  max-width: 90vw;
+  width: 50vw;
+  max-width: 50vw;
   height: 100vh;
-  background: #111417;
+  background: var(--bg-primary);
   border-left: 2px solid var(--border-color);
   box-shadow: -15px 0 35px rgba(0, 0, 0, 0.8);
   display: flex;
@@ -3559,346 +3559,775 @@ input[type="range"]::-webkit-slider-thumb:hover {
   to { transform: translateX(0); }
 }
 
+/* --- Header compacto --- */
 .mixer-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem 1.25rem;
-  background: #181d22;
+  padding: 0.6rem 1rem;
+  background: var(--bg-secondary);
   border-bottom: 2px solid var(--border-color);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+  flex-shrink: 0;
 }
 
 .mixer-header-title {
   display: flex;
   align-items: center;
-  gap: 10px;
-  color: #00ffcc;
-  font-family: 'Share Tech Mono', monospace;
-  letter-spacing: 0.08em;
-}
-
-.mixer-header-title h2 {
-  font-size: 1.1rem;
-  margin: 0;
-  font-weight: 700;
-}
-
-.mixer-header-icon {
-  color: #00ffcc;
-  filter: drop-shadow(0 0 6px rgba(0, 255, 204, 0.6));
-}
-
-.mixer-close-btn {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
-  border-radius: 4px;
-  cursor: pointer;
-  padding: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
-}
-
-.mixer-close-btn:hover {
-  background: rgba(255, 51, 102, 0.2);
-  color: #ff3366;
-  border-color: #ff3366;
-}
-
-.mixer-channels-container {
-  flex: 1;
-  display: flex;
-  gap: 1rem;
-  padding: 1.25rem;
-  overflow-x: auto;
-  overflow-y: hidden;
-  align-items: stretch;
-  background: radial-gradient(circle at top right, #161b20, #0d1013);
-}
-
-.mixer-strip {
-  flex: 0 0 160px;
-  background: #171d22;
-  border: 1px solid var(--border-color);
-  border-top: 3px solid var(--channel-color, #00ffcc);
-  border-radius: 6px;
-  padding: 0.85rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
-  transition: all 0.2s ease;
-}
-
-.mixer-strip.is-muted {
-  opacity: 0.6;
-}
-
-.mixer-strip.is-solo {
-  border-color: #ffcc00;
-  box-shadow: 0 0 15px rgba(255, 204, 0, 0.3);
-}
-
-.mixer-strip.is-silenced {
-  opacity: 0.35;
-}
-
-.strip-header {
-  display: flex;
-  align-items: center;
   gap: 8px;
 }
 
+.mixer-header-title h2 {
+  font-family: 'VT323', monospace;
+  font-size: 1.25rem;
+  margin: 0;
+  font-weight: 400;
+  color: var(--text-primary);
+  letter-spacing: 0.06em;
+  text-shadow: 0 0 8px rgba(90, 158, 122, 0.4);
+}
+
+.mixer-header-icon {
+  color: var(--reposo);
+  filter: drop-shadow(0 0 5px rgba(90, 158, 122, 0.5));
+}
+
+.mixer-close-btn {
+  background: linear-gradient(to bottom, #302a3d 0%, #201a2b 100%);
+  border: 2px solid #14111a;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: none;
+  box-shadow: 0 3px 0 #120e18, inset 0 1px 0 rgba(255,255,255,0.12);
+}
+
+.mixer-close-btn:hover {
+  background: linear-gradient(to bottom, #373046 0%, #251e33 100%);
+  color: #ff3366;
+}
+
+.mixer-close-btn:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #120e18, inset 0 2px 4px rgba(0,0,0,0.6);
+}
+
+/* --- Channels container --- */
+.mixer-channels-container {
+  flex: 1;
+  display: flex;
+  gap: 6px;
+  padding: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  align-items: stretch;
+  background: radial-gradient(ellipse at 70% 20%, var(--bg-tertiary), var(--bg-primary) 80%);
+}
+
+.mixer-channels-container::-webkit-scrollbar {
+  height: 6px;
+}
+.mixer-channels-container::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+  border-radius: 3px;
+}
+.mixer-channels-container::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+.mixer-channels-container::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+/* --- Channel Strip base --- */
+.mixer-strip {
+  flex: 1 1 0;
+  min-width: 125px;
+  max-width: 165px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-top: 3px solid var(--channel-color, var(--reposo));
+  border-radius: 6px;
+  padding: 8px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255,255,255,0.04);
+  transition: opacity 0.2s ease;
+  height: calc(100% - 16px);
+  box-sizing: border-box;
+}
+
+.mixer-strip.is-muted {
+  opacity: 0.55;
+}
+
+.mixer-strip.is-solo {
+  border-color: var(--tension);
+  box-shadow: 0 0 14px rgba(176, 144, 64, 0.25), inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+.mixer-strip.is-silenced {
+  opacity: 0.3;
+}
+
+/* --- Master strip differentiation --- */
+.mixer-strip.is-master {
+  flex: 0 0 155px;
+  min-width: 155px;
+  max-width: 155px;
+  background: linear-gradient(180deg, rgba(176,144,64,0.08) 0%, var(--bg-secondary) 40%);
+  border-top: 3px solid var(--tension);
+  border-left: 3px solid var(--tension);
+  margin-right: 6px;
+  position: relative;
+}
+
+.mixer-strip.is-master::after {
+  content: '';
+  position: absolute;
+  right: -8px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: linear-gradient(to bottom, transparent, var(--border-color) 20%, var(--border-color) 80%, transparent);
+}
+
+/* --- Row 1: Strip Header (Fixed 28px) --- */
+.strip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
 .strip-color-badge {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  box-shadow: 0 0 8px currentColor;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor;
 }
 
 .strip-name {
   font-family: 'Share Tech Mono', monospace;
   font-weight: bold;
-  font-size: 0.95rem;
-  color: #ffffff;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  user-select: none;
 }
 
+.strip-name:hover {
+  color: #ffffff;
+  text-shadow: 0 0 4px rgba(255, 255, 255, 0.4);
+}
+
+.strip-name-input {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.8rem;
+  font-weight: bold;
+  color: var(--text-primary);
+  background: #07050a;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 1px 4px;
+  width: 100%;
+  outline: none;
+  box-shadow: 0 0 5px rgba(112, 96, 176, 0.4);
+}
+
+.strip-reorder-controls {
+  display: flex;
+  gap: 1px;
+  flex-shrink: 0;
+}
+
+.strip-move-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 1px;
+  display: flex;
+  align-items: center;
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+
+.strip-move-btn:hover:not(:disabled) {
+  opacity: 1;
+  color: var(--text-primary);
+}
+
+.strip-move-btn:disabled {
+  opacity: 0.2;
+  cursor: default;
+}
+
+/* --- Row 2: Instrument Row (Fixed 28px Across All Channels) --- */
 .strip-instrument-select {
   display: flex;
   align-items: center;
-  gap: 6px;
-  background: #0d1013;
+  gap: 4px;
+  background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  padding: 4px 6px;
+  padding: 2px 5px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.strip-instrument-select.master-instrument-row {
+  justify-content: center;
+  background: rgba(176, 144, 64, 0.06);
+  border-color: rgba(176, 144, 64, 0.25);
+}
+
+.strip-instrument-select.drum-instrument-row {
+  background: var(--bg-primary);
 }
 
 .strip-inst-icon {
   color: var(--text-secondary);
+  flex-shrink: 0;
 }
 
 .strip-select {
   background: none;
   border: none;
-  color: #00ffcc;
-  font-size: 0.75rem;
+  color: var(--reposo);
+  font-size: 0.7rem;
   font-family: 'Share Tech Mono', monospace;
   width: 100%;
   cursor: pointer;
   outline: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.strip-select-static {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-family: 'Share Tech Mono', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.85;
 }
 
 .strip-select option {
-  background: #111417;
-  color: #ffffff;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
 }
 
+.master-badge {
+  color: var(--tension);
+  font-weight: bold;
+  font-size: 0.7rem;
+  font-family: 'Share Tech Mono', monospace;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+
+.strip-synth-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  border-radius: 3px;
+  padding: 2px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s ease;
+}
+
+.strip-synth-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* --- Row 3: Mute/Solo Row (Fixed 28px Across All Channels) --- */
 .strip-ms-buttons {
   display: flex;
-  gap: 6px;
+  gap: 4px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.strip-ms-buttons.master-placeholder {
+  justify-content: center;
+  align-items: center;
+  background: #08060c;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.master-bus-label {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.62rem;
+  color: var(--tension);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.75;
 }
 
 .btn-mute, .btn-solo {
   flex: 1;
-  padding: 6px 0;
-  font-family: 'Share Tech Mono', monospace;
-  font-weight: bold;
-  font-size: 0.85rem;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  background: #0d1013;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.btn-mute.active {
-  background: #ff3366;
-  color: #ffffff;
-  border-color: #ff3366;
-  box-shadow: 0 0 10px rgba(255, 51, 102, 0.6);
-}
-
-.btn-solo.active {
-  background: #ffcc00;
-  color: #000000;
-  border-color: #ffcc00;
-  box-shadow: 0 0 10px rgba(255, 204, 0, 0.6);
-}
-
-.strip-fader-section {
-  flex: 1;
+  height: 100%;
+  padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  padding: 8px 0;
-  min-height: 140px;
+  font-family: 'Share Tech Mono', monospace;
+  font-weight: bold;
+  font-size: 0.75rem;
+  border: 2px solid #14111a;
+  border-radius: 4px;
+  background: linear-gradient(to bottom, #302a3d 0%, #201a2b 100%);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: none;
+  box-shadow: 0 2px 0 #120e18, inset 0 1px 0 rgba(255,255,255,0.1);
 }
 
-.strip-vu-meter {
-  width: 10px;
+.btn-mute:active, .btn-solo:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 #120e18, inset 0 1px 3px rgba(0,0,0,0.5);
+}
+
+.btn-mute.active {
+  background: linear-gradient(to bottom, #1d1827, #100b17);
+  color: #ff3366;
+  border-color: #14111a;
+  transform: translateY(1px);
+  box-shadow:
+    0 1px 0 #120e18,
+    inset 0 2px 4px rgba(0,0,0,0.6),
+    0 0 8px rgba(255, 51, 102, 0.35);
+  text-shadow: 0 0 6px rgba(255, 51, 102, 0.6);
+}
+
+.btn-solo.active {
+  background: linear-gradient(to bottom, #1d1827, #100b17);
+  color: var(--tension);
+  border-color: #14111a;
+  transform: translateY(1px);
+  box-shadow:
+    0 1px 0 #120e18,
+    inset 0 2px 4px rgba(0,0,0,0.6),
+    0 0 8px rgba(176, 144, 64, 0.35);
+  text-shadow: 0 0 6px rgba(176, 144, 64, 0.6);
+}
+
+/* --- Row 4: Peak dB Display & Clip LED (Fixed 22px Across All Channels) --- */
+.strip-peak-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 22px;
+  min-height: 22px;
+  max-height: 22px;
+  background: #08060c;
+  border: 1px solid #1a1622;
+  border-radius: 3px;
+  padding: 0 6px;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.7);
+  flex-shrink: 0;
+  box-sizing: border-box;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.strip-peak-display:hover {
+  background: #0f0c17;
+  border-color: var(--border-color);
+}
+
+.strip-peak-display:active {
+  transform: translateY(1px);
+}
+
+.strip-peak-display.clipping {
+  border-color: rgba(255, 51, 85, 0.5);
+  background: rgba(255, 51, 85, 0.08);
+}
+
+.strip-peak-display .peak-value {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.65rem;
+  font-weight: bold;
+  color: var(--reposo);
+  text-shadow: 0 0 4px rgba(90, 158, 122, 0.5);
+}
+
+.strip-peak-display.over-zero .peak-value {
+  color: var(--tension);
+  text-shadow: 0 0 4px rgba(176, 144, 64, 0.6);
+}
+
+.strip-peak-display.clipping .peak-value {
+  color: #ff3355;
+  text-shadow: 0 0 6px rgba(255, 51, 85, 0.8);
+}
+
+.clip-led {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 51, 85, 0.15);
+  border: 1px solid rgba(255, 51, 85, 0.3);
+  transition: all 0.1s ease;
+  flex-shrink: 0;
+}
+
+.clip-led.clipping {
+  background: #ff3355;
+  border-color: #ff3355;
+  box-shadow: 0 0 6px rgba(255, 51, 85, 0.9), 0 0 12px rgba(255, 51, 85, 0.5);
+  animation: clip-pulse 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes clip-pulse {
+  from { box-shadow: 0 0 6px rgba(255, 51, 85, 0.7), 0 0 12px rgba(255, 51, 85, 0.35); }
+  to   { box-shadow: 0 0 10px rgba(255, 51, 85, 0.9), 0 0 20px rgba(255, 51, 85, 0.6); }
+}
+
+/* --- Row 5: Fader Section with Full 100% Vertical Travel --- */
+.strip-fader-section {
+  flex: 1 1 auto;
+  min-height: 200px;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 0;
+  position: relative;
+  box-sizing: border-box;
+}
+
+/* High Precision dB Scale with Micro-ticks */
+.db-scale-column {
+  position: relative;
   height: 100%;
-  background: #090b0d;
-  border: 1px solid var(--border-color);
+  width: 26px;
+  flex-shrink: 0;
+}
+
+.db-major-mark {
+  position: absolute;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  transform: translateY(50%);
+  line-height: 1;
+}
+
+.db-mark-label {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.55rem;
+  color: var(--text-secondary);
+  opacity: 0.8;
+  text-align: right;
+  min-width: 14px;
+}
+
+.db-mark-line {
+  width: 5px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.db-major-mark:nth-child(2) .db-mark-line {
+  /* 0 dB Highlight */
+  background: rgba(255, 255, 255, 0.8);
+  width: 7px;
+  box-shadow: 0 0 3px rgba(255, 255, 255, 0.6);
+}
+
+.db-micro-tick {
+  position: absolute;
+  right: 0;
+  width: 2.5px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateY(50%);
+}
+
+/* Professional VU Meter Bar */
+.strip-vu-meter {
+  width: 8px;
+  height: 100%;
+  background: #08060c;
+  border: 1px solid #1a1622;
   border-radius: 2px;
   position: relative;
   overflow: hidden;
   display: flex;
   align-items: flex-end;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 255, 255, 0.02);
+  flex-shrink: 0;
 }
 
 .strip-vu-fill {
   width: 100%;
-  transition: height 0.08s ease-out;
+  transition: height 0.04s cubic-bezier(0.1, 0.8, 0.3, 1);
+  border-radius: 1px;
+  box-shadow: 0 0 6px currentColor;
 }
 
+/* Pure Slot Container & 3D Fader Cap (No solid background box) */
 .strip-fader-container {
   height: 100%;
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  position: relative;
   display: flex;
   align-items: center;
-}
-
-.strip-fader-input {
-  -webkit-appearance: slider-vertical;
-  appearance: slider-vertical;
-  width: 16px;
-  height: 100%;
-  background: #0d1013;
+  justify-content: center;
   cursor: pointer;
+  user-select: none;
+  touch-action: none;
+  background: transparent;
 }
 
+.analog-fader-rail {
+  position: absolute;
+  width: 4px;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #07050a;
+  border: 1px solid #1a1524;
+  border-radius: 2px;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.95), 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+/* 3D Console Fader Cap (Smooth full-range travel) */
+.analog-fader-cap {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 38px;
+  height: 18px;
+  border-radius: 3px;
+  background: linear-gradient(
+    to bottom,
+    #4a4258 0%,
+    #352e42 20%,
+    #221c2c 48%,
+    #140f1c 52%,
+    #2a2336 80%,
+    #3a3248 100%
+  );
+  border: 1px solid #0d0a14;
+  box-shadow:
+    0 4px 10px rgba(0, 0, 0, 0.85),
+    0 1px 3px rgba(0, 0, 0, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transition: box-shadow 0.15s ease;
+}
+
+.strip-fader-container:hover .analog-fader-cap {
+  filter: brightness(1.12);
+}
+
+.strip-fader-container:active .analog-fader-cap {
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.95),
+    0 0 10px var(--channel-color, var(--reposo));
+}
+
+.fader-cap-notch {
+  width: 100%;
+  height: 2px;
+  background: var(--channel-color, var(--reposo));
+  box-shadow: 0 0 4px var(--channel-color, var(--reposo));
+}
+
+/* --- Row 6: dB Readout (Fixed 24px) --- */
 .strip-db-readout {
+  height: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   font-family: 'Share Tech Mono', monospace;
-  font-size: 0.75rem;
-  color: #00ffcc;
-  background: #090b0d;
-  padding: 3px 0;
+  font-size: 0.72rem;
+  font-weight: bold;
+  color: var(--channel-color, var(--reposo));
+  background: #08060c;
   border-radius: 3px;
-  border: 1px solid rgba(0, 255, 204, 0.2);
+  border: 1px solid var(--border-color);
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.7);
+  text-shadow: 0 0 5px currentColor;
+  cursor: pointer;
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 
+.strip-db-readout .db-unit {
+  font-size: 0.6rem;
+  opacity: 0.7;
+}
+
+/* --- Row 7: Pan Knob (Fixed 54px) --- */
 .strip-pan-knob-section {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+  height: 54px;
+  min-height: 54px;
+  max-height: 54px;
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .strip-pan-knob-labels {
   display: flex;
   justify-content: space-between;
   width: 100%;
-  font-size: 0.6rem;
+  font-size: 0.55rem;
   font-family: 'Share Tech Mono', monospace;
   color: var(--text-secondary);
+  opacity: 0.75;
 }
 
 .strip-pan-knob-value {
-  color: var(--channel-color, #00ffcc);
+  color: var(--channel-color, var(--reposo));
   font-weight: bold;
 }
 
 .pan-knob-container {
   position: relative;
-  width: 44px;
-  height: 44px;
-  cursor: pointer;
+  width: 38px;
+  height: 38px;
+  cursor: ns-resize;
+  user-select: none;
+  touch-action: none;
 }
 
 .pan-knob-track {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background: radial-gradient(circle, #1a1e24 60%, #0d1013 100%);
-  border: 2px solid #2a2e34;
+  background: radial-gradient(circle, var(--bg-tertiary) 60%, var(--bg-primary) 100%);
+  border: 2px solid var(--border-color);
   box-shadow:
     inset 0 2px 6px rgba(0,0,0,0.8),
-    0 1px 0 rgba(255,255,255,0.05);
+    0 1px 0 rgba(255,255,255,0.04);
 }
 
 .pan-knob-dial {
   position: absolute;
-  inset: 4px;
+  inset: 3px;
   border-radius: 50%;
   background: linear-gradient(135deg, #302a3d 0%, #201a2b 100%);
   box-shadow:
     0 2px 4px rgba(0,0,0,0.6),
-    inset 0 1px 0 rgba(255,255,255,0.12);
+    inset 0 1px 0 rgba(255,255,255,0.1);
   transition: transform 0.05s ease-out;
+  pointer-events: none;
 }
 
 .pan-knob-indicator {
   position: absolute;
-  top: 3px;
+  top: 2px;
   left: 50%;
   transform: translateX(-50%);
-  width: 3px;
+  width: 2px;
   height: 8px;
-  background: var(--channel-color, #00ffcc);
+  background: var(--channel-color, var(--reposo));
   border-radius: 1px;
-  box-shadow: 0 0 4px var(--channel-color, #00ffcc);
+  box-shadow: 0 0 4px var(--channel-color, var(--reposo));
 }
 
-.pan-knob-hidden-input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  cursor: pointer;
-  border-radius: 50%;
-}
-
+/* --- Add channel strip --- */
 .mixer-strip-add {
-  flex: 0 0 140px;
+  flex: 0 0 54px;
   display: flex;
   align-items: center;
   justify-content: center;
+  height: calc(100% - 16px);
+  box-sizing: border-box;
 }
 
 .btn-add-channel {
   width: 100%;
   height: 100%;
-  background: rgba(255, 255, 255, 0.02);
-  border: 2px dashed var(--border-color);
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px dashed var(--border-color);
   border-radius: 6px;
   color: var(--text-secondary);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .btn-add-channel:hover {
-  background: rgba(0, 255, 204, 0.05);
-  border-color: #00ffcc;
-  color: #00ffcc;
+  background: rgba(90, 158, 122, 0.06);
+  border-color: var(--reposo);
+  color: var(--reposo);
 }
 
+/* --- Footer --- */
 .mixer-footer {
-  padding: 0.85rem 1.25rem;
-  background: #181d22;
+  padding: 0.5rem 1rem;
+  background: var(--bg-secondary);
   border-top: 2px solid var(--border-color);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+  flex-shrink: 0;
 }
 
 .mixer-status {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 0.75rem;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
 }
 
 .status-ok {
-  color: #00ffcc;
+  color: var(--reposo);
+  opacity: 0.8;
 }
 
 .status-solo-warning {
-  color: #ffcc00;
+  color: var(--tension);
   font-weight: bold;
 }
 

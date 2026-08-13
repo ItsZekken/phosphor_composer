@@ -267,8 +267,8 @@ export const SettingsPanel = () => {
             onChange={(e) => setInstrumentType(e.target.value as 'synth' | 'piano')}
             style={{ width: '130px', padding: '0.25rem 0.5rem', fontSize: '0.78rem' }}
           >
-            <option value="synth">Sintetizador 💻</option>
-            <option value="piano">Piano 🎹</option>
+            <option value="synth">Sintetizador</option>
+            <option value="piano">Piano</option>
           </select>
         </div>
 
@@ -450,12 +450,12 @@ export const SettingsPanel = () => {
             onChange={(e) => setPattern(e.target.value)}
             style={{ width: '130px', padding: '0.25rem 0.5rem', fontSize: '0.78rem' }}
           >
-            <option value="hold">Sostenido ──</option>
-            <option value="quarters">Negras ♩</option>
-            <option value="eighths">Corcheas ♪</option>
-            <option value="pop">Piano Pop 🎹</option>
-            <option value="arpeggio">Arpegiador ⬈⬊</option>
-            <option value="strum">Rasgueado 🎸</option>
+            <option value="hold">Sostenido</option>
+            <option value="quarters">Negras</option>
+            <option value="eighths">Corcheas</option>
+            <option value="pop">Piano Pop</option>
+            <option value="arpeggio">Arpegio</option>
+            <option value="strum">Rasgueado</option>
             {customPatterns.length > 0 && (
               <optgroup label="MIDI">
                 {customPatterns.map(p => (

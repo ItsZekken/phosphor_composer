@@ -70,7 +70,7 @@ export function ExportProgressModal({
       >
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '20px' }}>🎙️</span>
+          <span style={{ fontSize: '20px' }}>wav</span>
           <div>
             <div style={{
               fontFamily: "'Share Tech Mono', monospace",
