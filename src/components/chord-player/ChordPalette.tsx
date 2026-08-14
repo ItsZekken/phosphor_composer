@@ -4,7 +4,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { ChordSuggestion } from '../../utils/typeDefinitions';
 import type { PaletteMode } from '../../store/songStore';
 import { toneEngine } from '../../audio/toneEngine';
-import { NOTE_CLASSES, getDiatonicChords } from '../../engine/scaleDefinitions';
+import { NOTE_CLASSES, getDiatonicChords } from '../../core/music';
 import type { NoteClass, ScaleType } from '../../utils/typeDefinitions';
 import { CircleFifthsView } from './CircleFifthsView';
 import { CadencesView } from './CadencesView';

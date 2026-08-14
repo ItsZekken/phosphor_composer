@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Search, Check } from 'lucide-react';
 import type { MelodyNote, NoteClass, ScaleType } from '../../utils/typeDefinitions';
-import { findMatchingScales, formatPitchClasses } from '../../engine/scaleFinder';
+import { findMatchingScales, formatPitchClasses } from '../../core/music';
 
 interface ScaleFinderSectionProps {
   selectedNoteIds: string[];

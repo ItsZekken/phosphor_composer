@@ -103,14 +103,18 @@ export const DrumSequencerView: React.FC = () => {
           </div>
 
           {/* Global M/S */}
-          <div className="drum-mute-solo" style={{ flexDirection: 'row', marginLeft: '0.5rem' }}>
+          <div style={{ display: 'inline-flex', gap: '4px', alignItems: 'center', marginLeft: '0.5rem' }}>
             <button 
               className={`ms-btn ${drumsMixer.muted ? 'active-mute' : ''}`}
               onClick={() => toggleMute('drums')}
+              style={{ width: '28px', height: '28px', fontSize: '0.72rem', fontWeight: 'bold' }}
+              title={drumsMixer.muted ? 'Desmutear batería' : 'Silenciar batería (Mute)'}
             >M</button>
             <button 
               className={`ms-btn ${drumsMixer.solo ? 'active-solo' : ''}`}
               onClick={() => toggleSolo('drums')}
+              style={{ width: '28px', height: '28px', fontSize: '0.72rem', fontWeight: 'bold' }}
+              title={drumsMixer.solo ? 'Desactivar Solo' : 'Aislar batería (Solo)'}
             >S</button>
           </div>
 

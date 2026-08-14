@@ -8,7 +8,7 @@ import { noteToMod12 } from './pitchClass';
 import { parseChord, getChordNotes } from './chordParser';
 import type { ScaleType } from './scaleDefinitions';
 import { getDiatonicChords, getChordRomanDegree } from './scaleDefinitions';
-import chordModelData from '../../engine/chordModel.json';
+import chordModelData from './chordModel.json';
 
 export interface ChordSuggestion {
   chord: string;
@@ -64,31 +64,42 @@ export function getHarmonicSuggestions(
 
   const rawSuggestions: { chord: string; baseProb: number; category: ChordSuggestion['category'] }[] = [];
 
-  // Mapear acordes diatónicos base
+  // Mapear acordes diatónicos base según función tonal en mayor vs menor
   diatonicBases.forEach((chordBase, index) => {
     let category: ChordSuggestion['category'];
     let baseProb = 0.5;
 
-    // Tónica, mediante, submediante (reposo / función de tónica)
-    if (index === 0 || index === 2 || index === 5) {
-      category = 'reposo';
-      baseProb = index === 0 ? 0.82 : 0.65;
-    } else if (index === 3 || index === 1) {
-      // Subdominante / ii
-      category = 'subdominante';
-      baseProb = index === 3 ? 0.70 : 0.60;
+    if (currentScale === 'major') {
+      if (index === 0 || index === 2 || index === 5) {
+        category = 'reposo'; // I, iii, vi
+        baseProb = index === 0 ? 0.85 : 0.65;
+      } else if (index === 3 || index === 1) {
+        category = 'subdominante'; // IV, ii
+        baseProb = index === 3 ? 0.72 : 0.62;
+      } else {
+        category = 'tensión'; // V, vii°
+        baseProb = index === 4 ? 0.78 : 0.55;
+      }
     } else {
-      // Dominante / Disminuido
-      category = 'tensión';
-      baseProb = index === 4 ? 0.75 : 0.55;
+      // Tonalidades menores o modales
+      if (index === 0 || index === 2 || index === 5) {
+        category = 'reposo'; // i, III, VI
+        baseProb = index === 0 ? 0.85 : 0.65;
+      } else if (index === 3 || index === 1) {
+        category = 'subdominante'; // iv, ii°
+        baseProb = index === 3 ? 0.72 : 0.58;
+      } else {
+        category = 'tensión'; // v / V, VII
+        baseProb = index === 4 ? 0.75 : 0.60;
+      }
     }
 
     const isDominant = index === 4;
-    const isDiminished = index === 6;
+    const isDiminished = index === 6 || (currentScale === 'minor' && index === 1);
 
     const variations = getChordVariations(chordBase, isDominant, isDiminished);
     variations.forEach((varChord, varIndex) => {
-      const probPenalty = varIndex * 0.07;
+      const probPenalty = varIndex * 0.06;
       rawSuggestions.push({
         chord: varChord,
         baseProb: Math.max(0.2, baseProb - probPenalty),
@@ -108,7 +119,7 @@ export function getHarmonicSuggestions(
         const probPenalty = varIndex * 0.05;
         rawSuggestions.push({
           chord: varChord,
-          baseProb: Math.max(0.18, 0.40 - probPenalty),
+          baseProb: Math.max(0.18, 0.42 - probPenalty),
           category: 'spicy'
         });
       });
@@ -130,7 +141,7 @@ export function getHarmonicSuggestions(
     }
   });
 
-  // 3. Modulación probabilística con Cadenas de Markov
+  // 3. Modulación probabilística con Cadenas de Markov Multi-Orden
   if (chordProgression && chordProgression.length > 0) {
     const validChords = chordProgression.filter(c => !!c && c.trim().length > 0);
     const last1 = validChords[validChords.length - 1];
@@ -168,14 +179,15 @@ export function getHarmonicSuggestions(
       });
     }
 
-    // Regla de resolución de dominante a tónica
+    // Regla de resolución armónica (Dominante -> Tónica)
     if (last1) {
       const lastClean = last1.trim();
-      const isDominant = lastClean.includes('7') || lastClean.endsWith('sus4');
+      const parsedLast = parseChord(lastClean);
+      const isDominant = lastClean.includes('7') || lastClean.endsWith('sus4') || (parsedLast && parsedLast.quality === 'major' && rom1 === 'V');
 
       suggestions.forEach(sug => {
-        if (isDominant && !transitions && (sug.chord === diatonicBases[0] || sug.chord === `${diatonicBases[0]}maj7`)) {
-          sug.probability += 0.20;
+        if (isDominant && !transitions && (sug.chord === diatonicBases[0] || sug.chord === `${diatonicBases[0]}maj7` || sug.chord === `${diatonicBases[0]}m`)) {
+          sug.probability += 0.22;
         }
         // Penalizar repetición inmediata exacta del mismo acorde
         if (sug.chord === lastClean) {
@@ -207,7 +219,7 @@ export function getHarmonicSuggestions(
 
   // Normalizar límites [0.05, 0.99]
   suggestions.forEach(sug => {
-    sug.probability = Math.max(0.05, Math.min(0.99, sug.probability));
+    sug.probability = Math.max(0.05, Math.min(0.99, Math.round(sug.probability * 100) / 100));
   });
 
   return suggestions.sort((a, b) => b.probability - a.probability);

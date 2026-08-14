@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useSongStore } from '../../store/songStore';
 import { useShallow } from 'zustand/react/shallow';
-import { NOTE_CLASSES, getExtensionsForChord } from '../../engine/scaleDefinitions';
+import { NOTE_CLASSES, getExtensionsForChord } from '../../core/music';
 import type { NoteClass } from '../../utils/typeDefinitions';
 import { Trash2, Copy, X } from 'lucide-react';
 

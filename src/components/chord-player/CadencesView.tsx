@@ -7,7 +7,7 @@
 import React, { useMemo } from 'react';
 import type { NoteClass, ScaleType, ChordSuggestion } from '../../utils/typeDefinitions';
 import { toneEngine } from '../../audio/toneEngine';
-import { NOTE_CLASSES } from '../../engine/scaleDefinitions';
+import { NOTE_CLASSES } from '../../core/music';
 import { useSongStore } from '../../store/songStore';
 
 interface CadencesViewProps {

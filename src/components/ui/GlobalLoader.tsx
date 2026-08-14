@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useSongStore } from '../../store/songStore';
 import { toneEngine } from '../../audio/toneEngine';
-import { melodyPredictor } from '../../magenta/melodyPredictor';
 import { PhosphorLogo } from './PhosphorLogo';
 
 export const GlobalLoader: React.FC = () => {
@@ -19,15 +18,13 @@ export const GlobalLoader: React.FC = () => {
 
     const autoBoot = async () => {
       try {
-        // Inicializar audio y Magenta
+        // Inicializar audio
         await toneEngine.init();
         if (!isMounted) return;
 
         if (instrumentType === 'piano') {
           await toneEngine.setInstrument('piano');
         }
-
-        await melodyPredictor.init();
         if (!isMounted) return;
 
         // Breve pausa para contemplar el logo antes de abrir la cortina

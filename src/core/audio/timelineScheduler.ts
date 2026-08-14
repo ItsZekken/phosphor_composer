@@ -32,7 +32,7 @@ export function scheduleSessionTimeline(
 
   // 1. Armadura de Mute / Solo del Mixer
   const channels = session.mixer.channels || {};
-  const isAnyChannelSolo = Object.values(channels).some(c => c.solo);
+  const isAnyChannelSolo = Object.values(channels).filter(c => c.id !== 'master').some(c => c.solo);
 
   const isChannelAudible = (channelId: string) => {
     const ch = channels[channelId];

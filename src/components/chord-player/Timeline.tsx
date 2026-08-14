@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { useSongStore } from '../../store/songStore';
 import { useShallow } from 'zustand/react/shallow';
 import type { ChordBlock } from '../../utils/typeDefinitions';
-import { isChordInScale, getChordRomanDegree } from '../../engine/scaleDefinitions';
+import { isChordInScale, getChordRomanDegree } from '../../core/music';
 import { getChordRole } from './ChordPalette';
 import { ChordPropertiesPanel } from './ChordPropertiesPanel';
 import { CustomSelect } from '../ui/CustomSelect';

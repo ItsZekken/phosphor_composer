@@ -8,6 +8,9 @@ export type OfflineRenderProgressCallback = (elapsedSeconds: number, totalSecond
 export interface OfflineRenderOptions {
   sampleRate?: number;
   onProgress?: OfflineRenderProgressCallback;
+  normalize?: boolean;
+  targetPeakDb?: number;
+  drumBuffers?: Map<string, any>;
 }
 
 export interface ScheduledChordEvent {

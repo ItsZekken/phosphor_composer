@@ -57,7 +57,7 @@ export interface ChordSuggestion {
   category: 'reposo' | 'tensión' | 'spicy' | 'subdominante' | 'exotic';
 }
 
-export type ActiveView = 'chord' | 'piano-roll' | 'sequencer';
+export type ActiveView = 'chord' | 'piano-roll' | 'sequencer' | 'visualizer';
 
 export interface SynthSettings {
   waveType: 'sine' | 'triangle' | 'square' | 'sawtooth';

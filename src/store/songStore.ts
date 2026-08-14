@@ -1,1111 +1,139 @@
+/**
+ * songStore.ts
+ * Root Store de Phosphor compuesto por Slices modulares e historial de deshacer/rehacer con Zundo.
+ */
+
 import { create } from 'zustand';
 import { temporal } from 'zundo';
-import type { NoteClass, ScaleType, ChordBlock, MelodyNote, GhostNote, ChordSuggestion, ActiveView, ChannelConfig, ChannelInstrument } from '../utils/typeDefinitions';
-
-import { getHarmonicSuggestions } from '../engine/harmonyEngine';
-import { detectKey } from '../engine/keyDetector';
-import { toneEngine } from '../audio/toneEngine';
-import type { PatternDef } from '../patterns/patternTypes';
-import { loadCustomPatterns, invalidatePatternCache } from '../patterns/patternLoader';
-
-import { PRESET_DRUM_KITS, findMatchingKitId, inferCategoryFromChannel } from '../constants/drumKits';
+import type { SongStore } from './types';
+import { createTransportSlice, initialTransportState } from './slices/transportSlice';
+import { createHarmonySlice, initialHarmonyState } from './slices/harmonySlice';
+import { createTrackSlice, initialTrackState } from './slices/trackSlice';
+import { createDrumSlice, initialDrumState, DEFAULT_DRUM_CHANNELS } from './slices/drumSlice';
+import { createMixerSlice, initialMixerState, DEFAULT_CHANNELS } from './slices/mixerSlice';
+import { createUISlice, initialUIState } from './slices/uiSlice';
 import { NOTE_CLASSES, transposeNote, transposeChordName } from '../core/music';
 import { deserializeSession } from '../core/session';
 
-export type PaletteMode = 'matrix' | 'fifths' | 'cadences';
-
-const transposeNoteName = transposeNote;
-
-interface SongStore {
-  bpm: number;
-  key: NoteClass;
-  scale: ScaleType;
-  isAutoKey: boolean;         // true = la tónica se detecta automáticamente
-  detectedKey: string | null; // etiqueta de tonalidad detectada para mostrar en la UI
-  activeView: ActiveView;
-  paletteMode: PaletteMode;
-  chordBlocks: ChordBlock[];
-  melodyNotes: MelodyNote[];
-  isPlaying: boolean;
-  currentBeat: number;
-  playbackStep: number;
-  selectedChordId: string | null;
-  chordSuggestions: ChordSuggestion[];
-  ghostNotes: GhostNote[];
-  isLooping: boolean;
-  isMetronomeActive: boolean;
-  metroSubdivision: '4n' | '8n' | '16n';
-  metroVolume: number;
-  isAudioLoading: boolean;
-  isEngineReady: boolean;
-  isExporting: boolean;
-  exportProgress: number; // 0.0 – 1.0
-  instrumentType: 'synth' | 'piano';
-  draggingChord: string | null;
-  draggingStyle: string | null;
-  setDraggingStyle: (draggingStyle: string | null) => void;
-  timeSignature: '4/4' | '3/4' | '6/8';
-  pattern: string;
-  customPatterns: PatternDef[];
-  activeNotes: string[]; // Notas de armonía sonando en este momento (para el visualizador de piano)
-  activeMelodyNotes: string[]; // Notas de melodía sonando en este momento (color distinto en el visualizador)
-  swing: number; // Ratio de swing (0% a 100%)
-  sustain: boolean; // Pedal de sustain / resonancia de notas
-  chordOctaveShift: number; // Transposición global de acordes por octavas
-  isKeyboardMelodyEnabled: boolean;
-  isKeyboardChromatic: boolean;
-  keyboardCenterNote: string;
-  setKeyboardCenterNote: (keyboardCenterNote: string) => void;
-  channelOrder: string[];
-  setChannelOrder: (channelOrder: string[]) => void;
-  reorderChannels: (fromIndex: number, toIndex: number) => void;
-  isSynthModalOpen: boolean;
-  synthSettings: {
-    waveType: 'sine' | 'triangle' | 'square' | 'sawtooth';
-    envelope: {
-      attack: number;
-      decay: number;
-      sustain: number;
-      release: number;
-    };
-    filter: {
-      enabled: boolean;
-      type: 'lowpass' | 'highpass' | 'bandpass';
-      frequency: number;
-      Q: number;
-    };
-    detune: number;
-  };
-  
-  // Ajustes de UI / CRT
-  isCrtEnabled: boolean;
-  isSettingsOpen: boolean;
-  crtParams: {
-    scanlineOpacity: number;
-    scanlineSize: number;
-    curvature: number;
-    aberration: number;
-    bloom: number;
-    svgBlur: number;
-    phosphorHue: number;
-    phosphorSat: number;
-    tintStrength: number;
-    noise: number;
-    flicker: number;
-    vignette: number;
-    brightness: number;
-    contrast: number;
-    saturation: number;
-  };
-
-  // Estado del Secuenciador de Batería
-  drumChannels: import('../utils/typeDefinitions').DrumChannel[];
-  activeDrumKitId: string;
-  selectDrumKit: (kitId: string) => void;
-  userDrumPatternEdit: number;
-  currentDrumPatternEdit: number;
-  isLiveFollowLocked: boolean;
-  setCurrentDrumPatternEdit: (pattern: number) => void;
-  setCurrentDrumPatternEditLive: (pattern: number) => void;
-  addDrumChannel: (channel: import('../utils/typeDefinitions').DrumChannel) => void;
-  updateDrumChannel: (id: string, updates: Partial<import('../utils/typeDefinitions').DrumChannel>) => void;
-  toggleDrumStep: (channelId: string, stepIndex: number, patternIndex: number, forceState?: boolean) => void;
-  setDrumStepVelocity: (channelId: string, stepIndex: number, patternIndex: number, velocity: number) => void;
-
-  // Acciones de Copia de Patrón
-  clipboardPattern: import('../utils/typeDefinitions').DrumStep[][] | null;
-  copyDrumPattern: (sourcePatternIndex: number) => void;
-  pasteDrumPattern: (targetPatternIndex: number) => void;
-
-  // Estado de Cadena de Patrones (Pattern Chain / Arranger)
-  patternChain: import('../utils/typeDefinitions').PatternChainItem[];
-  isPatternRepeatOn: boolean;
-  currentChainItemId: string | null;
-  setPatternRepeatOn: (active: boolean) => void;
-  setCurrentChainItemId: (id: string | null) => void;
-  addChainItem: (patternIndex: number, repeatCount?: number) => void;
-  updateChainItem: (id: string, updates: Partial<import('../utils/typeDefinitions').PatternChainItem>) => void;
-  removeChainItem: (id: string) => void;
-  moveChainItem: (fromIndex: number, toIndex: number) => void;
-  removeDrumChannel: (id: string) => void;
-  reorderDrumChannels: (fromIndex: number, toIndex: number) => void;
-
-  // Estado del Mezclador (Mixer)
-  isMixerOpen: boolean;
-  channels: Record<string, ChannelConfig>;
-  setMixerOpen: (open: boolean) => void;
-  updateChannel: (id: string, updates: Partial<ChannelConfig>) => void;
-  toggleMute: (id: string) => void;
-  toggleSolo: (id: string) => void;
-  setChannelVolume: (id: string, volume: number) => void;
-  setChannelPan: (id: string, pan: number) => void;
-  setChannelInstrument: (id: string, instrument: ChannelInstrument) => void;
-
-  setBpm: (bpm: number) => void;
-
-  setKey: (key: NoteClass) => void;
-  setScale: (scale: ScaleType) => void;
-  setIsAutoKey: (auto: boolean) => void;
-  setPaletteMode: (mode: PaletteMode) => void;
-  setActiveView: (view: ActiveView) => void;
-  setPlaying: (isPlaying: boolean) => void;
-  setCurrentBeat: (beat: number) => void;
-  setPlaybackStep: (step: number) => void;
-  setLooping: (isLooping: boolean) => void;
-  setMetronomeActive: (isActive: boolean) => void;
-  setMetroSubdivision: (subdivision: '4n' | '8n' | '16n') => void;
-  setMetroVolume: (volume: number) => void;
-  setIsAudioLoading: (loading: boolean) => void;
-  setIsEngineReady: (ready: boolean) => void;
-  setIsExporting: (v: boolean) => void;
-  setExportProgress: (v: number) => void;
-  setInstrumentType: (type: 'synth' | 'piano') => void;
-  setDraggingChord: (chord: string | null) => void;
-  setTimeSignature: (timeSignature: '4/4' | '3/4' | '6/8') => void;
-  setPattern: (pattern: string) => void;
-  setCustomPatterns: (patterns: PatternDef[]) => void;
-  setActiveNotes: (notes: string[]) => void;
-  setActiveMelodyNotes: (notes: string[]) => void;
-  setSwing: (swing: number) => void;
-  setSustain: (sustain: boolean) => void;
-  setChordOctaveShift: (shift: number) => void;
-  refreshPatterns: () => Promise<void>;
-  setKeyboardMelodyEnabled: (enabled: boolean) => void;
-  setKeyboardChromatic: (chromatic: boolean) => void;
-  setSynthModalOpen: (open: boolean) => void;
-  setSynthSettings: (settings: Partial<SongStore['synthSettings']>) => void;
-  isAutoSuggestions: boolean;
-  setAutoSuggestions: (v: boolean) => void;
-  // Setters de UI / CRT
-  setCrtEnabled: (enabled: boolean) => void;
-  setSettingsOpen: (open: boolean) => void;
-  setCrtParams: (params: Partial<SongStore['crtParams']>) => void;
-
-  addChordBlock: (chord: string, startBeat: number, durationBeats?: number) => void;
-  updateChordBlock: (id: string, updates: Partial<Omit<ChordBlock, 'id'>>) => void;
-  removeChordBlock: (id: string) => void;
-  setSelectedChordId: (id: string | null) => void;
-
-  addMelodyNote: (note: Omit<MelodyNote, 'id'>) => void;
-  updateMelodyNote: (id: string, updates: Partial<Omit<MelodyNote, 'id'>>) => void;
-  removeMelodyNote: (id: string) => void;
-  setMelodyNotes: (notes: MelodyNote[]) => void;
-
-  // Pistas de Piano Roll Multicanal y Marcadores de Estilo
-  tracks: import('../utils/typeDefinitions').PianoRollTrack[];
-  activeTrackId: string;
-  styleMarkers: import('../utils/typeDefinitions').StyleMarker[];
-  editingChannelId: string | null;
-  clipboardNotes: MelodyNote[];
-
-  addPianoRollTrack: (name?: string) => void;
-  removePianoRollTrack: (id: string) => void;
-  renamePianoRollTrack: (id: string, name: string) => void;
-  setActiveTrackId: (id: string) => void;
-  updateTrackViewport: (id: string, viewport: Partial<import('../utils/typeDefinitions').PianoRollTrack['viewport']>) => void;
-  setTrackNotes: (trackId: string, notes: MelodyNote[]) => void;
-
-  addStyleMarker: (marker: import('../utils/typeDefinitions').StyleMarker) => void;
-  removeStyleMarker: (id: string) => void;
-  updateStyleMarker: (id: string, updates: Partial<import('../utils/typeDefinitions').StyleMarker>) => void;
-
-  openSynthConfigForChannel: (channelId: string) => void;
-  setChannelSynthSettings: (channelId: string, settings: import('../utils/typeDefinitions').SynthSettings) => void;
-  setClipboardNotes: (notes: MelodyNote[]) => void;
-
-  updateSuggestions: () => void;
-  setGhostNotes: (ghostNotes: GhostNote[]) => void;
-  transposeSong: (semitones: number) => void;
-  clearSong: () => void;
-  importSong: (session: unknown) => void;
-}
-
-export const DEFAULT_CHANNELS: Record<string, ChannelConfig> = {
-  master: {
-    id: 'master',
-    name: 'MASTER',
-    type: 'master',
-    instrument: 'synth',
-    volume: 80,
-    pan: 0,
-    muted: false,
-    solo: false,
-    color: '#ffaa00'
-  },
-  chords: {
-    id: 'chords',
-    name: 'Armonía',
-    type: 'chords',
-    instrument: 'synth',
-    volume: 80,
-    pan: 0,
-    muted: false,
-    solo: false,
-    color: '#00ffcc'
-  },
-  melody: {
-    id: 'melody',
-    name: 'Melodía 1',
-    type: 'melody',
-    instrument: 'synth',
-    volume: 85,
-    pan: 0,
-    muted: false,
-    solo: false,
-    color: '#ff00aa'
-  },
-  drums: {
-    id: 'drums',
-    name: 'Batería',
-    type: 'drums',
-    instrument: 'sampler' as ChannelInstrument,
-    volume: 80,
-    pan: 0,
-    muted: false,
-    solo: false,
-    color: '#00e5ff'
-  }
-};
-
-const createEmptyPatterns = (numPatterns = 8, length = 16) => 
-  Array.from({ length: numPatterns }).map(() => 
-    Array.from({ length }).map(() => ({ isActive: false, velocity: 0.8 }))
-  );
-
-export const DEFAULT_DRUM_CHANNELS: import('../utils/typeDefinitions').DrumChannel[] = [
-  { id: 'kick_1', name: 'Kick', sampleUrl: '/drums/kicks/kick1.wav', patterns: createEmptyPatterns(), volume: 80, pan: 0, muted: false, solo: false },
-  { id: 'snare_1', name: 'Snare', sampleUrl: '/drums/snares/snare1.wav', patterns: createEmptyPatterns(), volume: 80, pan: 0, muted: false, solo: false },
-  { id: 'hihat_closed', name: 'HiHat (C)', sampleUrl: '/drums/hihats_closed/hihat_closed1.wav', patterns: createEmptyPatterns(), volume: 70, pan: 0, muted: false, solo: false },
-  { id: 'hihat_open', name: 'HiHat (O)', sampleUrl: '/drums/hihats_open/hihat_open1.wav', patterns: createEmptyPatterns(), volume: 70, pan: 0, muted: false, solo: false },
-  { id: 'clap_1', name: 'Clap', sampleUrl: '/drums/claps/clap1.wav', patterns: createEmptyPatterns(), volume: 75, pan: 0, muted: false, solo: false },
-  { id: 'crash_1', name: 'Crash', sampleUrl: '/drums/crashes/crash1.wav', patterns: createEmptyPatterns(), volume: 70, pan: 0, muted: false, solo: false }
-];
+export * from './types';
+export { DEFAULT_CHANNELS, DEFAULT_DRUM_CHANNELS };
 
 export const useSongStore = create<SongStore>()(
   temporal(
-    (set, get) => ({
-  bpm: 120,
-  key: 'C',
-  scale: 'major',
-  isAutoKey: true,
-  detectedKey: null,
-  activeView: 'chord',
-  paletteMode: 'matrix',
-  chordBlocks: [],
-  melodyNotes: [],
-  isPlaying: false,
-  currentBeat: 0,
-  playbackStep: 0,
-  selectedChordId: null,
-  chordSuggestions: [],
-  ghostNotes: [],
-  isLooping: true,
-  isMetronomeActive: false,
-  metroSubdivision: '4n',
-  metroVolume: 50,
-  isAudioLoading: false,
-  isExporting: false,
-  exportProgress: 0,
-  isEngineReady: false,
-  instrumentType: 'synth',
-  timeSignature: '4/4',
-  pattern: 'hold',
-  customPatterns: [],
-  activeNotes: [],
-  activeMelodyNotes: [],
-  swing: 0,
-  sustain: false,
-  chordOctaveShift: 0,
-  isKeyboardMelodyEnabled: true,
-  isKeyboardChromatic: false,
-  keyboardCenterNote: 'C4',
-  setKeyboardCenterNote: (keyboardCenterNote) => set({ keyboardCenterNote }),
-  channelOrder: ['master', 'chords', 'melody', 'drums'],
-  setChannelOrder: (channelOrder) => set({ channelOrder }),
-  reorderChannels: (fromIndex, toIndex) => set((state) => {
-    const currentOrder = (state.channelOrder && Array.isArray(state.channelOrder) && state.channelOrder.length > 0)
-      ? state.channelOrder
-      : ['master', ...Object.keys(state.channels || {}).filter(k => k !== 'master')];
-    const newOrder = [...currentOrder];
-    if (fromIndex < 0 || fromIndex >= newOrder.length || toIndex < 0 || toIndex >= newOrder.length) return state;
-    const [moved] = newOrder.splice(fromIndex, 1);
-    newOrder.splice(toIndex, 0, moved);
-    return { channelOrder: newOrder };
-  }),
-  isSynthModalOpen: false,
-  isAutoSuggestions: false,
-  isMixerOpen: false,
-  clipboardPattern: null,
-  channels: DEFAULT_CHANNELS,
-  drumChannels: DEFAULT_DRUM_CHANNELS,
-  activeDrumKitId: 'kit_1',
-  userDrumPatternEdit: 0,
-  currentDrumPatternEdit: 0,
-  isLiveFollowLocked: false,
+    (set, get, api) => ({
+      ...createTransportSlice(set, get, api),
+      ...createHarmonySlice(set, get, api),
+      ...createTrackSlice(set, get, api),
+      ...createDrumSlice(set, get, api),
+      ...createMixerSlice(set, get, api),
+      ...createUISlice(set, get, api),
 
-  tracks: [
-    {
-      id: 'track_melody_1',
-      name: 'Melodía 1',
-      channelId: 'melody',
-      color: '#ff00aa',
-      notes: [],
-      viewport: { scrollLeft: 0, scrollTop: 600, beatWidth: 40, rowHeight: 20 }
-    }
-  ],
-  activeTrackId: 'track_melody_1',
-  styleMarkers: [],
-  editingChannelId: 'chords',
-  clipboardNotes: [],
+      transposeSong: (semitones: number) => {
+        set((state) => {
+          const nextTracks = state.tracks.map((track) => ({
+            ...track,
+            notes: (track.notes || []).map((n) => ({
+              ...n,
+              midi: n.midi + semitones,
+              note: transposeNote(n.note, semitones)
+            }))
+          }));
 
-  addPianoRollTrack: (name) => set((state) => {
-    const trackNum = state.tracks.length + 1;
-    const trackId = `track_${Date.now()}`;
-    const channelId = `ch_${trackId}`;
-    const trackName = name || `Melodía ${trackNum}`;
-    const trackColor = ['#00e5ff', '#ff00aa', '#a855f7', '#ffaa00', '#00ffcc', '#ff3366'][state.tracks.length % 6];
+          const activeTrack = nextTracks.find((t) => t.id === state.activeTrackId) || nextTracks[0];
 
-    const newChannel: ChannelConfig = {
-      id: channelId,
-      name: trackName,
-      type: 'melody',
-      instrument: 'synth',
-      volume: 80,
-      pan: 0,
-      muted: false,
-      solo: false,
-      color: trackColor
-    };
+          const newChords = state.chordBlocks.map((block) => ({
+            ...block,
+            chord: transposeChordName(block.chord, semitones)
+          }));
 
-    const newTrack: import('../utils/typeDefinitions').PianoRollTrack = {
-      id: trackId,
-      name: trackName,
-      channelId: channelId,
-      color: trackColor,
-      notes: [],
-      viewport: { scrollLeft: 0, scrollTop: 600, beatWidth: 40, rowHeight: 20 }
-    };
+          const keyVal = NOTE_CLASSES.indexOf(state.key);
+          const newKey = NOTE_CLASSES[(((keyVal + semitones) % 12) + 12) % 12];
 
-    const currentOrder = state.channelOrder || ['master', 'chords', 'melody', 'drums'];
-    return {
-      channels: { ...state.channels, [channelId]: newChannel },
-      tracks: [...state.tracks, newTrack],
-      channelOrder: [...currentOrder, channelId],
-      activeTrackId: trackId,
-      melodyNotes: []
-    };
-  }),
-
-  removePianoRollTrack: (id) => set((state) => {
-    if (state.tracks.length <= 1) return state;
-    const track = state.tracks.find(t => t.id === id);
-    const nextTracks = state.tracks.filter(t => t.id !== id);
-    const nextActiveId = state.activeTrackId === id ? nextTracks[0].id : state.activeTrackId;
-    const nextActiveTrack = nextTracks.find(t => t.id === nextActiveId) || nextTracks[0];
-    const nextChannels = { ...state.channels };
-    if (track) {
-      delete nextChannels[track.channelId];
-    }
-    const currentOrder = state.channelOrder || Object.keys(state.channels || {});
-    const nextChannelOrder = currentOrder.filter(chId => chId !== track?.channelId);
-    return {
-      tracks: nextTracks,
-      activeTrackId: nextActiveId,
-      melodyNotes: nextActiveTrack ? nextActiveTrack.notes : [],
-      channels: nextChannels,
-      channelOrder: nextChannelOrder
-    };
-  }),
-
-  renamePianoRollTrack: (id, name) => set((state) => {
-    const track = state.tracks.find(t => t.id === id);
-    if (!track) return state;
-    const nextTracks = state.tracks.map(t => t.id === id ? { ...t, name } : t);
-    const nextChannels = { ...state.channels };
-    if (nextChannels[track.channelId]) {
-      nextChannels[track.channelId] = { ...nextChannels[track.channelId], name };
-    }
-    return { tracks: nextTracks, channels: nextChannels };
-  }),
-
-  setActiveTrackId: (id) => set((state) => {
-    const activeTrack = state.tracks.find(t => t.id === id);
-    return {
-      activeTrackId: id,
-      melodyNotes: activeTrack ? activeTrack.notes : state.melodyNotes
-    };
-  }),
-
-  updateTrackViewport: (id, viewport) => set((state) => ({
-    tracks: state.tracks.map(t => t.id === id ? { ...t, viewport: { ...t.viewport, ...viewport } } : t)
-  })),
-
-  setTrackNotes: (trackId, notes) => set((state) => ({
-    tracks: state.tracks.map(t => t.id === trackId ? { ...t, notes } : t),
-    melodyNotes: state.activeTrackId === trackId ? notes : state.melodyNotes
-  })),
-
-  addStyleMarker: (marker) => set((state) => ({
-    styleMarkers: [...state.styleMarkers.filter(m => m.beat !== marker.beat), marker].sort((a, b) => a.beat - b.beat)
-  })),
-
-  removeStyleMarker: (id) => set((state) => ({
-    styleMarkers: state.styleMarkers.filter(m => m.id !== id)
-  })),
-
-  updateStyleMarker: (id, updates) => set((state) => ({
-    styleMarkers: state.styleMarkers.map(m => m.id === id ? { ...m, ...updates } : m)
-  })),
-
-  openSynthConfigForChannel: (channelId) => set({
-    editingChannelId: channelId,
-    isSynthModalOpen: true
-  }),
-
-  setChannelSynthSettings: (channelId, settings) => set((state) => {
-    const ch = state.channels[channelId];
-    if (!ch) return state;
-    return {
-      channels: {
-        ...state.channels,
-        [channelId]: {
-          ...ch,
-          synthSettings: settings
-        }
-      }
-    };
-  }),
-
-  setClipboardNotes: (notes) => set({ clipboardNotes: notes }),
-
-  selectDrumKit: (kitId) => set((state) => {
-    if (kitId === 'custom') {
-      return { activeDrumKitId: 'custom' };
-    }
-
-    const kit = PRESET_DRUM_KITS.find(k => k.id === kitId);
-    if (!kit) return state;
-
-    const nextChannels = state.drumChannels.map(ch => {
-      const newSampleUrl = kit.samples[ch.id] || kit.samples[inferCategoryFromChannel(ch)];
-      if (newSampleUrl) {
-        return { ...ch, sampleUrl: newSampleUrl };
-      }
-      return ch;
-    });
-
-    return {
-      drumChannels: nextChannels,
-  activeDrumKitId: kitId
-    };
-  }),
-
-  addDrumChannel: (channel) => set((state) => ({ drumChannels: [...state.drumChannels, channel] })),
-  updateDrumChannel: (id, updates) => set((state) => {
-    const nextChannels = state.drumChannels.map(ch => ch.id === id ? { ...ch, ...updates } : ch);
-    const newKitId = updates.sampleUrl !== undefined ? findMatchingKitId(nextChannels) : state.activeDrumKitId;
-
-    if (updates.pan !== undefined) {
-      toneEngine.updateDrumChannelPan(id, updates.pan);
-    }
-
-    return { 
-      drumChannels: nextChannels,
-      activeDrumKitId: newKitId
-    };
-  }),
-  removeDrumChannel: (id) => set((state) => {
-    toneEngine.removeDrumPlayer(id);
-    return { drumChannels: state.drumChannels.filter(c => c.id !== id) };
-  }),
-  reorderDrumChannels: (fromIndex, toIndex) => set((state) => {
-    if (
-      fromIndex === toIndex ||
-      fromIndex < 0 ||
-      toIndex < 0 ||
-      fromIndex >= state.drumChannels.length ||
-      toIndex >= state.drumChannels.length
-    ) {
-      return state;
-    }
-    const nextChannels = [...state.drumChannels];
-    const [movedItem] = nextChannels.splice(fromIndex, 1);
-    nextChannels.splice(toIndex, 0, movedItem);
-    return { drumChannels: nextChannels };
-  }),
-
-  setCurrentDrumPatternEdit: (pattern: number) => set((state) => ({
-    userDrumPatternEdit: pattern,
-    currentDrumPatternEdit: pattern,
-    isLiveFollowLocked: state.isPlaying ? true : state.isLiveFollowLocked
-  })),
-  setCurrentDrumPatternEditLive: (pattern: number) => set({ currentDrumPatternEdit: pattern }),
-
-  // Acciones de Copia de Patrón
-  copyDrumPattern: (sourcePatternIndex) => set((state) => {
-    // Copiamos la información de TODOS los canales para ese index
-    const copiedData = state.drumChannels.map(ch => ch.patterns[sourcePatternIndex]);
-    return { clipboardPattern: copiedData };
-  }),
-  pasteDrumPattern: (targetPatternIndex) => set((state) => {
-    if (!state.clipboardPattern) return state;
-    
-    const nextChannels = state.drumChannels.map((ch, idx) => {
-      const nextPatterns = [...ch.patterns];
-      if (state.clipboardPattern && state.clipboardPattern[idx]) {
-        // Deep copy del pattern pegado
-        nextPatterns[targetPatternIndex] = state.clipboardPattern[idx].map(step => ({ ...step }));
-      }
-      return { ...ch, patterns: nextPatterns };
-    });
-    return { 
-      drumChannels: nextChannels,
-      userDrumPatternEdit: targetPatternIndex,
-      currentDrumPatternEdit: targetPatternIndex,
-      isLiveFollowLocked: state.isPlaying ? true : state.isLiveFollowLocked
-    };
-  }),
-
-  // Estado de Cadena de Patrones (Pattern Chain)
-  patternChain: [],
-  isPatternRepeatOn: true,
-  currentChainItemId: null,
-
-  setPatternRepeatOn: (active) => set({ isPatternRepeatOn: active }),
-  setCurrentChainItemId: (id) => set({ currentChainItemId: id }),
-
-  addChainItem: (patternIndex, repeatCount = 1) => set((state) => ({
-    patternChain: [...state.patternChain, { id: `chain_${Date.now()}`, type: 'pattern', patternIndex, repeatCount }]
-  })),
-
-  updateChainItem: (id, updates) => set((state) => ({
-    patternChain: state.patternChain.map(item => item.id === id ? { ...item, ...updates } : item)
-  })),
-
-  removeChainItem: (id) => set((state) => {
-    const nextChain = state.patternChain.filter(item => item.id !== id);
-    return { patternChain: nextChain };
-  }),
-
-  moveChainItem: (fromIndex, toIndex) => set((state) => {
-    if (fromIndex < 0 || fromIndex >= state.patternChain.length || toIndex < 0 || toIndex >= state.patternChain.length) return state;
-    const nextChain = [...state.patternChain];
-    const [moved] = nextChain.splice(fromIndex, 1);
-    nextChain.splice(toIndex, 0, moved);
-    return { patternChain: nextChain };
-  }),
-
-  toggleDrumStep: (channelId, stepIndex, patternIndex, forceState) => set((state) => {
-    let becameActive = false;
-    const nextChannels = state.drumChannels.map(ch => {
-      if (ch.id === channelId) {
-        const nextPatterns = [...ch.patterns];
-        const nextSteps = [...nextPatterns[patternIndex]];
-        if (nextSteps[stepIndex]) {
-          const isActivating = forceState !== undefined ? forceState : !nextSteps[stepIndex].isActive;
-          nextSteps[stepIndex] = {
-            ...nextSteps[stepIndex],
-            isActive: isActivating
+          return {
+            tracks: nextTracks,
+            melodyNotes: activeTrack ? activeTrack.notes : [],
+            chordBlocks: newChords,
+            key: newKey
           };
-          if (isActivating) becameActive = true;
-        }
-        nextPatterns[patternIndex] = nextSteps;
-        return { ...ch, patterns: nextPatterns };
-      }
-      return ch;
-    });
+        });
+        get().updateSuggestions();
+      },
 
-    let nextChain = state.patternChain;
-    if (becameActive) {
-      const isInChain = state.patternChain.some(item => item.patternIndex === patternIndex);
-      if (!isInChain) {
-        nextChain = [...state.patternChain, { id: `chain_${Date.now()}`, type: 'pattern', patternIndex, repeatCount: 1 }];
-      }
-    }
+      clearSong: () => {
+        try {
+          localStorage.removeItem('phosphor_session');
+        } catch (_) {}
 
-    return { 
-      drumChannels: nextChannels, 
-      patternChain: nextChain,
-      userDrumPatternEdit: patternIndex,
-      ...(state.isPlaying && { isLiveFollowLocked: true })
-    };
-  }),
+        set({
+          ...initialTransportState,
+          ...initialHarmonyState,
+          ...initialTrackState,
+          ...initialDrumState,
+          ...initialMixerState,
+          ...initialUIState,
+          bpm: 100,
+          isAutoKey: false,
+          detectedKey: null,
+          isPlaying: false,
+          currentBeat: 0,
+          playbackStep: 0,
+        });
 
-  setDrumStepVelocity: (channelId, stepIndex, patternIndex, velocity) => set((state) => {
-    const nextChannels = state.drumChannels.map(ch => {
-      if (ch.id === channelId) {
-        const nextPatterns = [...ch.patterns];
-        const nextSteps = [...nextPatterns[patternIndex]];
-        if (nextSteps[stepIndex]) {
-          nextSteps[stepIndex] = { ...nextSteps[stepIndex], velocity };
-        }
-        nextPatterns[patternIndex] = nextSteps;
-        return { ...ch, patterns: nextPatterns };
-      }
-      return ch;
-    });
-    return { 
-      drumChannels: nextChannels,
-      userDrumPatternEdit: patternIndex,
-      ...(state.isPlaying && { isLiveFollowLocked: true })
-    };
-  }),
+        get().updateSuggestions();
+      },
 
-  setMixerOpen: (isMixerOpen) => set({ isMixerOpen }),
-  updateChannel: (id, updates) => set((state) => {
-    const existing = state.channels[id];
-    if (!existing) return state;
-    const updatedChannel = { ...existing, ...updates };
-    const newChannels = { ...state.channels, [id]: updatedChannel };
-    toneEngine.syncChannels(newChannels);
-    return { channels: newChannels };
-  }),
-  toggleMute: (id) => get().updateChannel(id, { muted: !get().channels[id]?.muted }),
-  toggleSolo: (id) => get().updateChannel(id, { solo: !get().channels[id]?.solo }),
-  setChannelVolume: (id, volume) => get().updateChannel(id, { volume }),
-  setChannelPan: (id, pan) => get().updateChannel(id, { pan }),
-  setChannelInstrument: (id, instrument) => {
-    get().updateChannel(id, { instrument });
-    if (id === 'chords' && (instrument === 'piano' || instrument === 'synth')) {
-      set({ instrumentType: instrument });
-    }
-  },
+      importSong: (sessionInput: unknown) => {
+        const { session } = deserializeSession(sessionInput);
+        const activeTrack = session.tracks.find((t) => t.id === session.activeTrackId) || session.tracks[0];
+        const activeMelodyNotes = activeTrack ? activeTrack.notes : [];
 
-  synthSettings: {
-    waveType: 'triangle',
-    envelope: {
-      attack: 0.1,
-      decay: 0.3,
-      sustain: 0.4,
-      release: 0.8
-    },
-    filter: {
-      enabled: false,
-      type: 'lowpass',
-      frequency: 2000,
-      Q: 1
-    },
-    detune: 0
-  },
+        set({
+          bpm: session.transport.bpm,
+          key: session.transport.key,
+          scale: session.transport.scale,
+          isAutoKey: session.transport.isAutoKey,
+          detectedKey: null,
+          timeSignature: session.transport.timeSignature,
+          pattern: session.harmony.defaultPattern,
+          chordBlocks: session.harmony.chordBlocks,
+          styleMarkers: session.harmony.styleMarkers,
+          chordOctaveShift: session.harmony.chordOctaveShift,
+          tracks: session.tracks,
+          activeTrackId: session.activeTrackId,
+          melodyNotes: activeMelodyNotes,
+          patternChain: session.drums.patternChain,
+          isPatternRepeatOn: session.drums.isPatternRepeatOn,
+          activeDrumKitId: session.drums.activeDrumKitId,
+          drumChannels: session.drums.drumChannels,
+          channels: session.mixer.channels,
+          channelOrder: session.mixer.channelOrder,
+          selectedChordId: null,
+          currentBeat: 0,
+          isPlaying: false,
+          ...(session.ui?.isCrtEnabled !== undefined && { isCrtEnabled: session.ui.isCrtEnabled }),
+          ...(session.ui?.crtParams && { crtParams: { ...get().crtParams, ...session.ui.crtParams } }),
+          ...(session.ui?.isKeyboardMelodyEnabled !== undefined && { isKeyboardMelodyEnabled: session.ui.isKeyboardMelodyEnabled }),
+          ...(session.ui?.isKeyboardChromatic !== undefined && { isKeyboardChromatic: session.ui.isKeyboardChromatic }),
+          ...(session.ui?.keyboardCenterNote && { keyboardCenterNote: session.ui.keyboardCenterNote })
+        });
 
-  // Estados CRT por defecto
-  isCrtEnabled: true,
-  isSettingsOpen: false,
-  crtParams: {
-    scanlineOpacity: 0.21,
-    scanlineSize: 5.0,
-    curvature: 29.0,
-    aberration: 2.0,
-    bloom: 0.5,
-    svgBlur: 0.5,
-    phosphorHue: 121,
-    phosphorSat: 31,
-    tintStrength: 0.04,
-    noise: 0.025,
-    flicker: 0.1,
-    vignette: 0.7,
-    brightness: 1.13,
-    contrast: 1.08,
-    saturation: 0.78
-  },
-
-  setBpm: (bpm) => set({ bpm }),
-
-  setKey: (key) => {
-    set({ key, isAutoKey: false }); // el usuario tomó el control
-    get().updateSuggestions();
-  },
-
-  setScale: (scale) => {
-    set({ scale, isAutoKey: false });
-    get().updateSuggestions();
-  },
-
-  setIsAutoKey: (isAutoKey) => {
-    set({ isAutoKey });
-    if (isAutoKey) get().updateSuggestions();
-  },
-
-  setPaletteMode: (paletteMode) => set({ paletteMode }),
-
-  setActiveView: (activeView) => set({ activeView }),
-  setPlaying: (isPlaying) => set((state) => {
-    if (!isPlaying) {
-      return {
-        isPlaying: false,
-        isLiveFollowLocked: false,
-        currentDrumPatternEdit: state.userDrumPatternEdit,
-        playbackStep: -1
-      };
-    } else {
-      return {
-        isPlaying: true,
-        isLiveFollowLocked: false,
-        userDrumPatternEdit: state.currentDrumPatternEdit
-      };
-    }
-  }),
-  setCurrentBeat: (currentBeat) => {
-    const oldBeat = get().currentBeat;
-    set({ currentBeat });
-    // S9: No recalcular sugerencias durante la reproducción — evita detectKey() cada compas
-    if (get().isPlaying) return;
-    if (!get().selectedChordId) {
-      // Solo actualizamos sugerencias si el compás cambió.
-      // El compás depende de beatsPerMeasure, pero dado que updateSuggestions asume compases de 4 beats,
-      // usaremos el mismo divisor (4) que usa updateSuggestions internamente para ser consistentes.
-      const oldMeasure = Math.floor(oldBeat / 4);
-      const newMeasure = Math.floor(currentBeat / 4);
-      if (oldMeasure !== newMeasure) {
         get().updateSuggestions();
       }
+    }),
+    {
+      partialize: (state) => ({
+        bpm: state.bpm,
+        key: state.key,
+        scale: state.scale,
+        chordBlocks: state.chordBlocks,
+        tracks: state.tracks,
+        styleMarkers: state.styleMarkers,
+        timeSignature: state.timeSignature,
+        pattern: state.pattern,
+        chordOctaveShift: state.chordOctaveShift,
+        drumChannels: state.drumChannels,
+        patternChain: state.patternChain,
+      }),
     }
-  },
-  setPlaybackStep: (step: number) => set({ playbackStep: step }),
-  setLooping: (isLooping) => set({ isLooping }),
-  setMetronomeActive: (isMetronomeActive) => set({ isMetronomeActive }),
-  setMetroSubdivision: (metroSubdivision) => set({ metroSubdivision }),
-  setMetroVolume: (metroVolume) => set({ metroVolume }),
-  setIsAudioLoading: (isAudioLoading) => set({ isAudioLoading }),
-  setIsEngineReady: (isEngineReady) => set({ isEngineReady }),
-  setIsExporting: (isExporting) => set({ isExporting }),
-  setExportProgress: (exportProgress) => set({ exportProgress }),
-  setInstrumentType: (instrumentType) => {
-    set({ instrumentType });
-    toneEngine.setInstrument(instrumentType);
-  },
-  draggingChord: null,
-  draggingStyle: null,
-  setDraggingStyle: (draggingStyle) => set({ draggingStyle }),
-  setDraggingChord: (draggingChord) => set({ draggingChord }),
-  setTimeSignature: (timeSignature) => set({ timeSignature }),
-  setPattern: (pattern) => set({ pattern }),
-  setCustomPatterns: (customPatterns) => set({ customPatterns }),
-  setActiveNotes: (activeNotes) => set({ activeNotes }),
-  setActiveMelodyNotes: (activeMelodyNotes) => set({ activeMelodyNotes }),
-  setSwing: (swing) => set({ swing }),
-  setSustain: (sustain) => set({ sustain }),
-  setChordOctaveShift: (chordOctaveShift) => set({ chordOctaveShift }),
-  refreshPatterns: async () => {
-    try {
-      const response = await fetch('/api/process-patterns');
-      if (!response.ok) {
-        console.warn('API de procesamiento falló o no está disponible en este entorno.');
-      }
-    } catch (e) {
-      console.warn('No se pudo invocar la API de procesamiento (puede estar en modo producción):', e);
-    }
-    invalidatePatternCache();
-    const newPatterns = await loadCustomPatterns();
-    set({ customPatterns: newPatterns });
-    get().updateSuggestions();
-  },
-  setKeyboardMelodyEnabled: (isKeyboardMelodyEnabled) => set({ isKeyboardMelodyEnabled }),
-  setKeyboardChromatic: (isKeyboardChromatic) => set({ isKeyboardChromatic }),
-  setSynthModalOpen: (isSynthModalOpen) => set({ isSynthModalOpen }),
-  setAutoSuggestions: (isAutoSuggestions) => set({ isAutoSuggestions }),
-  setSynthSettings: (updates) => set((state) => {
-    const newSettings = { ...state.synthSettings };
-    if (updates.waveType !== undefined) newSettings.waveType = updates.waveType;
-    if (updates.detune !== undefined) newSettings.detune = updates.detune;
-    
-    if (updates.envelope !== undefined) {
-      newSettings.envelope = { ...newSettings.envelope, ...updates.envelope };
-    }
-    if (updates.filter !== undefined) {
-      newSettings.filter = { ...newSettings.filter, ...updates.filter };
-    }
-    // S7: Notificar al toneEngine que hay nuevos ajustes incrementando la versión
-    // (evita JSON.stringify en cada tick del suscriptor)
-    toneEngine.bumpSynthSettingsVersion();
-    return { synthSettings: newSettings };
-  }),
-
-  setCrtEnabled: (isCrtEnabled) => set({ isCrtEnabled }),
-  setSettingsOpen: (isSettingsOpen) => set({ isSettingsOpen }),
-  setCrtParams: (updates) => set((state) => ({ crtParams: { ...state.crtParams, ...updates } })),
-
-  addChordBlock: (chord, startBeat, durationBeats = 4) => {
-    const newBlock: ChordBlock = {
-      id: Math.random().toString(36).substr(2, 9),
-      chord,
-      startBeat,
-      durationBeats
-    };
-    set((state) => {
-      const filtered = state.chordBlocks.filter(b => b.startBeat !== startBeat);
-      return { chordBlocks: [...filtered, newBlock].sort((a, b) => a.startBeat - b.startBeat) };
-    });
-    if (get().isAutoSuggestions) get().updateSuggestions();
-  },
-
-  updateChordBlock: (id, updates) => {
-    set((state) => ({
-      chordBlocks: state.chordBlocks.map(b => b.id === id ? { ...b, ...updates } : b)
-        .sort((a, b) => a.startBeat - b.startBeat)
-    }));
-    if (get().isAutoSuggestions) get().updateSuggestions();
-  },
-
-  removeChordBlock: (id) => {
-    set((state) => ({
-      chordBlocks: state.chordBlocks.filter(b => b.id !== id),
-      selectedChordId: state.selectedChordId === id ? null : state.selectedChordId
-    }));
-    if (get().isAutoSuggestions) get().updateSuggestions();
-  },
-
-  setSelectedChordId: (selectedChordId) => {
-    set({ selectedChordId });
-    if (get().isAutoSuggestions) get().updateSuggestions();
-  },
-
-  addMelodyNote: (noteData) => {
-    const newNote: MelodyNote = { id: Math.random().toString(36).substr(2, 9), ...noteData };
-    set((state) => {
-      const nextNotes = [...state.melodyNotes, newNote];
-      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? { ...t, notes: nextNotes } : t);
-      return { melodyNotes: nextNotes, tracks: nextTracks };
-    });
-    if (get().isAutoSuggestions) get().updateSuggestions();
-  },
-
-  updateMelodyNote: (id, updates) => {
-    set((state) => {
-      const nextNotes = state.melodyNotes.map(n => n.id === id ? { ...n, ...updates } : n);
-      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? { ...t, notes: nextNotes } : t);
-      return { melodyNotes: nextNotes, tracks: nextTracks };
-    });
-    if (get().isAutoSuggestions) get().updateSuggestions();
-  },
-
-  removeMelodyNote: (id) => {
-    set((state) => {
-      const nextNotes = state.melodyNotes.filter(n => n.id !== id);
-      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? { ...t, notes: nextNotes } : t);
-      return { melodyNotes: nextNotes, tracks: nextTracks };
-    });
-    if (get().isAutoSuggestions) get().updateSuggestions();
-  },
-
-  setMelodyNotes: (melodyNotes) => {
-    set((state) => {
-      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? { ...t, notes: melodyNotes } : t);
-      return { melodyNotes, tracks: nextTracks };
-    });
-    if (get().isAutoSuggestions) get().updateSuggestions();
-  },
-
-  updateSuggestions: () => {
-    const state = get();
-    const { chordBlocks, melodyNotes, selectedChordId, currentBeat } = state;
-    let { key, scale } = state;
-
-    // --- Auto-detección de tonalidad ---
-    if (state.isAutoKey && chordBlocks.length > 0) {
-      const chordNames = chordBlocks.map(b => b.chord);
-      const detected = detectKey(chordNames);
-      if (detected) {
-        // Solo actualizar si cambia para evitar renders extra
-        const detectedLabel = `${detected.key} ${detected.scale}`;
-        if (state.detectedKey !== detectedLabel) {
-          set({ key: detected.key, scale: detected.scale, detectedKey: detectedLabel });
-        }
-        key = detected.key;
-        scale = detected.scale;
-      }
-    } else if (state.isAutoKey && chordBlocks.length === 0) {
-      set({ detectedKey: null });
-    }
-
-    // --- Extraer notas melódicas del compás activo ---
-    let chordProgression: string[] = [];
-    let startRange = 0;
-    let endRange = 16;
-
-    if (selectedChordId) {
-      const selectedIdx = chordBlocks.findIndex(b => b.id === selectedChordId);
-      if (selectedIdx !== -1) {
-        const selected = chordBlocks[selectedIdx];
-        chordProgression = chordBlocks.slice(0, selectedIdx + 1).map(b => b.chord);
-        startRange = selected.startBeat;
-        endRange = selected.startBeat + selected.durationBeats;
-      }
-    } else {
-      const currentMeasure = Math.floor(currentBeat / 4);
-      startRange = currentMeasure * 4;
-      endRange = startRange + 4;
-      
-      // Si el usuario no ha seleccionado nada, asumimos que quiere sugerencias
-      // para continuar la canción desde el último acorde que exista.
-      chordProgression = chordBlocks.map(b => b.chord);
-    }
-
-    const activeMelodyNotes = melodyNotes.filter(n => {
-      const noteEnd = n.startBeat + n.durationBeats;
-      return n.startBeat < endRange && noteEnd > startRange;
-    });
-
-    const uniquePitchClasses = Array.from(new Set(activeMelodyNotes.map(n => n.midi % 12)));
-    const suggestions = getHarmonicSuggestions(key, scale, chordProgression, uniquePitchClasses);
-    
-    // Comparar con las sugerencias actuales para evitar actualizar si son idénticas
-    const currentSuggestions = state.chordSuggestions;
-    const isSame = currentSuggestions.length === suggestions.length &&
-      currentSuggestions.every((s, i) => s.chord === suggestions[i].chord && s.probability === suggestions[i].probability);
-    
-    if (!isSame) {
-      set({ chordSuggestions: suggestions });
-    }
-  },
-
-  setGhostNotes: (ghostNotes) => set({ ghostNotes }),
-
-  transposeSong: (semitones) => {
-    set((state) => {
-      const newNotes = state.melodyNotes.map(note => ({
-        ...note,
-        midi: note.midi + semitones,
-        note: transposeNoteName(note.note, semitones)
-      }));
-      const newChords = state.chordBlocks.map(block => ({
-        ...block,
-        chord: transposeChordName(block.chord, semitones)
-      }));
-      const keyVal = NOTE_CLASSES.indexOf(state.key);
-      const newKey = NOTE_CLASSES[(((keyVal + semitones) % 12) + 12) % 12] as NoteClass;
-      if (newNotes.length > 0) toneEngine.playNotePreview(newNotes[0].note);
-      return { melodyNotes: newNotes, chordBlocks: newChords, key: newKey };
-    });
-    get().updateSuggestions();
-  },
-
-  clearSong: () => {
-    try {
-      toneEngine.stop();
-      toneEngine.silence();
-    } catch (_) {}
-
-    try {
-      localStorage.removeItem('phosphor_session');
-    } catch (_) {}
-
-    set({
-      bpm: 100,
-      key: 'C',
-      scale: 'major',
-      isAutoKey: false,
-      detectedKey: null,
-      chordBlocks: [],
-      melodyNotes: [],
-      styleMarkers: [],
-      patternChain: [],
-      isPatternRepeatOn: false,
-      selectedChordId: null,
-      currentBeat: 0,
-      playbackStep: 0,
-      isPlaying: false,
-      activeNotes: [],
-      activeMelodyNotes: [],
-      ghostNotes: [],
-      chordSuggestions: [],
-      swing: 0,
-      sustain: false,
-      chordOctaveShift: 0,
-      keyboardCenterNote: 'C4',
-      userDrumPatternEdit: 0,
-      currentDrumPatternEdit: 0,
-      activeDrumKitId: 'kit_1',
-      drumChannels: DEFAULT_DRUM_CHANNELS,
-      channels: DEFAULT_CHANNELS,
-      channelOrder: ['master', 'chords', 'melody', 'drums'],
-      tracks: [
-        {
-          id: 'track_melody_1',
-          name: 'Melodía 1',
-          channelId: 'melody',
-          color: '#ff00aa',
-          notes: [],
-          viewport: { scrollLeft: 0, scrollTop: 600, beatWidth: 40, rowHeight: 20 }
-        }
-      ],
-      activeTrackId: 'track_melody_1'
-    });
-
-    try {
-      toneEngine.syncChannels(DEFAULT_CHANNELS);
-    } catch (_) {}
-    get().updateSuggestions();
-  },
-
-  importSong: (sessionInput) => {
-    toneEngine.stop();
-    const { session } = deserializeSession(sessionInput);
-    const activeTrack = session.tracks.find(t => t.id === session.activeTrackId) || session.tracks[0];
-    const activeMelodyNotes = activeTrack ? activeTrack.notes : [];
-
-    set({
-      bpm: session.transport.bpm,
-      key: session.transport.key,
-      scale: session.transport.scale,
-      isAutoKey: session.transport.isAutoKey,
-      detectedKey: null,
-      timeSignature: session.transport.timeSignature,
-      pattern: session.harmony.defaultPattern,
-      chordBlocks: session.harmony.chordBlocks,
-      styleMarkers: session.harmony.styleMarkers,
-      chordOctaveShift: session.harmony.chordOctaveShift,
-      tracks: session.tracks,
-      activeTrackId: session.activeTrackId,
-      melodyNotes: activeMelodyNotes,
-      patternChain: session.drums.patternChain,
-      isPatternRepeatOn: session.drums.isPatternRepeatOn,
-      activeDrumKitId: session.drums.activeDrumKitId,
-      drumChannels: session.drums.drumChannels,
-      channels: session.mixer.channels,
-      channelOrder: session.mixer.channelOrder,
-      selectedChordId: null,
-      currentBeat: 0,
-      isPlaying: false,
-      ...(session.ui?.isCrtEnabled !== undefined && { isCrtEnabled: session.ui.isCrtEnabled }),
-      ...(session.ui?.crtParams && { crtParams: { ...get().crtParams, ...session.ui.crtParams } }),
-      ...(session.ui?.isKeyboardMelodyEnabled !== undefined && { isKeyboardMelodyEnabled: session.ui.isKeyboardMelodyEnabled }),
-      ...(session.ui?.isKeyboardChromatic !== undefined && { isKeyboardChromatic: session.ui.isKeyboardChromatic }),
-      ...(session.ui?.keyboardCenterNote && { keyboardCenterNote: session.ui.keyboardCenterNote })
-    });
-
-    try {
-      toneEngine.syncChannels(session.mixer.channels);
-      if (Array.isArray(session.drums.drumChannels)) {
-        session.drums.drumChannels.forEach(ch => {
-          if (ch && ch.id && typeof ch.pan === 'number') {
-            toneEngine.updateDrumChannelPan(ch.id, ch.pan);
-          }
-        });
-      }
-    } catch (_) {}
-
-    get().updateSuggestions();
-  }
-}),
-{
-  partialize: (state) => ({
-    bpm: state.bpm,
-    key: state.key,
-    scale: state.scale,
-    chordBlocks: state.chordBlocks,
-    melodyNotes: state.melodyNotes,
-    tracks: state.tracks,
-    styleMarkers: state.styleMarkers,
-    timeSignature: state.timeSignature,
-    pattern: state.pattern,
-    chordOctaveShift: state.chordOctaveShift,
-    synthSettings: state.synthSettings,
-    channels: state.channels,
-    drumChannels: state.drumChannels,
-    patternChain: state.patternChain,
-  }),
-}
-)
+  )
 );
-

@@ -5118,29 +5118,43 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 .ms-btn {
-  background: #1a1622;
-  border: 1px solid #332d44;
-  color: #666;
-  font-size: 0.6rem;
-  font-weight: bold;
-  width: 18px;
-  height: 18px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.45);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  width: 22px;
+  height: 20px;
   border-radius: 3px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  user-select: none;
 }
 
-.active-mute {
-  background: #ff3366;
-  color: white;
-  border-color: #ff3366;
-  box-shadow: 0 0 5px rgba(255,51,102,0.5);
+.ms-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.85);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
-.active-solo {
-  background: #ffcc00;
-  color: #111;
-  border-color: #ffcc00;
-  box-shadow: 0 0 5px rgba(255,204,0,0.5);
+.active-mute, .ms-btn.active-mute, .btn-mute.active, .mute-toggle.active {
+  background: rgba(255, 59, 48, 0.25) !important;
+  color: #ff453a !important;
+  border-color: #ff453a !important;
+  box-shadow: 0 0 8px rgba(255, 69, 58, 0.45) !important;
+  text-shadow: 0 0 6px rgba(255, 69, 58, 0.6) !important;
+}
+
+.active-solo, .ms-btn.active-solo, .btn-solo.active, .solo-toggle.active {
+  background: rgba(255, 214, 10, 0.25) !important;
+  color: #ffd60a !important;
+  border-color: #ffd60a !important;
+  box-shadow: 0 0 8px rgba(255, 214, 10, 0.45) !important;
+  text-shadow: 0 0 6px rgba(255, 214, 10, 0.6) !important;
 }
 
 .drum-steps {
@@ -6094,6 +6108,600 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .phosphor-logo-svg.animated-glow {
   animation: logo-pulse 2s infinite ease-in-out;
 }
+
+/* ============================================================
+   STAGE VISUALIZER / LIVE PLAYBACK VIEW (4TH VIEW)
+   ============================================================ */
+
+.stage-view-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  padding: 10px 14px;
+  gap: 10px;
+  background: radial-gradient(circle at 50% 30%, #1c1826 0%, #120f18 100%);
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+.stage-view-container.zen-mode {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 150;
+  padding: 14px 20px;
+  background: #0d0a12;
+}
+
+/* 1. Stage Telemetry HUD */
+.stage-telemetry-hud {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(180deg, #201a2c 0%, #16121e 100%);
+  border: 1px solid #2e263d;
+  border-radius: 6px;
+  padding: 6px 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  flex-shrink: 0;
+}
+
+.stage-hud-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stage-hud-divider {
+  width: 1px;
+  height: 18px;
+  background: #2e263d;
+  margin: 0 4px;
+}
+
+.stage-hud-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: #252033;
+  border: 1px solid #372e4a;
+  border-radius: 4px;
+  color: #c4b8db;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.stage-hud-btn:hover {
+  background: #312a44;
+  color: #ffffff;
+  border-color: #554477;
+}
+
+.stage-hud-btn.active {
+  background: #3c3258;
+  color: #82a5f5;
+  border-color: #82a5f5;
+  box-shadow: 0 0 8px rgba(130, 165, 245, 0.4);
+}
+
+.stage-hud-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #110e17;
+  border: 1px solid #2a2238;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.82rem;
+  color: #e0d6f2;
+}
+
+.stage-bpm-led {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #443759;
+  transition: background-color 0.1s;
+}
+
+.stage-bpm-led.pulsing {
+  animation: bpm-pulse infinite cubic-bezier(0.1, 0.8, 0.2, 1);
+}
+
+@keyframes bpm-pulse {
+  0% {
+    background-color: #5a9e7a;
+    box-shadow: 0 0 8px #5a9e7a, 0 0 14px #5a9e7a;
+    transform: scale(1.2);
+  }
+  40% {
+    background-color: #5a9e7a;
+    box-shadow: 0 0 4px #5a9e7a;
+    transform: scale(1);
+  }
+  100% {
+    background-color: #272033;
+    box-shadow: none;
+    transform: scale(0.9);
+  }
+}
+
+.stage-hud-digits {
+  font-family: 'Share Tech Mono', monospace;
+  letter-spacing: 0.5px;
+}
+
+.stage-hud-code {
+  font-family: 'Share Tech Mono', monospace;
+  font-weight: bold;
+  color: #82a5f5;
+}
+
+.stage-lcd-display {
+  display: flex;
+  align-items: center;
+  background: #09070d;
+  border: 1px solid #231b30;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.95rem;
+  color: #5a9e7a;
+  letter-spacing: 1px;
+  box-shadow: inset 0 0 6px rgba(0, 0, 0, 0.8);
+}
+
+.stage-lcd-segment {
+  font-weight: bold;
+}
+
+.stage-lcd-dot {
+  opacity: 0.6;
+  margin: 0 2px;
+}
+
+.stage-active-chord-badge {
+  display: flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: #221c30;
+  border: 1px solid #b09040;
+  color: #ffd875;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.9rem;
+  font-weight: bold;
+  box-shadow: 0 0 10px rgba(176, 144, 64, 0.3);
+  animation: chord-glow 1.5s infinite alternate ease-in-out;
+}
+
+@keyframes chord-glow {
+  0% { box-shadow: 0 0 6px rgba(176, 144, 64, 0.2); }
+  100% { box-shadow: 0 0 12px rgba(176, 144, 64, 0.5); }
+}
+
+.stage-mode-group {
+  display: flex;
+  background: #15111d;
+  border: 1px solid #2b233a;
+  border-radius: 5px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.stage-mode-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: #7b6f94;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.stage-mode-btn:hover {
+  color: #d1c5e8;
+  background: #231c30;
+}
+
+.stage-mode-btn.active {
+  background: #342a4d;
+  color: #82a5f5;
+  box-shadow: 0 0 6px rgba(130, 165, 245, 0.3);
+}
+
+/* 2. Hero Grid: Oscilloscope & MIDI Waterfall */
+.stage-hero-grid {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 10px;
+  flex: 1;
+  min-height: 220px;
+}
+
+@media (max-width: 900px) {
+  .stage-hero-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.stage-hero-scope,
+.stage-hero-waterfall {
+  display: flex;
+  background: #110d18;
+  border: 1px solid #272036;
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.6), 0 3px 10px rgba(0, 0, 0, 0.3);
+}
+
+.master-visualizer-card,
+.midi-waterfall-card {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.master-visualizer-canvas,
+.midi-waterfall-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* 3. Channel Activity Deck */
+.stage-deck-section {
+  flex-shrink: 0;
+}
+
+.stage-channel-deck {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px;
+}
+
+.stage-channel-card {
+  flex: 1;
+  min-width: 110px;
+  background: linear-gradient(180deg, #1d1828 0%, #15111d 100%);
+  border: 1px solid #2d253d;
+  border-radius: 5px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  transition: border-color 0.2s;
+}
+
+.stage-channel-card.muted {
+  opacity: 0.45;
+}
+
+.stage-channel-card.solo {
+  box-shadow: 0 0 10px rgba(130, 165, 245, 0.3);
+}
+
+.stage-channel-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.stage-channel-identity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stage-channel-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.stage-channel-icon {
+  display: flex;
+  align-items: center;
+}
+
+.stage-channel-actions {
+  display: flex;
+  gap: 3px;
+}
+
+.stage-ch-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: #110e17;
+  border: 1px solid #2e263d;
+  border-radius: 3px;
+  color: #796c91;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.stage-ch-btn:hover {
+  background: #272036;
+  color: #d1c5e8;
+}
+
+.stage-ch-btn.active-mute {
+  background: #441c24;
+  color: #e04060;
+  border-color: #e04060;
+}
+
+.stage-ch-btn.active-solo {
+  background: #1c3248;
+  color: #82a5f5;
+  border-color: #82a5f5;
+}
+
+.stage-channel-meter-bg {
+  width: 100%;
+  height: 4px;
+  background: #0c0912;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.stage-channel-meter-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  transition: width 0.05s linear;
+}
+
+.stage-channel-notes {
+  display: flex;
+  gap: 3px;
+  min-height: 14px;
+  flex-wrap: wrap;
+}
+
+.stage-note-pill {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.65rem;
+  font-weight: bold;
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  line-height: 1;
+}
+
+/* 4. Arrangement Macro Tracker & Drum Chain */
+.stage-tracker-section {
+  flex-shrink: 0;
+}
+
+.stage-arrangement-tracker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #16121e;
+  border: 1px solid #2b233a;
+  border-radius: 6px;
+  padding: 8px 10px;
+  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+.stage-macro-timeline {
+  position: relative;
+  width: 100%;
+  height: 52px;
+  background: #0f0c15;
+  border: 1px solid #231c30;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 3px 0;
+}
+
+.stage-macro-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #ffffff;
+  box-shadow: 0 0 8px #ffffff, 0 0 14px #82a5f5;
+  z-index: 20;
+  pointer-events: none;
+  transition: left 0.04s linear;
+}
+
+.stage-chord-macro-lane {
+  position: relative;
+  width: 100%;
+  height: 24px;
+}
+
+.stage-macro-chord-block {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(90, 158, 122, 0.15);
+  border: 1px solid rgba(90, 158, 122, 0.4);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: bold;
+  color: #e3fadc;
+  box-sizing: border-box;
+}
+
+.stage-macro-chord-block.active {
+  border-color: #5a9e7a;
+  box-shadow: 0 0 8px rgba(90, 158, 122, 0.4);
+}
+
+.stage-chord-progress-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: rgba(90, 158, 122, 0.35);
+  pointer-events: none;
+}
+
+.stage-macro-chord-name {
+  position: relative;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.stage-tracks-macro-container {
+  position: relative;
+  width: 100%;
+  height: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stage-macro-track-lane {
+  position: relative;
+  width: 100%;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 2px;
+}
+
+.stage-macro-note-pill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 2px;
+  opacity: 0.75;
+}
+
+.stage-macro-note-pill.active {
+  opacity: 1;
+  filter: brightness(1.4);
+}
+
+/* Drum Tracker */
+.stage-drum-tracker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid #231c30;
+}
+
+.stage-drum-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #796c91;
+}
+
+.stage-drum-num {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.75rem;
+  font-weight: bold;
+}
+
+.stage-step-strip {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+}
+
+.stage-step-dot {
+  flex: 1;
+  height: 5px;
+  border-radius: 2px;
+  transition: background-color 0.05s;
+}
+
+.stage-step-dot.active {
+  transform: scaleY(1.3);
+}
+
+.stage-drum-chain-blocks {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  overflow-x: auto;
+}
+
+.stage-drum-chain-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 3px 6px;
+  border: 1px solid;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.stage-drum-chain-item.active {
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
+}
+
+.stage-drum-chain-tag {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stage-drum-chip {
+  color: #0d0a12;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.65rem;
+  font-weight: bold;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.stage-repeat-count {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.65rem;
+  color: #8c7fa6;
+}
+
+.stage-mini-step-strip {
+  display: flex;
+  gap: 1.5px;
+  width: 100%;
+}
+
+.stage-mini-step {
+  flex: 1;
+  height: 3px;
+  border-radius: 1px;
+}
+
+.stage-mini-step.active {
+  filter: brightness(1.5);
+  box-shadow: 0 0 4px currentColor;
+}
+
 
 
 

@@ -320,7 +320,17 @@ export function serializeSession(state: any, metadataUpdates?: Partial<SessionMe
       currentDrumPatternEdit: state.currentDrumPatternEdit
     },
     mixer: {
-      channels: state.channels || DEFAULT_CHANNELS,
+      channels: {
+        ...(state.channels || DEFAULT_CHANNELS),
+        chords: {
+          ...((state.channels || DEFAULT_CHANNELS).chords),
+          instrument: (state.channels || DEFAULT_CHANNELS).chords?.instrument || (state.instrumentType === 'piano' ? 'piano' : 'synth')
+        },
+        melody: {
+          ...((state.channels || DEFAULT_CHANNELS).melody),
+          instrument: (state.channels || DEFAULT_CHANNELS).melody?.instrument || (state.instrumentType === 'piano' ? 'piano' : 'synth')
+        }
+      },
       channelOrder: state.channelOrder || ['master', 'chords', 'melody', 'drums']
     },
     ui: {

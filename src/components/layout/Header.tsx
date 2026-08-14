@@ -3,7 +3,7 @@ import { useStore } from 'zustand';
 import { useSongStore } from '../../store/songStore';
 import { useShallow } from 'zustand/react/shallow';
 import { toneEngine } from '../../audio/toneEngine';
-import { NOTE_CLASSES, SCALE_INTERVALS } from '../../engine/scaleDefinitions';
+import { NOTE_CLASSES, SCALE_INTERVALS } from '../../core/music';
 import type { NoteClass, ScaleType } from '../../utils/typeDefinitions';
 import { Play, Square, Trash2, RefreshCw, Bell, Settings as SettingsIcon, Sliders, FolderOpen, Save, RotateCcw, RotateCw } from 'lucide-react';
 import { CustomSelect } from '../ui/CustomSelect';
@@ -223,6 +223,41 @@ export const Header = () => {
       (err) => {
         cancelExportRef.current = null;
         alert('Error al exportar audio: ' + err.message);
+      }
+    );
+
+    cancelExportRef.current = cancelFn;
+  };
+
+  const handleExportCompressedAudio = async () => {
+    setExportDropdownOpen(false);
+    if (chordBlocks.length === 0 && melodyNotes.length === 0) {
+      alert('La canción está vacía. Agrega notas o acordes primero.');
+      return;
+    }
+
+    setExportElapsed(0);
+    setExportTotal(0);
+
+    const cancelFn = toneEngine.exportToCompressed(
+      (elapsed, total) => {
+        setExportElapsed(elapsed);
+        setExportTotal(total);
+      },
+      ({ blob, extension }) => {
+        cancelExportRef.current = null;
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `phosphor_${key}_${scale}_${bpm}bpm_render.${extension}`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      },
+      (err) => {
+        cancelExportRef.current = null;
+        alert('Error al exportar audio comprimido: ' + err.message);
       }
     );
 
@@ -502,6 +537,9 @@ export const Header = () => {
               <div style={{ height: '1px', background: 'rgba(255,255,255,0.08)', margin: '4px 0' }} />
               <button className="export-dropdown-item" onClick={handleExportAudio}>
                 Exportar Audio (.wav)
+              </button>
+              <button className="export-dropdown-item" onClick={handleExportCompressedAudio}>
+                Exportar Audio Comprimido (.ogg / .webm)
               </button>
             </div>
           )}

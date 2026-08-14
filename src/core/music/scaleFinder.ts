@@ -1,5 +1,12 @@
-import type { NoteClass, ScaleType } from '../utils/typeDefinitions';
-import { NOTE_CLASSES, SCALE_INTERVALS, mod12ToNote } from './scaleDefinitions';
+/**
+ * scaleFinder.ts
+ * Encuentra y clasifica las escalas musicales que mejor coinciden con un conjunto de clases de pitch (0-11).
+ */
+
+import type { NoteClass } from './pitchClass';
+import { NOTE_CLASSES, mod12ToNote } from './pitchClass';
+import type { ScaleType } from './scaleDefinitions';
+import { SCALE_INTERVALS } from './scaleDefinitions';
 
 export interface ScaleMatch {
   key: NoteClass;

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useSongStore } from '../../store/songStore';
 import { useShallow } from 'zustand/react/shallow';
-import { X, Sliders, Activity, Radio } from 'lucide-react';
+import { X, Sliders, Activity, Radio, Play } from 'lucide-react';
 import { toneEngine } from '../../audio/toneEngine';
 
 export const SynthConfigModal: React.FC = () => {
@@ -29,7 +29,7 @@ export const SynthConfigModal: React.FC = () => {
   const targetChannelId = editingChannelId || 'chords';
   const targetChannel = channels[targetChannelId] || channels['chords'] || Object.values(channels)[0];
   const synthSettings = targetChannel?.synthSettings || {
-    waveType: 'sine',
+    waveType: 'triangle',
     detune: 0,
     envelope: { attack: 0.05, decay: 0.2, sustain: 0.7, release: 0.8 },
     filter: { enabled: true, type: 'lowpass', frequency: 3500, Q: 2 }
@@ -106,15 +106,20 @@ export const SynthConfigModal: React.FC = () => {
 
   if (!isSynthModalOpen) return null;
 
-  const updateSettings = (partial: any) => {
-    setChannelSynthSettings(targetChannelId, {
+  const updateSettings = (partial: any, triggerPreview = false) => {
+    const updated = {
       ...synthSettings,
       ...partial
-    });
+    };
+    setChannelSynthSettings(targetChannelId, updated);
+    toneEngine.updateSynthSettings(updated, targetChannelId);
+    if (triggerPreview) {
+      toneEngine.playNotePreview('C4', targetChannelId);
+    }
   };
 
   const handleWaveSelect = (waveType: 'sine' | 'triangle' | 'square' | 'sawtooth') => {
-    updateSettings({ waveType });
+    updateSettings({ waveType }, true);
   };
 
   const handleDetuneChange = (val: number) => {
@@ -136,7 +141,7 @@ export const SynthConfigModal: React.FC = () => {
         ...synthSettings.filter,
         enabled
       }
-    });
+    }, true);
   };
 
   const handleFilterChange = (key: 'type' | 'frequency' | 'Q', val: any) => {
@@ -191,9 +196,32 @@ export const SynthConfigModal: React.FC = () => {
             <Activity className="header-icon pulse-icon" size={16} />
             <span>SINTETIZADOR VIRTUAL // {targetChannel.name.toUpperCase()}</span>
           </div>
-          <button className="synth-close-btn" onClick={() => setSynthModalOpen(false)} title="Cerrar Panel">
-            <X size={16} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              className="synth-test-btn"
+              onClick={() => toneEngine.playNotePreview('C4', targetChannelId)}
+              title="Probar nota C4 en tiempo real"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                background: 'rgba(0, 229, 255, 0.15)',
+                border: '1px solid #00e5ff',
+                color: '#00e5ff',
+                borderRadius: '4px',
+                padding: '4px 10px',
+                fontSize: '0.72rem',
+                fontFamily: "'Share Tech Mono', monospace",
+                cursor: 'pointer',
+                fontWeight: 'bold'
+              }}
+            >
+              <Play size={12} /> PROBAR VOZ (C4)
+            </button>
+            <button className="synth-close-btn" onClick={() => setSynthModalOpen(false)} title="Cerrar Panel">
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         {/* Osciloscopio FFT en Tiempo Real */}

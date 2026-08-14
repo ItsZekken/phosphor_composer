@@ -97,6 +97,8 @@ export function noteToMidi(noteName: string): number {
   return 12 * (octave + 1) + mod12;
 }
 
+export const noteNameToMidi = noteToMidi;
+
 /**
  * Convierte un número MIDI (0..127) a su nombre de nota estándar con octava.
  * Ej: 60 -> "C4", 69 -> "A4", 61 -> "C#4"
@@ -107,6 +109,8 @@ export function midiToNote(midi: number): string {
   const octave = Math.floor(clamped / 12) - 1;
   return `${NOTE_CLASSES[mod12]}${octave}`;
 }
+
+export const midiToNoteName = midiToNote;
 
 /**
  * Desplaza una nota con octava un número dado de octavas enteras.

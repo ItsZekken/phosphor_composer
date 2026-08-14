@@ -4,6 +4,7 @@ import { ViewToggle } from './components/layout/ViewToggle';
 import { ChordPlayerView } from './components/chord-player/ChordPlayerView';
 import { PianoRollView } from './components/piano-roll/PianoRollView';
 import { DrumSequencerView } from './components/sequencer/DrumSequencerView';
+import { StageVisualizerView } from './components/visualizer/StageVisualizerView';
 import { useSongStore } from './store/songStore';
 import { toneEngine } from './audio/toneEngine';
 import { loadCustomPatterns } from './patterns/patternLoader';
@@ -195,6 +196,7 @@ export default function App() {
               {activeView === 'chord' && <ChordPlayerView />}
               {activeView === 'piano-roll' && <PianoRollView />}
               {activeView === 'sequencer' && <DrumSequencerView />}
+              {activeView === 'visualizer' && <StageVisualizerView />}
             </main>
           </div>
 

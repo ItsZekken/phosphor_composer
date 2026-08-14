@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useSongStore } from '../../store/songStore';
 import { useShallow } from 'zustand/react/shallow';
-import { X, Sliders, Music, Plus, Settings, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, Sliders, Music, Settings, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { ChannelInstrument, ChannelConfig } from '../../utils/typeDefinitions';
 import { CustomSelect } from './CustomSelect';
 import { toneEngine } from '../../audio/toneEngine';
@@ -124,7 +124,6 @@ export const MixerDrawer: React.FC = () => {
     setChannelVolume,
     setChannelPan,
     setChannelInstrument,
-    addPianoRollTrack,
     openSynthConfigForChannel,
     isPlaying
   } = useSongStore(
@@ -140,7 +139,6 @@ export const MixerDrawer: React.FC = () => {
       setChannelVolume: state.setChannelVolume,
       setChannelPan: state.setChannelPan,
       setChannelInstrument: state.setChannelInstrument,
-      addPianoRollTrack: state.addPianoRollTrack,
       openSynthConfigForChannel: state.openSynthConfigForChannel,
       isPlaying: state.isPlaying
     }))
@@ -304,16 +302,6 @@ export const MixerDrawer: React.FC = () => {
               />
             );
           })}
-
-          <div className="mixer-strip-add">
-            <button
-              className="btn-add-channel"
-              title="Añadir nueva pista de Piano Roll"
-              onClick={() => addPianoRollTrack()}
-            >
-              <Plus size={20} />
-            </button>
-          </div>
         </div>
 
         <div className="mixer-footer">

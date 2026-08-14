@@ -1,10 +1,11 @@
 /**
  * scripts/test-offline-audio.ts
- * Suite de pruebas para Timeline Scheduler y Renderizado Offline
+ * Suite de pruebas para Timeline Scheduler, Masterizado y Renderizado Offline a WAV
  */
 
 import { scheduleSessionTimeline } from '../src/core/audio/timelineScheduler';
 import type { SessionV2 } from '../src/core/session/sessionTypes';
+import { audioBufferToWav } from '../src/utils/wavEncoder';
 
 function assert(condition: boolean, msg: string) {
   if (!condition) {
@@ -141,4 +142,70 @@ const mutedScheduled = scheduleSessionTimeline(mutedSession);
 assert(mutedScheduled.chordEvents.length === 0, 'Muted chords channel produces 0 chord events');
 assert(mutedScheduled.trackEvents.length === 3, 'Melody track events are unaffected when only chords are muted');
 
-console.log('\n🎉 ALL OFFLINE AUDIO & SCHEDULER TESTS PASSED WITH 100% SUCCESS!');
+console.log('\n--- 3. Testing WAV Encoder & True Peak Normalization ---');
+
+// Mock de AudioBuffer estéreo a 44.1kHz con señal que excede 1.0 (clipping sintético)
+const sampleRate = 44100;
+const length = 4410; // 100ms
+const leftChannel = new Float32Array(length);
+const rightChannel = new Float32Array(length);
+
+// Inyectar pico de 1.8 (sobremodulado)
+for (let i = 0; i < length; i++) {
+  leftChannel[i] = Math.sin(2 * Math.PI * 440 * (i / sampleRate)) * 1.8;
+  rightChannel[i] = Math.cos(2 * Math.PI * 440 * (i / sampleRate)) * 1.8;
+}
+
+const mockAudioBuffer = {
+  numberOfChannels: 2,
+  sampleRate,
+  length,
+  getChannelData: (c: number) => (c === 0 ? leftChannel : rightChannel)
+} as any;
+
+const encodedWav = audioBufferToWav(mockAudioBuffer, { normalize: true, targetPeakDb: -0.3 });
+assert(encodedWav instanceof ArrayBuffer, 'WAV encoder returns valid ArrayBuffer');
+
+const expectedByteLength = 44 + (length * 2 * 2); // 44 header + 4410 samples * 2 channels * 2 bytes/sample
+assert(encodedWav.byteLength === expectedByteLength, `WAV file size is exact (${encodedWav.byteLength} bytes)`);
+
+// Verificar encabezado RIFF
+const view = new DataView(encodedWav);
+const riff = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+const wave = String.fromCharCode(view.getUint8(8), view.getUint8(9), view.getUint8(10), view.getUint8(11));
+assert(riff === 'RIFF', 'Header contains RIFF identifier');
+assert(wave === 'WAVE', 'Header contains WAVE identifier');
+
+// Verificar que las muestras estén dentro de [-32768, 32767] sin desbordamiento
+let maxIntSample = 0;
+for (let i = 44; i < encodedWav.byteLength; i += 2) {
+  const sample = view.getInt16(i, true);
+  maxIntSample = Math.max(maxIntSample, Math.abs(sample));
+}
+// Con targetPeakDb = -0.3, el pico máximo de 32767 * 10^(-0.3/20) ~ 31652
+assert(maxIntSample <= 32767 && maxIntSample >= 31000, `True Peak normalized successfully to target range (peak sample: ${maxIntSample})`);
+
+// Probar que señales suaves (pico = 0.25 por fader bajo) se preservan intactas sin sobre-amplificar
+const quietLeft = new Float32Array(length);
+const quietRight = new Float32Array(length);
+for (let i = 0; i < length; i++) {
+  quietLeft[i] = 0.25 * Math.sin(2 * Math.PI * 440 * (i / sampleRate));
+  quietRight[i] = 0.25 * Math.cos(2 * Math.PI * 440 * (i / sampleRate));
+}
+const quietBuffer = {
+  numberOfChannels: 2,
+  sampleRate,
+  length,
+  getChannelData: (c: number) => (c === 0 ? quietLeft : quietRight)
+} as any;
+const encodedQuietWav = audioBufferToWav(quietBuffer, { normalize: true, targetPeakDb: -0.3 });
+const quietView = new DataView(encodedQuietWav);
+let maxQuietSample = 0;
+for (let i = 44; i < encodedQuietWav.byteLength; i += 2) {
+  const sample = quietView.getInt16(i, true);
+  maxQuietSample = Math.max(maxQuietSample, Math.abs(sample));
+}
+// 32767 * 0.25 = ~8192
+assert(maxQuietSample <= 8300 && maxQuietSample >= 8000, `Fader volume preserved faithfully without artificial amplification (got ${maxQuietSample}, expected ~8192)`);
+
+console.log('\n🎉 ALL OFFLINE AUDIO, SCHEDULER & WAV MASTERING TESTS PASSED WITH 100% SUCCESS!\n');
