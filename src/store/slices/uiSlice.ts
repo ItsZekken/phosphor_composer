@@ -1,50 +1,66 @@
 import type { SliceCreator, UIState, UIActions } from '../types';
+import { DEFAULT_SYNTH_SETTINGS, normalizeSynthSettings } from '../../core/audio/engine/synthPresets';
+import type { CRTParams } from '../../utils/typeDefinitions';
+
+export const FIXED_CRT_PARAMS: CRTParams = {
+  scanlineOpacity: 0.23,
+  scanlineSize: 3.0,
+  curvature: 30.0,
+  aberration: 3.0,
+  bloom: 0.5,
+  svgBlur: 0.5,
+  phosphorHue: 210,
+  phosphorSat: 53,
+  tintStrength: 0.08,
+  noise: 0.050,
+  flicker: 0.09,
+  vignette: 1.00,
+  brightness: 1.40,
+  contrast: 1.08,
+  saturation: 0.78
+};
+
+const USER_SETTINGS_KEY = 'phosphor_user_settings';
+
+const loadSavedUserSettings = (): Partial<UIState> => {
+  try {
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem(USER_SETTINGS_KEY);
+      if (raw) return JSON.parse(raw);
+    }
+  } catch (e) {
+    console.warn('[uiSlice] No se pudieron cargar ajustes locales:', e);
+  }
+  return {};
+};
+
+const saveUserSettings = (settings: Partial<UIState>) => {
+  try {
+    if (typeof window !== 'undefined') {
+      const existing = loadSavedUserSettings();
+      localStorage.setItem(USER_SETTINGS_KEY, JSON.stringify({ ...existing, ...settings }));
+    }
+  } catch (e) {
+    console.warn('[uiSlice] No se pudieron guardar ajustes locales:', e);
+  }
+};
+
+const savedSettings = typeof window !== 'undefined' ? loadSavedUserSettings() : {};
 
 export const initialUIState: UIState = {
   activeView: 'chord',
   activeNotes: [],
   activeMelodyNotes: [],
   instrumentType: 'synth',
-  isKeyboardMelodyEnabled: true,
-  isKeyboardChromatic: false,
-  keyboardCenterNote: 'C4',
+  isKeyboardMelodyEnabled: savedSettings.isKeyboardMelodyEnabled !== undefined ? savedSettings.isKeyboardMelodyEnabled : true,
+  isKeyboardChromatic: savedSettings.isKeyboardChromatic !== undefined ? savedSettings.isKeyboardChromatic : false,
+  keyboardCenterNote: savedSettings.keyboardCenterNote || 'C4',
   isSynthModalOpen: false,
   editingChannelId: 'chords',
-  synthSettings: {
-    waveType: 'triangle',
-    envelope: {
-      attack: 0.1,
-      decay: 0.3,
-      sustain: 0.4,
-      release: 0.8
-    },
-    filter: {
-      enabled: false,
-      type: 'lowpass',
-      frequency: 2000,
-      Q: 1
-    },
-    detune: 0
-  },
-  isCrtEnabled: true,
+  synthSettings: { ...DEFAULT_SYNTH_SETTINGS },
+  isCrtEnabled: savedSettings.isCrtEnabled === true, // Default OFF (false)
   isSettingsOpen: false,
-  crtParams: {
-    scanlineOpacity: 0.21,
-    scanlineSize: 5.0,
-    curvature: 29.0,
-    aberration: 2.0,
-    bloom: 0.5,
-    svgBlur: 0.5,
-    phosphorHue: 121,
-    phosphorSat: 31,
-    tintStrength: 0.04,
-    noise: 0.025,
-    flicker: 0.1,
-    vignette: 0.7,
-    brightness: 1.13,
-    contrast: 1.08,
-    saturation: 0.78
-  }
+  crtParams: { ...FIXED_CRT_PARAMS }
 };
 
 export const createUISlice: SliceCreator<UIState & UIActions> = (set) => ({
@@ -63,9 +79,18 @@ export const createUISlice: SliceCreator<UIState & UIActions> = (set) => ({
     }
     return { instrumentType, channels };
   }),
-  setKeyboardMelodyEnabled: (isKeyboardMelodyEnabled) => set({ isKeyboardMelodyEnabled }),
-  setKeyboardChromatic: (isKeyboardChromatic) => set({ isKeyboardChromatic }),
-  setKeyboardCenterNote: (keyboardCenterNote) => set({ keyboardCenterNote }),
+  setKeyboardMelodyEnabled: (isKeyboardMelodyEnabled) => {
+    saveUserSettings({ isKeyboardMelodyEnabled });
+    set({ isKeyboardMelodyEnabled });
+  },
+  setKeyboardChromatic: (isKeyboardChromatic) => {
+    saveUserSettings({ isKeyboardChromatic });
+    set({ isKeyboardChromatic });
+  },
+  setKeyboardCenterNote: (keyboardCenterNote) => {
+    saveUserSettings({ keyboardCenterNote });
+    set({ keyboardCenterNote });
+  },
   setSynthModalOpen: (isSynthModalOpen) => set({ isSynthModalOpen }),
 
   openSynthConfigForChannel: (channelId) => set({
@@ -76,32 +101,31 @@ export const createUISlice: SliceCreator<UIState & UIActions> = (set) => ({
   setChannelSynthSettings: (channelId, settings) => set((state) => {
     const ch = state.channels[channelId];
     if (!ch) return state;
+    const normalized = normalizeSynthSettings(settings);
     return {
       channels: {
         ...state.channels,
         [channelId]: {
           ...ch,
-          synthSettings: settings
+          synthSettings: normalized
         }
       }
     };
   }),
 
   setSynthSettings: (updates) => set((state) => {
-    const newSettings = { ...state.synthSettings };
-    if (updates.waveType !== undefined) newSettings.waveType = updates.waveType;
-    if (updates.detune !== undefined) newSettings.detune = updates.detune;
-
-    if (updates.envelope !== undefined) {
-      newSettings.envelope = { ...newSettings.envelope, ...updates.envelope };
-    }
-    if (updates.filter !== undefined) {
-      newSettings.filter = { ...newSettings.filter, ...updates.filter };
-    }
+    const newSettings = normalizeSynthSettings({ ...state.synthSettings, ...updates });
     return { synthSettings: newSettings };
   }),
 
-  setCrtEnabled: (isCrtEnabled) => set({ isCrtEnabled }),
+  setCrtEnabled: (isCrtEnabled) => {
+    saveUserSettings({ isCrtEnabled });
+    set({ isCrtEnabled });
+  },
   setSettingsOpen: (isSettingsOpen) => set({ isSettingsOpen }),
-  setCrtParams: (updates) => set((state) => ({ crtParams: { ...state.crtParams, ...updates } })),
+  setCrtParams: (updates) => set((state) => {
+    const newParams = { ...state.crtParams, ...updates };
+    saveUserSettings({ crtParams: newParams });
+    return { crtParams: newParams };
+  }),
 });

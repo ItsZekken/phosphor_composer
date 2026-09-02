@@ -9,6 +9,7 @@ export * from './offlineRenderer';
 export * from './pianoSampler';
 export * from './engine/MixerGraph';
 export * from './engine/SynthVoiceManager';
+export * from './engine/ChannelInstrumentManager';
 export * from './engine/DrumSoundManager';
 export * from './engine/PreviewManager';
 export * from './engine/AudioTransport';

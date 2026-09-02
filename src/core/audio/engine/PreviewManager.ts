@@ -1,20 +1,17 @@
 /**
  * PreviewManager.ts
  * Orquestador de preescuchas interactivas de acordes, notas melódicas y tracking visual de teclas.
+ * Totalmente desacoplado mediante ChannelInstrumentManager para soportar cualquier canal e instrumento.
  */
 
 import * as Tone from 'tone';
 import { getChordNotes, shiftOctave, resolvePatternNoteToChord } from '../../music';
 import type { PatternDef } from '../../../patterns/patternTypes';
-import type { PianoSampler } from '../pianoSampler';
-import type { SynthVoiceManager } from './SynthVoiceManager';
+import type { ChannelInstrumentManager } from './ChannelInstrumentManager';
+import { useSongStore } from '../../../store/songStore';
 
 export interface PreviewContext {
-  synthManager: SynthVoiceManager;
-  getChordsPiano: () => PianoSampler | null;
-  getMelodyPiano: () => PianoSampler | null;
-  isChordPianoActive: () => boolean;
-  isMelodyPianoActive: () => boolean;
+  instrumentManager: ChannelInstrumentManager;
   onActiveNotesChange: (notes: string[]) => void;
   onActiveMelodyNotesChange: (notes: string[]) => void;
 }
@@ -41,8 +38,7 @@ export class PreviewManager {
   }
 
   public playChordPreview(chordName: string, chordOctaveShift = 0) {
-    const usePiano = this.ctx.isChordPianoActive();
-    const chordsPiano = this.ctx.getChordsPiano();
+    const isPiano = useSongStore.getState().channels.chords?.instrument === 'piano';
 
     try {
       let notes = getChordNotes(chordName, 4);
@@ -50,15 +46,8 @@ export class PreviewManager {
         notes = notes.map((note) => shiftOctave(note, chordOctaveShift));
       }
       if (notes.length > 0) {
-        if (usePiano && chordsPiano && chordsPiano.loaded) {
-          const now = Tone.now();
-          notes.forEach((note) => {
-            chordsPiano.keyDown({ note, time: now, velocity: 0.7 });
-            chordsPiano.keyUp({ note, time: now + 1.0 });
-          });
-        } else {
-          this.ctx.synthManager.chordSynth.triggerAttackRelease(notes, '2n');
-        }
+        const now = Tone.now();
+        this.ctx.instrumentManager.triggerAttackRelease('chords', isPiano, notes, '2n', now, 0.7);
       }
     } catch (e) {
       console.warn('Error tocando acorde preview:', e);
@@ -96,8 +85,7 @@ export class PreviewManager {
 
     this.previewStep = 0;
     const beatDurationMs = (60 / bpm) * 1000;
-    const usePiano = this.ctx.isChordPianoActive();
-    const chordsPiano = this.ctx.getChordsPiano();
+    const isPiano = useSongStore.getState().channels.chords?.instrument === 'piano';
 
     const playNoteImmediate = (note: string, durationMs: number, velocity = 0.6) => {
       const now = Tone.now();
@@ -105,16 +93,7 @@ export class PreviewManager {
       if (!this.activePreviewNotes.includes(note)) {
         this.activePreviewNotes.push(note);
       }
-      if (usePiano && chordsPiano && chordsPiano.loaded) {
-        try {
-          chordsPiano.keyDown({ note, time: now, velocity });
-          chordsPiano.keyUp({ note, time: now + durSec });
-        } catch (e) { console.error(e); }
-      } else {
-        try {
-          this.ctx.synthManager.chordSynth.triggerAttackRelease(note, durSec, now, velocity);
-        } catch (e) { console.error(e); }
-      }
+      this.ctx.instrumentManager.triggerAttackRelease('chords', isPiano, note, durSec, now, velocity);
       this.trackNote(note, durSec, undefined, 'harmony');
     };
 
@@ -126,20 +105,8 @@ export class PreviewManager {
           this.activePreviewNotes.push(note);
         }
       });
-      if (usePiano && chordsPiano && chordsPiano.loaded) {
-        this.previewNotes.forEach((note) => {
-          try {
-            chordsPiano.keyDown({ note, time: now, velocity });
-            chordsPiano.keyUp({ note, time: now + durSec });
-          } catch (e) { console.error(e); }
-          this.trackNote(note, durSec, undefined, 'harmony');
-        });
-      } else {
-        try {
-          this.ctx.synthManager.chordSynth.triggerAttackRelease(this.previewNotes, durSec, now, velocity);
-        } catch (e) { console.error(e); }
-        this.previewNotes.forEach((note) => this.trackNote(note, durSec, undefined, 'harmony'));
-      }
+      this.ctx.instrumentManager.triggerAttackRelease('chords', isPiano, this.previewNotes, durSec, now, velocity);
+      this.previewNotes.forEach((note) => this.trackNote(note, durSec, undefined, 'harmony'));
     };
 
     const playBassImmediate = (durationMs: number, velocity = 0.7) => {
@@ -275,16 +242,11 @@ export class PreviewManager {
     }
 
     const now = Tone.now();
-    const usePiano = this.ctx.isChordPianoActive();
-    const chordsPiano = this.ctx.getChordsPiano();
+    const isPiano = useSongStore.getState().channels.chords?.instrument === 'piano';
 
     this.activePreviewNotes.forEach((note) => {
       try {
-        if (usePiano && chordsPiano && chordsPiano.loaded) {
-          chordsPiano.keyUp({ note, time: now });
-        } else {
-          this.ctx.synthManager.chordSynth.triggerRelease(note, now);
-        }
+        this.ctx.instrumentManager.keyUp('chords', isPiano, note, now);
       } catch (_) {}
 
       this.activeNotesSet.delete(note);
@@ -300,16 +262,9 @@ export class PreviewManager {
   }
 
   public playNotePreview(noteName: string, channelId = 'melody', usePiano = false) {
-    const melodyPiano = this.ctx.getMelodyPiano();
     try {
-      if (usePiano && melodyPiano && melodyPiano.loaded) {
-        const now = Tone.now();
-        melodyPiano.keyDown({ note: noteName, time: now, velocity: 0.8 });
-        melodyPiano.keyUp({ note: noteName, time: now + 0.3 });
-      } else {
-        const synth = this.ctx.synthManager.getChannelSynth(channelId);
-        synth.triggerAttackRelease(noteName, '8n');
-      }
+      const now = Tone.now();
+      this.ctx.instrumentManager.triggerAttackRelease(channelId, usePiano, noteName, '8n', now, 0.8);
       this.trackNote(noteName, 0.3, undefined, channelId);
     } catch (e) {
       console.warn('Error tocando nota preview:', e);
@@ -322,13 +277,7 @@ export class PreviewManager {
       this.activePressedNotesList = this.activePressedNotesList.filter((n) => n !== noteName);
       this.activePressedNotesList.push(noteName);
 
-      const melodyPiano = this.ctx.getMelodyPiano();
-      if (usePiano && melodyPiano && melodyPiano.loaded) {
-        melodyPiano.keyDown({ note: noteName, time: Tone.now(), velocity: 0.8 });
-      } else {
-        const synth = this.ctx.synthManager.getChannelSynth(channelId);
-        synth.triggerAttack(noteName, Tone.now());
-      }
+      this.ctx.instrumentManager.keyDown(channelId, usePiano, noteName, Tone.now(), 0.8);
       this.trackNoteStart(noteName);
     } catch (e) {
       console.warn('Error starting note:', e);
@@ -340,18 +289,12 @@ export class PreviewManager {
       this.activePressedNotes.delete(noteName);
       this.activePressedNotesList = this.activePressedNotesList.filter((n) => n !== noteName);
 
-      const melodyPiano = this.ctx.getMelodyPiano();
-      if (usePiano && melodyPiano && melodyPiano.loaded) {
-        melodyPiano.keyUp({ note: noteName, time: Tone.now() });
+      if (this.activePressedNotes.size === 0) {
+        this.ctx.instrumentManager.releaseAll();
       } else {
-        const synth = this.ctx.synthManager.getChannelSynth(channelId);
-        if (this.activePressedNotes.size === 0) {
-          synth.releaseAll();
-        } else {
-          synth.triggerRelease(noteName, Tone.now());
-          const nextNote = this.activePressedNotesList[this.activePressedNotesList.length - 1];
-          synth.triggerAttack(nextNote, Tone.now());
-        }
+        this.ctx.instrumentManager.keyUp(channelId, usePiano, noteName, Tone.now());
+        const nextNote = this.activePressedNotesList[this.activePressedNotesList.length - 1];
+        this.ctx.instrumentManager.keyDown(channelId, usePiano, nextNote, Tone.now(), 0.8);
       }
       this.trackNoteStop(noteName);
     } catch (e) {
@@ -365,6 +308,7 @@ export class PreviewManager {
     startTime?: number,
     type: 'harmony' | 'melody' | string = 'harmony'
   ) {
+    if (useSongStore.getState().isPlaying) return;
     const now = Tone.now();
     const delayMs = startTime !== undefined ? Math.max(0, (startTime - now) * 1000) : 0;
     const durationMs = durationSeconds * 1000;

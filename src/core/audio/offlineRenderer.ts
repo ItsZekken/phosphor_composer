@@ -1,8 +1,11 @@
 /**
  * offlineRenderer.ts
- * Motor de renderizado offline de alta fidelidad con Tone.Offline y exportación a WAV / OGG / WebM.
- * Refleja exactamente la síntesis, envolventes ADSR, filtros VCF, sampler acústico de Piano,
- * paneo estéreo, volumen y balance de faders del mixer de Phosphor Composer.
+ * Motor de renderizado offline de alta fidelidad con Tone.Offline y exportación a WAV / MP3.
+ * Garantiza paridad acústica 1:1 con el playback en tiempo real:
+ * - Síntesis analógica multi-oscilador y filtros VCF.
+ * - Sampler acústico de Piano interpolado con buffers compartidos.
+ * - Envolventes de sustain, dinámicas de velocidad por nota y faders en dB.
+ * - Ruteo estéreo explícito y paneo individual por canal y golpe de batería.
  */
 
 import * as Tone from 'tone';
@@ -10,19 +13,13 @@ import type { SessionV2 } from '../session';
 import type { OfflineRenderOptions } from './audioTypes';
 import { scheduleSessionTimeline } from './timelineScheduler';
 import { audioBufferToWav } from '../../utils/wavEncoder';
-import { audioBufferToCompressedBlob, type CompressedAudioResult } from '../../utils/compressedAudioEncoder';
+import { audioBufferToMp3BlobAsync, type Mp3EncodeResult } from '../../utils/mp3Encoder';
 import type { PatternDef } from '../../patterns/patternTypes';
 import type { SynthSettings } from '../../utils/typeDefinitions';
-import { PIANO_URLS, PIANO_BASE_URL, preloadPianoBuffers } from './pianoSampler';
-
-/**
- * Convierte el valor de fader (0 a 100 con 80 = 0 dB) al valor en decibeles exacto del mixer.
- */
-function faderToDb(volume: number): number {
-  if (volume <= 0) return -Infinity;
-  const db = ((volume - 80) / 80) * 30;
-  return Math.max(-60, Math.min(6, db));
-}
+import { PIANO_URLS, PIANO_BASE_URL, preloadPianoBuffers, getSharedPianoBuffers } from './pianoSampler';
+import { PhosphorAnalogSynth } from './engine/PhosphorAnalogSynth';
+import { normalizeSynthSettings } from './engine/synthPresets';
+import { faderToDb } from './engine/MixerGraph';
 
 /**
  * Renderiza una sesión completa de forma offline a velocidad máxima de CPU
@@ -43,23 +40,48 @@ export async function renderSessionToAudioBuffer(
   const channels = session.mixer.channels || {};
 
   // 1. Precargar samples de Piano si algún canal tiene instrumento 'piano'
-  const hasPiano = Object.values(channels).some(ch => ch.instrument === 'piano');
+  const hasPiano = Object.values(channels).some((ch) => ch.instrument === 'piano');
   if (hasPiano) {
     try {
       await preloadPianoBuffers();
     } catch (_) {}
   }
 
+  const sharedBuffers = getSharedPianoBuffers();
+
   const renderedBuffer = await Tone.Offline(async () => {
-    // 2. Grafo Maestro de Audio Offline (Aplica fader y mute del Master)
+    // 2. Grafo Maestro de Audio Offline
     const masterCh = channels['master'];
     const masterVol = masterCh?.volume ?? 80;
+    const masterPan = masterCh ? Math.max(-1, Math.min(1, masterCh.pan)) : 0;
     const masterDb = faderToDb(masterVol);
-    const masterVolume = new Tone.Volume(masterDb).toDestination();
+
+    const masterPanner = new Tone.Panner(masterPan).toDestination();
+    const masterVolume = new Tone.Volume(masterDb).connect(masterPanner);
     if (masterCh?.muted) {
       masterVolume.mute = true;
     }
 
+    const enforceStereo = (node: any) => {
+      try {
+        const raw = node.input || node.output || node._gainNode || node._panner || node;
+        if (raw) {
+          raw.channelCount = 2;
+          raw.channelCountMode = 'explicit';
+          raw.channelInterpretation = 'speakers';
+        }
+        if (node._panner) {
+          node._panner.channelCount = 2;
+          node._panner.channelCountMode = 'explicit';
+          node._panner.channelInterpretation = 'speakers';
+        }
+      } catch (_) {}
+    };
+
+    enforceStereo(masterVolume);
+    enforceStereo(masterPanner);
+
+    // 3. Nodos de Canales Individuales
     const channelNodes = new Map<string, { volumeNode: Tone.Volume; pannerNode: Tone.Panner }>();
 
     const getChannelNode = (channelId: string) => {
@@ -75,6 +97,9 @@ export async function renderSessionToAudioBuffer(
           volumeNode.mute = true;
         }
         const pannerNode = new Tone.Panner(pan);
+        enforceStereo(volumeNode);
+        enforceStereo(pannerNode);
+
         volumeNode.connect(pannerNode);
         pannerNode.connect(masterVolume);
 
@@ -84,40 +109,8 @@ export async function renderSessionToAudioBuffer(
       return node;
     };
 
-    // 3. Creador de Instrumentos (Piano Sampler / Sintetizadores VCF)
+    // 4. Instanciación y Carga de Instrumentos por Canal
     const channelInstruments = new Map<string, any>();
-
-    // Instanciar y esperar a que los samplers de piano estén listos dentro del contexto offline
-    for (const chId of Object.keys(channels)) {
-      const ch = channels[chId];
-      if (ch?.instrument === 'piano') {
-        const chNode = getChannelNode(chId);
-        try {
-          await new Promise<void>((resolve) => {
-            const sampler = new Tone.Sampler({
-              urls: PIANO_URLS,
-              baseUrl: PIANO_BASE_URL,
-              onload: () => {
-                channelInstruments.set(chId, sampler);
-                resolve();
-              },
-              onerror: () => {
-                resolve();
-              }
-            }).connect(chNode.volumeNode);
-            channelInstruments.set(chId, sampler);
-            setTimeout(resolve, 2500);
-          });
-        } catch (_) {
-          const pianoSynth = new Tone.PolySynth(Tone.Synth, {
-            oscillator: { type: 'triangle' },
-            envelope: { attack: 0.005, decay: 1.2, sustain: 0.2, release: 0.8 }
-          }).connect(chNode.volumeNode);
-          pianoSynth.volume.value = -6;
-          channelInstruments.set(chId, pianoSynth);
-        }
-      }
-    }
 
     const getInstrumentForChannel = (channelId: string, defaultWave: 'triangle' | 'sine' = 'triangle') => {
       let instrument = channelInstruments.get(channelId);
@@ -126,78 +119,46 @@ export async function renderSessionToAudioBuffer(
       const ch = channels[channelId];
       const chNode = getChannelNode(channelId);
 
-      // Si el canal está configurado como Piano Acústico pero no se precargó
       if (ch?.instrument === 'piano') {
         try {
-          const pianoSampler = new Tone.Sampler({
-            urls: PIANO_URLS,
-            baseUrl: PIANO_BASE_URL
-          }).connect(chNode.volumeNode);
-
-          instrument = pianoSampler;
-          channelInstruments.set(channelId, pianoSampler);
-          return pianoSampler;
+          if (sharedBuffers && (sharedBuffers as any).loaded) {
+            const bufferMap: Record<string, Tone.ToneAudioBuffer> = {};
+            Object.keys(PIANO_URLS).forEach((note) => {
+              if (sharedBuffers.has(note)) {
+                bufferMap[note] = sharedBuffers.get(note);
+              }
+            });
+            const sampler = new Tone.Sampler({ urls: bufferMap }).connect(chNode.volumeNode);
+            instrument = sampler;
+          } else {
+            const sampler = new Tone.Sampler({
+              urls: PIANO_URLS,
+              baseUrl: PIANO_BASE_URL
+            }).connect(chNode.volumeNode);
+            instrument = sampler;
+          }
         } catch (_) {
           const pianoSynth = new Tone.PolySynth(Tone.Synth, {
             oscillator: { type: 'triangle' },
             envelope: { attack: 0.005, decay: 1.2, sustain: 0.2, release: 0.8 }
           }).connect(chNode.volumeNode);
-          pianoSynth.volume.value = -6;
-
+          pianoSynth.volume.value = -4.4;
           instrument = pianoSynth;
-          channelInstruments.set(channelId, pianoSynth);
-          return pianoSynth;
         }
-      }
-
-      // Si el canal está configurado como Sintetizador Virtual
-      const synthSettings: SynthSettings = ch?.synthSettings || {
-        waveType: defaultWave,
-        detune: 0,
-        envelope: { attack: 0.04, decay: 0.2, sustain: 0.5, release: 0.6 },
-        filter: { enabled: true, type: 'lowpass', frequency: 12000, Q: 1 }
-      };
-
-      // Configurar Filtro VCF por Canal
-      let filter: Tone.Filter;
-      if (synthSettings.filter && synthSettings.filter.enabled !== false) {
-        filter = new Tone.Filter({
-          type: synthSettings.filter.type || 'lowpass',
-          frequency: Math.max(20, Math.min(20000, synthSettings.filter.frequency || 12000)),
-          Q: Math.max(0.1, Math.min(20, synthSettings.filter.Q || 1))
-        });
       } else {
-        filter = new Tone.Filter({
-          type: 'lowpass',
-          frequency: 20000,
-          Q: 1
-        });
+        const synthSettings: SynthSettings = normalizeSynthSettings(ch?.synthSettings || { waveType: defaultWave });
+        const analogSynth = new PhosphorAnalogSynth(channelId, synthSettings, chNode.volumeNode);
+        instrument = analogSynth;
       }
-      filter.connect(chNode.volumeNode);
 
-      const synth = new Tone.PolySynth(Tone.Synth, {
-        oscillator: { type: synthSettings.waveType || defaultWave },
-        envelope: {
-          attack: Math.max(0.001, synthSettings.envelope?.attack ?? 0.04),
-          decay: Math.max(0.001, synthSettings.envelope?.decay ?? 0.2),
-          sustain: Math.max(0, Math.min(1, synthSettings.envelope?.sustain ?? 0.5)),
-          release: Math.max(0.001, synthSettings.envelope?.release ?? 0.5)
-        },
-        detune: synthSettings.detune || 0
-      });
-
-      synth.connect(filter);
-      synth.volume.value = channelId === 'chords' ? -10 : -6;
-
-      instrument = synth;
-      channelInstruments.set(channelId, synth);
-      return synth;
+      channelInstruments.set(channelId, instrument);
+      return instrument;
     };
 
-    // 4. Instanciar Instrumento de Acordes
+    // Inicializar instrumento de acordes
     const chordVoice = getInstrumentForChannel('chords', 'triangle');
 
-    // 5. Sintetizadores y Samplers de Batería Offline
+    // 5. Sintetizadores de Batería de Respaldo Offline
     const drumsNode = getChannelNode('drums');
     const drumSynths = {
       kick: new Tone.MembraneSynth({
@@ -227,7 +188,7 @@ export async function renderSessionToAudioBuffer(
     };
 
     // 6. Programar Eventos de Acordes
-    scheduled.chordEvents.forEach(evt => {
+    scheduled.chordEvents.forEach((evt) => {
       try {
         chordVoice.triggerAttackRelease(
           evt.note,
@@ -238,8 +199,8 @@ export async function renderSessionToAudioBuffer(
       } catch (_) {}
     });
 
-    // 7. Programar Eventos de Pistas Melódicas
-    scheduled.trackEvents.forEach(evt => {
+    // 7. Programar Eventos de Pistas Melódicas del Piano Roll
+    scheduled.trackEvents.forEach((evt) => {
       try {
         const voice = getInstrumentForChannel(evt.channelId, 'triangle');
         voice.triggerAttackRelease(
@@ -251,23 +212,26 @@ export async function renderSessionToAudioBuffer(
       } catch (_) {}
     });
 
-    // 8. Programar Eventos de Batería con Paneo Estéreo y Muestras de Audio
+    // 8. Programar Eventos de Batería (Cálculo de ganancia y velocidad idéntico a playback)
     const drumBuffers = options.drumBuffers;
 
-    scheduled.drumEvents.forEach(evt => {
+    scheduled.drumEvents.forEach((evt) => {
       try {
         const sampleUrl = evt.sampleUrl;
         const cachedBuffer = drumBuffers ? drumBuffers.get(sampleUrl) : null;
 
         if (cachedBuffer && cachedBuffer.loaded) {
-          const drumVolVal = evt.volume ?? 80;
-          const drumVolDb = faderToDb(drumVolVal);
+          // Misma fórmula de ganancia que en playback: (evt.volume / 100) * evt.velocity en decibeles
+          const volDb = Tone.gainToDb((evt.volume / 100) * evt.velocity);
           const panner = new Tone.Panner(Math.max(-1, Math.min(1, evt.pan || 0))).connect(drumsNode.volumeNode);
-          const volume = new Tone.Volume(drumVolDb).connect(panner);
+          const volume = new Tone.Volume(volDb).connect(panner);
+          enforceStereo(volume);
+          enforceStereo(panner);
+
           const player = new Tone.Player(cachedBuffer).connect(volume);
           player.start(evt.timeSeconds);
         } else {
-          // Fallback a síntesis percusiva de alta fidelidad
+          // Fallback a síntesis percusiva calibrada
           const urlLower = (sampleUrl || '').toLowerCase();
           if (urlLower.includes('snare') || urlLower.includes('clap')) {
             drumSynths.snare.triggerAttackRelease('16n', evt.timeSeconds, evt.velocity);
@@ -292,8 +256,7 @@ export async function renderSessionToAudioBuffer(
 }
 
 /**
- * Renderiza una sesión completa de forma offline a velocidad máxima de CPU
- * y genera un Blob con formato WAV PCM estéreo de 16 bits masterizado (True Peak -0.3 dBFS).
+ * Renderiza una sesión completa de forma offline y genera un Blob WAV PCM 16-bit estéreo masterizado.
  */
 export async function renderSessionToWav(
   session: SessionV2,
@@ -311,13 +274,22 @@ export async function renderSessionToWav(
 }
 
 /**
- * Renderiza una sesión completa y la comprime a formato .ogg / .webm con códec Opus.
+ * Renderiza una sesión completa y la comprime en segundo plano a formato MP3 (256 kbps CBR estéreo).
  */
 export async function renderSessionToCompressed(
   session: SessionV2,
   customPatterns: PatternDef[] = [],
   options: OfflineRenderOptions = {}
-): Promise<CompressedAudioResult> {
+): Promise<Mp3EncodeResult> {
   const audioBuffer = await renderSessionToAudioBuffer(session, customPatterns, options);
-  return audioBufferToCompressedBlob(audioBuffer, 'ogg');
+  return audioBufferToMp3BlobAsync(audioBuffer, {
+    bitrate: 256,
+    normalize: options.normalize !== false,
+    targetPeakDb: options.targetPeakDb ?? -0.3,
+    onProgress: (p) => {
+      if (options.onProgress) {
+        options.onProgress(p, 1);
+      }
+    }
+  });
 }

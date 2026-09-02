@@ -26,16 +26,13 @@ export function useVisualizerAudioData() {
     let animId: number;
 
     const sample = () => {
-      const waveform = toneEngine.getWaveformData();
-      const frequency = toneEngine.getFrequencyData();
+      toneEngine.getWaveformData(frameRef.current.waveform);
+      toneEngine.getFrequencyData(frameRef.current.frequency);
 
       // Muestrear nivel del master
       const masterDb = toneEngine.getChannelMeterLevel('master');
       // Convertir dB (-60 a 0) a 0..1 lineal aproximado
       const masterNorm = masterDb === -Infinity ? 0 : Math.max(0, Math.min(1, (masterDb + 60) / 60));
-
-      frameRef.current.waveform = waveform;
-      frameRef.current.frequency = frequency;
       frameRef.current.masterLevel = masterNorm;
 
       animId = requestAnimationFrame(sample);

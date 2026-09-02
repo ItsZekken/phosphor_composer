@@ -7,7 +7,7 @@
  * Uso: node scripts/processPatterns.mjs
  *
  * La progresión de referencia de onemotion.com es C-Em7-Am-F,
- * cada acorde ocupa exactamente 4 beats (16 beats totales por ciclo).
+ * cada compás de 4/4 ocupa 4 beats (o 3 beats en estilos Waltz 3/4).
  */
 
 import fs from 'fs';
@@ -17,17 +17,6 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PATTERNS_DIR = path.join(__dirname, '..', 'public', 'patterns');
 const OUTPUT_FILE = path.join(__dirname, '..', 'public', 'patterns.json');
-
-// ─── Progresión de referencia ──────────────────────────────────────────────
-
-// Cada acorde ocupa 4 beats. Estos son los MIDI roots en la progresión.
-const REFERENCE_CHORDS = [
-  { startBeat: 0,  rootMidi: 60, bassRootMidi: 36 },  // C  (C4 / C2)
-  { startBeat: 4,  rootMidi: 64, bassRootMidi: 40 },  // Em7 (E4 / E2)
-  { startBeat: 8,  rootMidi: 69, bassRootMidi: 45 },  // Am  (A4 / A2) — A3=57 en algunos MIDIs
-  { startBeat: 12, rootMidi: 65, bassRootMidi: 41 },  // F   (F4 / F2)
-];
-const TOTAL_BEATS = 4;
 
 // ─── Parser MIDI (puro, sin dependencias) ─────────────────────────────────
 
@@ -42,7 +31,6 @@ function readVarLen(buf, pos) {
 }
 
 function parseMidi(buf) {
-  // Header
   const tpq = buf.readUInt16BE(12);
   let pos = 14;
 
@@ -77,10 +65,7 @@ function parseMidi(buf) {
       const note = buf[pos++];
       const vel = buf[pos++];
       events.push({ tick: absoluteTick, type: 'off', note, vel });
-    } else if ((status & 0xf0) === 0xb0 || (status & 0xf0) === 0xa0 ||
-               (status & 0xf0) === 0xe0 || (status & 0xf0) === 0xc0 ||
-               (status & 0xf0) === 0xd0) {
-      // Canal con 1 o 2 bytes de datos
+    } else if ((status & 0xf0) >= 0x80 && (status & 0xf0) <= 0xe0) {
       if ((status & 0xf0) === 0xc0 || (status & 0xf0) === 0xd0) pos++;
       else pos += 2;
     }
@@ -91,20 +76,11 @@ function parseMidi(buf) {
 
 // ─── Normalización ────────────────────────────────────────────────────────
 
-function getChordAtBeat(beat) {
-  // El patrón se repite cíclicamente
-  const beatInCycle = beat % TOTAL_BEATS;
-  for (let i = REFERENCE_CHORDS.length - 1; i >= 0; i--) {
-    if (beatInCycle >= REFERENCE_CHORDS[i].startBeat) return REFERENCE_CHORDS[i];
-  }
-  return REFERENCE_CHORDS[0];
-}
-
 function normalizeSemitone(s) {
   return ((s % 12) + 12) % 12;
 }
 
-function extractNotes(events, tpq, voice) {
+function extractNotes(events, tpq, voice, totalBeats = 4) {
   const noteOns = {};
   const patternNotes = [];
 
@@ -117,25 +93,30 @@ function extractNotes(events, tpq, voice) {
       const on = noteOns[evt.note];
       delete noteOns[evt.note];
 
-      const durationBeats = beat - on.beat;
-      if (durationBeats < 0.01) continue; // ignorar notas fantasma
+      const rawDuration = beat - on.beat;
+      if (rawDuration < 0.01) continue; // ignorar notas fantasma
 
-      // Quedarse únicamente con las notas del primer compás (de 0 a 4 beats)
-      // para extraer el patrón rítmico puro de 1 compás (4 beats) en C major.
-      if (on.beat >= 4.0) continue;
+      // Quedarse únicamente con las notas que inician en el primer compás [0, totalBeats)
+      if (on.beat >= totalBeats - 0.02) continue;
 
-      const beatOffset = on.beat; // al ser < 4.0, ya es el offset relativo al compás
-      const chord = REFERENCE_CHORDS[0]; // C Major siempre es el primer acorde
+      const beatOffset = Math.round(on.beat * 100) / 100;
+      
+      // Preservar la duración musical sin cortes artificiales en la barra de compás
+      let durationBeats = Math.round(rawDuration * 100) / 100;
+      // Si la nota finaliza casi exactamente al final del compás (ej. 3.96/3.97), extenderla a la frontera exacta para legato perfecto
+      if (Math.abs((beatOffset + durationBeats) - totalBeats) < 0.08) {
+        durationBeats = Math.round((totalBeats - beatOffset) * 100) / 100;
+      }
+      durationBeats = Math.max(0.1, durationBeats);
 
-      // Raíz de referencia según el rol (bajo vs acorde)
-      const refRoot = voice === 'bass' ? chord.bassRootMidi : chord.rootMidi;
+      // Raíz de referencia según el rol (C1=24 para bajo transpuerto, C3=48 para acordes transpuestos)
+      const refRoot = voice === 'bass' ? 24 : 48;
       const semitoneFromRoot = normalizeSemitone(evt.note - refRoot);
-      // Octava relativa: (midi - refRoot - semitoneFromRoot) / 12 redondeado
-      const octaveOffset = Math.round((evt.note - refRoot - semitoneFromRoot) / 12) + 1;
+      const octaveOffset = Math.round((evt.note - refRoot - semitoneFromRoot) / 12);
 
       patternNotes.push({
-        beatOffset: Math.round(beatOffset * 100) / 100,
-        durationBeats: Math.round(durationBeats * 100) / 100,
+        beatOffset,
+        durationBeats,
         semitoneFromRoot,
         octaveOffset,
         velocity: Math.round(on.vel * 100) / 100,
@@ -146,16 +127,6 @@ function extractNotes(events, tpq, voice) {
 
   return patternNotes;
 }
-
-// ─── Carga de existentes para caché ──────────────────────────────────────
-
-let existingPatterns = [];
-if (fs.existsSync(OUTPUT_FILE)) {
-  try {
-    existingPatterns = JSON.parse(fs.readFileSync(OUTPUT_FILE, 'utf8'));
-  } catch (_) {}
-}
-const existingMap = Object.fromEntries(existingPatterns.map(p => [p.name, p]));
 
 // ─── Encontrar y agrupar archivos MIDI ───────────────────────────────────
 
@@ -175,24 +146,11 @@ for (const file of files) {
 // ─── Procesar cada grupo ──────────────────────────────────────────────────
 
 const results = [];
-let processed = 0, cached = 0;
+let processed = 0;
 
 for (const [name, group] of Object.entries(groups)) {
-  // Calcular mtime más reciente del par
-  const mtimes = [];
-  if (group.bass) mtimes.push(fs.statSync(path.join(PATTERNS_DIR, group.bass)).mtimeMs);
-  if (group.chords) mtimes.push(fs.statSync(path.join(PATTERNS_DIR, group.chords)).mtimeMs);
-  const latestMtime = Math.max(...mtimes);
-
-  // Usar caché si existe y el JSON es más reciente que los MIDIs
-  if (existingMap[name]) {
-    const jsonMtime = fs.statSync(OUTPUT_FILE).mtimeMs;
-    if (jsonMtime >= latestMtime) {
-      results.push(existingMap[name]);
-      cached++;
-      continue;
-    }
-  }
+  const is34Time = name.toLowerCase().includes('waltz') || name.toLowerCase().includes('polyrhythm');
+  const totalBeats = is34Time ? 3 : 4;
 
   // Parsear Bass
   let bassNotes = [];
@@ -201,7 +159,7 @@ for (const [name, group] of Object.entries(groups)) {
     const buf = fs.readFileSync(path.join(PATTERNS_DIR, group.bass));
     const midi = parseMidi(buf);
     bpm = midi.bpm;
-    bassNotes = extractNotes(midi.events, midi.tpq, 'bass');
+    bassNotes = extractNotes(midi.events, midi.tpq, 'bass', totalBeats);
   }
 
   // Parsear Chords
@@ -209,25 +167,25 @@ for (const [name, group] of Object.entries(groups)) {
   if (group.chords) {
     const buf = fs.readFileSync(path.join(PATTERNS_DIR, group.chords));
     const midi = parseMidi(buf);
-    if (!group.bass) bpm = midi.bpm; // usar BPM de Chords si no hay Bass
-    chordNotes = extractNotes(midi.events, midi.tpq, 'chord');
+    if (!group.bass) bpm = midi.bpm;
+    chordNotes = extractNotes(midi.events, midi.tpq, 'chord', totalBeats);
   }
 
   const allNotes = [...bassNotes, ...chordNotes].sort((a, b) => a.beatOffset - b.beatOffset);
 
   results.push({
     name,
-    totalBeats: TOTAL_BEATS,
+    totalBeats,
     bpm,
     hasBass: !!group.bass,
     hasChords: !!group.chords,
     notes: allNotes,
   });
   processed++;
-  console.log(`  ✓ ${name} (bajo: ${bassNotes.length} notas, acordes: ${chordNotes.length} notas)`);
+  console.log(`  ✓ ${name} (compás: ${totalBeats} beats, bajo: ${bassNotes.length} notas, acordes: ${chordNotes.length} notas)`);
 }
 
 // ─── Escribir JSON ────────────────────────────────────────────────────────
 
 fs.writeFileSync(OUTPUT_FILE, JSON.stringify(results, null, 2), 'utf8');
-console.log(`\n✅ patterns.json generado: ${processed} nuevos, ${cached} en caché, ${results.length} total.`);
+console.log(`\n✅ patterns.json generado con legato perfecto y 1 octava abajo: ${processed} patrones procesados.`);

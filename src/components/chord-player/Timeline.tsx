@@ -1,105 +1,153 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useSongStore } from '../../store/songStore';
 import { useShallow } from 'zustand/react/shallow';
 import type { ChordBlock } from '../../utils/typeDefinitions';
-import { isChordInScale, getChordRomanDegree } from '../../core/music';
-import { getChordRole } from './ChordPalette';
 import { ChordPropertiesPanel } from './ChordPropertiesPanel';
 import { CustomSelect } from '../ui/CustomSelect';
 import { ChannelInstrumentControl } from '../ui/ChannelInstrumentControl';
 import { ContextMenuContainer } from '../ui/ContextMenuContainer';
-import { Plus, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Trash2, ZoomIn, ZoomOut, Grid } from 'lucide-react';
+import { Plus, ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, Trash2, Grid, Copy, Scissors, Clipboard, Layers } from 'lucide-react';
 import { toneEngine } from '../../audio/toneEngine';
 import { ChannelQuickControl } from '../ui/ChannelQuickControl';
+import { UnifiedToolbar } from '../shared/UnifiedToolbar';
+import { PhysicalZoomControl } from '../shared/PhysicalZoomControl';
 
-const TimelinePlayhead: React.FC<{ beatWidth: number }> = ({ beatWidth }) => {
-  const currentBeat = useSongStore(state => state.currentBeat);
-  const playheadLeft = currentBeat * beatWidth;
-  return (
-    <div 
-      className="playhead"
-      style={{
-        left: `${playheadLeft}px`,
-        height: '100%',
-        width: '2px',
-        backgroundColor: '#00e5ff',
-        position: 'absolute',
-        top: 0,
-        zIndex: 10,
-        pointerEvents: 'none'
-      }}
-    />
-  );
-};
+import { TimelinePlayhead } from './timeline/TimelinePlayhead';
+import { TimelineBlock } from './timeline/TimelineBlock';
+import { TimelineMarkerTrack } from './timeline/TimelineMarkerTrack';
+import { useTimelineShortcuts } from './hooks/useTimelineShortcuts';
+
+interface DragState {
+  id: string;
+  type: 'move' | 'resize_left' | 'resize_right' | 'move_marker' | 'move_tempo_marker';
+  startX: number;
+  initialStartBeat: number;
+  initialDurationBeats: number;
+  currentStartBeat: number;
+  currentDurationBeats: number;
+  groupSnapshots?: Map<string, { startBeat: number; durationBeats: number }>;
+}
+
+interface LassoState {
+  isActive: boolean;
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+}
 
 export const Timeline: React.FC = () => {
   const {
     chordBlocks,
-    melodyNotes,
     selectedChordId,
+    selectedChordIds,
     setSelectedChordId,
+    setSelectedChordIds,
+    toggleSelectChordId,
+    selectAllChords,
+    chordGridSnap,
+    setChordGridSnap,
+    copySelectedChords,
+    cutSelectedChords,
+    pasteChords,
+    duplicateSelectedChords,
+    deleteSelectedChords,
     updateChordBlock,
     removeChordBlock,
     addChordBlock,
+    bpm,
+    tempoMarkers,
+    addTempoMarker,
+    removeTempoMarker,
+    updateTempoMarker,
     key,
     scale,
     timeSignature,
-    coarseBeat,
     transposeSong,
     styleMarkers,
     addStyleMarker,
     removeStyleMarker,
     updateStyleMarker,
     customPatterns,
-    setDraggingStyle
+    setDraggingStyle,
+    chordTimelineViewport,
+    setChordTimelineViewport
   } = useSongStore(useShallow(state => ({
-    chordBlocks: state.chordBlocks,
-    melodyNotes: state.melodyNotes,
+    chordBlocks: state.chordBlocks || [],
     selectedChordId: state.selectedChordId,
+    selectedChordIds: state.selectedChordIds || [],
     setSelectedChordId: state.setSelectedChordId,
+    setSelectedChordIds: state.setSelectedChordIds,
+    toggleSelectChordId: state.toggleSelectChordId,
+    selectAllChords: state.selectAllChords,
+    chordGridSnap: state.chordGridSnap || '1',
+    setChordGridSnap: state.setChordGridSnap,
+    copySelectedChords: state.copySelectedChords,
+    cutSelectedChords: state.cutSelectedChords,
+    pasteChords: state.pasteChords,
+    duplicateSelectedChords: state.duplicateSelectedChords,
+    deleteSelectedChords: state.deleteSelectedChords,
     updateChordBlock: state.updateChordBlock,
     removeChordBlock: state.removeChordBlock,
     addChordBlock: state.addChordBlock,
-    key: state.key,
-    scale: state.scale,
-    timeSignature: state.timeSignature,
-    coarseBeat: Math.floor(state.currentBeat / 4) * 4,
+    bpm: state.bpm || 120,
+    tempoMarkers: state.tempoMarkers || [],
+    addTempoMarker: state.addTempoMarker,
+    removeTempoMarker: state.removeTempoMarker,
+    updateTempoMarker: state.updateTempoMarker,
+    key: state.key || 'C',
+    scale: state.scale || 'major',
+    timeSignature: state.timeSignature || '4/4',
     transposeSong: state.transposeSong,
-    styleMarkers: state.styleMarkers,
+    styleMarkers: state.styleMarkers || [],
     addStyleMarker: state.addStyleMarker,
     removeStyleMarker: state.removeStyleMarker,
     updateStyleMarker: state.updateStyleMarker,
-    customPatterns: state.customPatterns,
-    setDraggingStyle: state.setDraggingStyle
+    customPatterns: state.customPatterns || [],
+    setDraggingStyle: state.setDraggingStyle,
+    chordTimelineViewport: state.chordTimelineViewport,
+    setChordTimelineViewport: state.setChordTimelineViewport
   })));
 
   const [trackContextMenu, setTrackContextMenu] = useState<{ x: number; y: number; beat: number } | null>(null);
-  const [styleMarkerMenu, setStyleMarkerMenu] = useState<{
-    markerId: string;
-    x: number;
-    y: number;
-    currentPattern: string;
-    beat: number;
-  } | null>(null);
+  const [blockContextMenu, setBlockContextMenu] = useState<{ x: number; y: number; block: ChordBlock } | null>(null);
 
   const [selectedStyleToDrag, setSelectedStyleToDrag] = useState<string>('hold');
-  const [zoomLevel, setZoomLevel] = useState<number>(1.0);
-  const [gridSnap, setGridSnap] = useState<'1' | '1/2' | '1/4'>('1');
+  const [zoomLevel, setZoomLevel] = useState<number>(chordTimelineViewport?.zoomLevel || 1.0);
 
-  const snapStep = gridSnap === '1/4' ? 0.25 : gridSnap === '1/2' ? 0.5 : 1;
+  // Sincronizar cambios de zoom con el store
+  useEffect(() => {
+    setChordTimelineViewport({ zoomLevel });
+  }, [zoomLevel, setChordTimelineViewport]);
+
+  const snapStep = chordGridSnap === '1/4' ? 0.25 : chordGridSnap === '1/2' ? 0.5 : 1;
   const BEAT_WIDTH = Math.max(16, Math.round(40 * zoomLevel));
 
-  const allStyles = [
+  const basicStyles = [
     { id: 'hold', label: 'Hold' },
     { id: 'quarters', label: 'Negras' },
     { id: 'eighths', label: 'Corcheas' },
     { id: 'pop', label: 'Pop' },
     { id: 'arpeggio', label: 'Arpegio' },
     { id: 'strum', label: 'Strum' },
-    ...customPatterns.filter((p: any) => p && p.name).map((p: any) => ({ id: p.name, label: p.name }))
   ];
 
-  // Handler para cambiar estilo desde el dropdown: actualiza o crea marcador en beat 0
+  const customStyleItems = (customPatterns || [])
+    .filter((p: any) => p && p.name)
+    .map((p: any) => ({ id: p.name, label: p.name }));
+
+  const styleGroups = [
+    {
+      label: 'Estilos Básicos',
+      options: basicStyles.map(s => ({ value: s.id, label: s.label }))
+    },
+    ...(customStyleItems.length > 0 ? [{
+      label: `Patrones MIDI (${customStyleItems.length})`,
+      options: customStyleItems.map(s => ({ value: s.id, label: s.label }))
+    }] : [])
+  ];
+
+  // Handler para cambiar estilo desde el dropdown
   const handleStyleSelectChange = (val: string) => {
     setSelectedStyleToDrag(val);
     const existingBeat0 = styleMarkers.find(m => m.beat === 0);
@@ -114,21 +162,32 @@ export const Timeline: React.FC = () => {
   // Determinar la duración del compás en beats
   const beatsPerMeasure = timeSignature === '3/4' ? 3 : timeSignature === '6/8' ? 6 : 4;
 
-  // Calcular de forma dinámica el total de beats necesarios
+  // Cálculo generoso de longitud total
   const maxChordBeat = chordBlocks.reduce((max, b) => Math.max(max, b.startBeat + b.durationBeats), 0);
-  const maxMelodyBeat = melodyNotes.reduce((max, n) => Math.max(max, n.startBeat + n.durationBeats), 0);
-  const maxContentBeat = Math.max(maxChordBeat, maxMelodyBeat);
-  
-  const rawBeatsNeeded = Math.max(32, maxContentBeat + 16, coarseBeat + 8);
+  const rawBeatsNeeded = Math.max(48, maxChordBeat + 24);
   const TOTAL_BEATS = Math.ceil(rawBeatsNeeded / beatsPerMeasure) * beatsPerMeasure;
 
   const viewportRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
   const clickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [scrollLeft, setScrollLeft] = useState(0);
+  const [scrollLeft, setScrollLeft] = useState(chordTimelineViewport?.scrollLeft || 0);
   const [popoverChordId, setPopoverChordId] = useState<string | null>(null);
 
-  // Listener nativo para Zoom con Alt + Rueda del ratón sobre la línea de tiempo
-  React.useEffect(() => {
+  // Restaurar y reaccionar a cambios de scrollLeft del store (ej. reseteo con tecla W a 0)
+  useEffect(() => {
+    if (viewportRef.current) {
+      const targetLeft = chordTimelineViewport?.scrollLeft ?? 0;
+      viewportRef.current.scrollLeft = targetLeft;
+      setScrollLeft(targetLeft);
+    }
+  }, [chordTimelineViewport?.scrollLeft]);
+
+  // Estados de arrastre y selección Lasso
+  const [activeDrag, setActiveDrag] = useState<DragState | null>(null);
+  const [lasso, setLasso] = useState<LassoState>({ isActive: false, startX: 0, startY: 0, currentX: 0, currentY: 0 });
+
+  // Zoom con Alt + Rueda y Scroll horizontal con Shift + Rueda
+  useEffect(() => {
     const viewportEl = viewportRef.current;
     if (!viewportEl) return;
 
@@ -138,6 +197,9 @@ export const Timeline: React.FC = () => {
         e.stopPropagation();
         const delta = e.deltaY > 0 ? -0.12 : 0.12;
         setZoomLevel(z => Math.max(0.4, Math.min(3.0, parseFloat((z + delta).toFixed(2)))));
+      } else if (e.shiftKey) {
+        e.preventDefault();
+        viewportEl.scrollLeft += e.deltaY;
       }
     };
 
@@ -147,18 +209,37 @@ export const Timeline: React.FC = () => {
     };
   }, []);
 
-  // Listener global para deseleccionar acorde
-  React.useEffect(() => {
-    const handleGlobalClick = (e: MouseEvent) => {
-      if (!selectedChordId) return;
+  // Hook de atajos de teclado DAW
+  useTimelineShortcuts({
+    selectedChordIds,
+    copySelectedChords,
+    cutSelectedChords,
+    pasteChords,
+    duplicateSelectedChords,
+    selectAllChords,
+    deleteSelectedChords
+  });
 
+  // Listener global para cerrar popovers y menús contextuales al hacer clic fuera
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       const clickedPopover = target.closest('.chord-properties-popover');
       const clickedBlock = target.closest('.chord-block');
+      const clickedContextMenu = target.closest('.custom-context-menu');
 
-      if (!clickedPopover && !clickedBlock) {
-        setSelectedChordId(null);
-        setPopoverChordId(null);
+      if (blockContextMenu && !clickedContextMenu) {
+        setBlockContextMenu(null);
+      }
+      if (trackContextMenu && !clickedContextMenu) {
+        setTrackContextMenu(null);
+      }
+
+      if (!clickedPopover && !clickedBlock && !clickedContextMenu && !lasso.isActive) {
+        if (selectedChordIds.length > 0 && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+          setSelectedChordIds([]);
+          setPopoverChordId(null);
+        }
       }
     };
 
@@ -173,101 +254,131 @@ export const Timeline: React.FC = () => {
       window.removeEventListener('mousedown', handleGlobalClick);
       window.removeEventListener('mouseup', handleGlobalMouseUp);
     };
-  }, [selectedChordId, setSelectedChordId]);
+  }, [selectedChordIds, setSelectedChordIds, lasso.isActive, blockContextMenu, trackContextMenu]);
 
-  // Listener global para cerrar menú contextual de marcador de estilo
-  React.useEffect(() => {
-    if (!styleMarkerMenu) return;
-    const handleCloseStyleMenu = () => {
-      setStyleMarkerMenu(null);
-    };
-    window.addEventListener('click', handleCloseStyleMenu);
-    return () => window.removeEventListener('click', handleCloseStyleMenu);
-  }, [styleMarkerMenu]);
-
-  // Estados locales para arrastre fluido
-  const [activeDrag, setActiveDrag] = useState<{
-    id: string;
-    type: 'move' | 'resize' | 'move_marker';
-    startX: number;
-    initialStartBeat: number;
-    initialDurationBeats: number;
-    currentStartBeat: number;
-    currentDurationBeats: number;
-  } | null>(null);
-
-  const handleMouseDown = (e: React.MouseEvent, block: ChordBlock) => {
+  // Manejo de interacción de Bloques de Acordes (Mover, Estirar Izquierda, Estirar Derecha)
+  const handleBlockMouseDown = (e: React.MouseEvent, block: ChordBlock) => {
     e.stopPropagation();
     if (e.button !== 0) return;
+    e.preventDefault();
 
     const rect = e.currentTarget.getBoundingClientRect();
     const clickXRelative = e.clientX - rect.left;
-    const isNearRightEdge = rect.width - clickXRelative < 12;
+    const isNearLeftEdge = clickXRelative < 10;
+    const isNearRightEdge = rect.width - clickXRelative < 10;
+
+    const isMultiKey = e.shiftKey || e.ctrlKey || e.metaKey;
+
+    if (isMultiKey) {
+      toggleSelectChordId(block.id, true);
+    } else {
+      if (!selectedChordIds.includes(block.id)) {
+        setSelectedChordId(block.id);
+      }
+    }
 
     toneEngine.seekToBeat(block.startBeat);
 
+    const type: 'move' | 'resize_left' | 'resize_right' = isNearLeftEdge
+      ? 'resize_left'
+      : isNearRightEdge
+      ? 'resize_right'
+      : 'move';
+
+    // Snapshot del grupo si se arrastra en modo mover
+    const groupSnapshots = new Map<string, { startBeat: number; durationBeats: number }>();
+    const effectiveSelectedIds = selectedChordIds.includes(block.id)
+      ? selectedChordIds
+      : [block.id];
+
+    chordBlocks.forEach((b) => {
+      if (effectiveSelectedIds.includes(b.id)) {
+        groupSnapshots.set(b.id, { startBeat: b.startBeat, durationBeats: b.durationBeats });
+      }
+    });
+
     setActiveDrag({
       id: block.id,
-      type: isNearRightEdge ? 'resize' : 'move',
+      type,
       startX: e.clientX,
       initialStartBeat: block.startBeat,
       initialDurationBeats: block.durationBeats,
       currentStartBeat: block.startBeat,
-      currentDurationBeats: block.durationBeats
+      currentDurationBeats: block.durationBeats,
+      groupSnapshots
     });
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
+      window.getSelection()?.removeAllRanges();
       const deltaX = moveEvent.clientX - e.clientX;
       const deltaBeatsRaw = deltaX / BEAT_WIDTH;
       const deltaBeats = Math.round(deltaBeatsRaw / snapStep) * snapStep;
 
       setActiveDrag(prev => {
         if (!prev) return null;
+
         if (prev.type === 'move') {
           const newStart = Math.max(0, prev.initialStartBeat + deltaBeats);
-          return {
-            ...prev,
-            currentStartBeat: newStart
-          };
-        } else {
+          return { ...prev, currentStartBeat: newStart };
+        } else if (prev.type === 'resize_right') {
           const newDuration = Math.max(snapStep, prev.initialDurationBeats + deltaBeats);
+          return { ...prev, currentDurationBeats: newDuration };
+        } else if (prev.type === 'resize_left') {
+          const initialEnd = prev.initialStartBeat + prev.initialDurationBeats;
+          const maxStart = initialEnd - snapStep;
+          const newStart = Math.min(maxStart, Math.max(0, prev.initialStartBeat + deltaBeats));
+          const newDuration = Math.max(snapStep, initialEnd - newStart);
           return {
             ...prev,
+            currentStartBeat: newStart,
             currentDurationBeats: newDuration
           };
         }
+        return prev;
       });
     };
 
-    const handleMouseUp = (upEvent: MouseEvent) => {
+    const handleMouseUp = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
 
-      const deltaX = upEvent.clientX - e.clientX;
+      const deltaX = (window.event as MouseEvent)?.clientX ? (window.event as MouseEvent).clientX - e.clientX : 0;
       const deltaBeats = Math.round((deltaX / BEAT_WIDTH) / snapStep) * snapStep;
-      const distanceX = Math.abs(upEvent.clientX - e.clientX);
+      const distanceX = Math.abs(deltaX);
 
       if (distanceX < 4) {
-        if (clickTimeoutRef.current) {
-          clearTimeout(clickTimeoutRef.current);
-          clickTimeoutRef.current = null;
-          setSelectedChordId(null);
-          setPopoverChordId(null);
-          removeChordBlock(block.id);
-        } else {
-          clickTimeoutRef.current = setTimeout(() => {
-            setSelectedChordId(block.id);
-            setPopoverChordId(null);
+        if (!isMultiKey) {
+          if (clickTimeoutRef.current) {
+            clearTimeout(clickTimeoutRef.current);
             clickTimeoutRef.current = null;
-          }, 240);
+            removeChordBlock(block.id);
+          } else {
+            clickTimeoutRef.current = setTimeout(() => {
+              setSelectedChordId(block.id);
+              setPopoverChordId(null);
+              clickTimeoutRef.current = null;
+            }, 240);
+          }
         }
       } else {
-        if (isNearRightEdge) {
+        if (type === 'resize_right') {
           const finalDuration = Math.max(snapStep, block.durationBeats + deltaBeats);
           updateChordBlock(block.id, { durationBeats: finalDuration });
-        } else {
-          const finalStart = Math.max(0, block.startBeat + deltaBeats);
-          updateChordBlock(block.id, { startBeat: finalStart });
+        } else if (type === 'resize_left') {
+          const initialEnd = block.startBeat + block.durationBeats;
+          const maxStart = initialEnd - snapStep;
+          const finalStart = Math.min(maxStart, Math.max(0, block.startBeat + deltaBeats));
+          const finalDuration = Math.max(snapStep, initialEnd - finalStart);
+          updateChordBlock(block.id, { startBeat: finalStart, durationBeats: finalDuration });
+        } else if (type === 'move') {
+          if (groupSnapshots.size > 0 && deltaBeats !== 0) {
+            const minStart = Array.from(groupSnapshots.values()).reduce((min, s) => Math.min(min, s.startBeat), Infinity);
+            const safeDelta = Math.max(-minStart, deltaBeats);
+
+            groupSnapshots.forEach((snapshot, bId) => {
+              updateChordBlock(bId, { startBeat: Math.max(0, snapshot.startBeat + safeDelta) });
+            });
+          }
         }
       }
 
@@ -278,42 +389,132 @@ export const Timeline: React.FC = () => {
     window.addEventListener('mouseup', handleMouseUp);
   };
 
-  const handleContextMenu = (e: React.MouseEvent, block: ChordBlock) => {
+  // Menú contextual en Bloque
+  const handleBlockContextMenu = (e: React.MouseEvent, block: ChordBlock) => {
     e.preventDefault();
     e.stopPropagation();
-    setSelectedChordId(block.id);
-    setPopoverChordId(block.id);
+    if (!selectedChordIds.includes(block.id)) {
+      setSelectedChordId(block.id);
+      setSelectedChordIds([block.id]);
+    }
+    setBlockContextMenu({ x: e.clientX, y: e.clientY, block });
   };
 
-  // Generar cuadrícula de compases, beats y subdivisiones
-  const totalSubdivisions = Math.round(TOTAL_BEATS / snapStep);
-  const gridLines = [];
-  for (let s = 0; s <= totalSubdivisions; s++) {
-    const beat = s * snapStep;
-    const isMeasure = Math.abs(beat % beatsPerMeasure) < 0.001;
-    const isBeat = Math.abs(beat % 1) < 0.001;
+  // Lasso / Marquee Selection en el Canvas
+  const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('.chord-block') || target.closest('.chord-properties-popover') || target.closest('.style-marker-flag')) {
+      return;
+    }
 
+    if (e.button !== 0) return;
+    e.preventDefault();
+
+    const canvasEl = canvasRef.current;
+    if (!canvasEl) return;
+
+    const canvasRect = canvasEl.getBoundingClientRect();
+    const startX = e.clientX - canvasRect.left;
+    const startY = e.clientY - canvasRect.top;
+
+    if (!e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      setSelectedChordIds([]);
+    }
+
+    const clickedBeat = Math.max(0, Math.floor(startX / BEAT_WIDTH));
+    toneEngine.seekToBeat(clickedBeat);
+
+    setLasso({ isActive: true, startX, startY, currentX: startX, currentY: startY });
+
+    const handleLassoMove = (moveEvent: MouseEvent) => {
+      // Garantizar que no se inicie selección de texto nativa del navegador durante el arrastre
+      window.getSelection()?.removeAllRanges();
+
+      const currentX = moveEvent.clientX - canvasRect.left;
+      const currentY = moveEvent.clientY - canvasRect.top;
+
+      setLasso(prev => ({ ...prev, currentX, currentY }));
+
+      // Calcular intersecciones con los bloques
+      const minX = Math.min(startX, currentX);
+      const maxX = Math.max(startX, currentX);
+      const minY = Math.min(startY, currentY);
+      const maxY = Math.max(startY, currentY);
+
+      const intersectingIds: string[] = [];
+
+      chordBlocks.forEach((b) => {
+        const bLeft = b.startBeat * BEAT_WIDTH;
+        const bRight = bLeft + b.durationBeats * BEAT_WIDTH;
+        const bTop = 24;
+        const bBottom = 76;
+
+        const overlapsX = bLeft < maxX && bRight > minX;
+        const overlapsY = bTop < maxY && bBottom > minY;
+
+        if (overlapsX && overlapsY) {
+          intersectingIds.push(b.id);
+        }
+      });
+
+      if (e.shiftKey || e.ctrlKey || e.metaKey) {
+        const merged = Array.from(new Set([...selectedChordIds, ...intersectingIds]));
+        setSelectedChordIds(merged);
+      } else {
+        setSelectedChordIds(intersectingIds);
+      }
+    };
+
+    const handleLassoUp = () => {
+      window.removeEventListener('mousemove', handleLassoMove);
+      window.removeEventListener('mouseup', handleLassoUp);
+      setLasso({ isActive: false, startX: 0, startY: 0, currentX: 0, currentY: 0 });
+    };
+
+    window.addEventListener('mousemove', handleLassoMove);
+    window.addEventListener('mouseup', handleLassoUp);
+  };
+
+  // Dibujar cuadrícula
+  const gridLines = [];
+  for (let beat = 0; beat < TOTAL_BEATS; beat += snapStep) {
+    const isMeasure = beat % beatsPerMeasure === 0;
+    const isBeat = beat % 1 === 0;
     gridLines.push(
-      <div 
-        key={`grid-${s}`} 
-        className={`grid-tick ${isMeasure ? 'measure' : isBeat ? 'beat' : 'subdivision'}`}
-        style={{ 
+      <div
+        key={`grid-${beat}`}
+        className={`grid-tick ${isMeasure ? 'measure' : ''}`}
+        style={{
           left: `${beat * BEAT_WIDTH}px`,
-          backgroundColor: isMeasure ? 'rgba(112, 96, 176, 0.25)' : isBeat ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 229, 255, 0.06)',
-          width: isMeasure ? '2px' : '1px'
+          backgroundColor: isMeasure ? 'rgba(112, 96, 176, 0.25)' : isBeat ? 'rgba(255, 255, 255, 0.04)' : 'rgba(255, 216, 117, 0.04)',
+          width: isMeasure ? '2px' : '1px',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          pointerEvents: 'none'
         }}
       >
-        {isMeasure ? <span className="measure-num">{Math.round(beat / beatsPerMeasure) + 1}</span> : null}
+        {isMeasure ? (
+          <span
+            className="measure-num"
+            style={{
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+              pointerEvents: 'none'
+            }}
+          >
+            {Math.round(beat / beatsPerMeasure) + 1}
+          </span>
+        ) : null}
       </div>
     );
   }
 
   // Calcular posición del popover flotante
-  const selectedBlock = chordBlocks.find(b => b.id === selectedChordId);
+  const activePopoverBlock = chordBlocks.find(b => b.id === popoverChordId) || chordBlocks.find(b => b.id === selectedChordId);
   let popoverLeft = 0;
-  if (selectedBlock) {
-    const blockLeft = selectedBlock.startBeat * BEAT_WIDTH;
-    const blockWidth = selectedBlock.durationBeats * BEAT_WIDTH;
+  if (activePopoverBlock) {
+    const blockLeft = activePopoverBlock.startBeat * BEAT_WIDTH;
+    const blockWidth = activePopoverBlock.durationBeats * BEAT_WIDTH;
     popoverLeft = blockLeft + (blockWidth / 2) - 130 - scrollLeft;
     popoverLeft += 12;
     const sectionWidth = viewportRef.current?.getBoundingClientRect().width || 800;
@@ -323,107 +524,93 @@ export const Timeline: React.FC = () => {
 
   return (
     <div className="timeline-section">
-      <div className="timeline-header-row">
-        <h2 className="timeline-title">Línea de Tiempo de Acordes</h2>
-        
-        {/* Selector de Instrumento */}
-        <ChannelInstrumentControl channelId="chords" />
+      <UnifiedToolbar
+        left={
+          <>
+            <ChannelQuickControl channelId="chords" />
+            <ChannelInstrumentControl channelId="chords" />
+          </>
+        }
+        center={
+          <>
+            {/* Subdivisión de Cuadrícula */}
+            <div className="physical-segment-tray" title="Subdivisión magnética de Grid">
+              <button
+                type="button"
+                className={`physical-segment-btn ${chordGridSnap === '1' ? 'active' : ''}`}
+                onClick={() => setChordGridSnap('1')}
+                title="Grid 1/1 (Negras)"
+              >
+                1/1
+              </button>
+              <button
+                type="button"
+                className={`physical-segment-btn ${chordGridSnap === '1/2' ? 'active' : ''}`}
+                onClick={() => setChordGridSnap('1/2')}
+                title="Grid 1/2 (Corcheas)"
+              >
+                1/2
+              </button>
+              <button
+                type="button"
+                className={`physical-segment-btn ${chordGridSnap === '1/4' ? 'active' : ''}`}
+                onClick={() => setChordGridSnap('1/4')}
+                title="Grid 1/4 (Semicorcheas)"
+              >
+                1/4
+              </button>
+            </div>
 
-        {/* Zoom Controls */}
-        <div className="timeline-zoom-group" style={{ display: 'flex', alignItems: 'center', gap: '3px', marginLeft: '12px', background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.08)' }}>
-          <button
-            type="button"
-            className="action-btn"
-            style={{ padding: '2px 4px', minHeight: '22px', fontSize: '0.7rem' }}
-            title="Reducir Zoom (Ctrl + Rueda Abajo)"
-            onClick={() => setZoomLevel(z => Math.max(0.5, parseFloat((z - 0.15).toFixed(2))))}
-          >
-            <ZoomOut size={13} />
-          </button>
-          <span
-            style={{ fontSize: '0.7rem', fontFamily: "'Share Tech Mono', monospace", color: 'var(--text-secondary)', padding: '0 4px', minWidth: '38px', textAlign: 'center', cursor: 'pointer' }}
-            title="Hacer clic para restaurar 100%"
-            onClick={() => setZoomLevel(1.0)}
-          >
-            {Math.round(zoomLevel * 100)}%
-          </span>
-          <button
-            type="button"
-            className="action-btn"
-            style={{ padding: '2px 4px', minHeight: '22px', fontSize: '0.7rem' }}
-            title="Aumentar Zoom (Ctrl + Rueda Arriba)"
-            onClick={() => setZoomLevel(z => Math.min(2.5, parseFloat((z + 0.15).toFixed(2))))}
-          >
-            <ZoomIn size={13} />
-          </button>
-        </div>
-
-        {/* Subdivisión de Cuadrícula */}
-        <button
-          type="button"
-          className="action-btn timeline-grid-toggle"
-          style={{
-            padding: '2px 8px',
-            minHeight: '24px',
-            fontSize: '0.72rem',
-            fontFamily: "'Share Tech Mono', monospace",
-            background: gridSnap !== '1' ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0,0,0,0.3)',
-            borderColor: gridSnap !== '1' ? 'rgba(0, 229, 255, 0.4)' : 'rgba(255,255,255,0.08)',
-            color: gridSnap !== '1' ? '#00e5ff' : 'var(--text-secondary)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px'
-          }}
-          title="Alternar subdivisión y ajuste de cuadrícula (1 Beat / 1/2 Beat / 1/4 Beat)"
-          onClick={() => {
-            setGridSnap(prev => prev === '1' ? '1/2' : prev === '1/2' ? '1/4' : '1');
-          }}
-        >
-          <Grid size={13} />
-          GRID: {gridSnap === '1' ? '1/1' : gridSnap === '1/2' ? '1/2' : '1/4'}
-        </button>
-
-        {/* Style Dragger */}
-        <div className="timeline-style-dragger">
-          <span className="timeline-style-label">ESTILO:</span>
-          <CustomSelect
-            value={selectedStyleToDrag}
-            onChange={handleStyleSelectChange}
-            options={allStyles.map(s => ({ value: s.id, label: s.label }))}
-            draggable={true}
-            onMouseDown={() => setDraggingStyle(selectedStyleToDrag)}
-            onDragStart={(e) => {
-              e.dataTransfer.setData('text/style-pattern', selectedStyleToDrag);
-              e.dataTransfer.effectAllowed = 'copy';
-              setDraggingStyle(selectedStyleToDrag);
-            }}
-            onOptionMouseDown={(val) => setDraggingStyle(val)}
-            onOptionDragStart={(val, e) => {
-              e.dataTransfer.setData('text/style-pattern', val);
-              e.dataTransfer.effectAllowed = 'copy';
-              setDraggingStyle(val);
-            }}
+            {/* Style Dragger */}
+            <div className="timeline-style-dragger" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ fontSize: '0.68rem', fontFamily: "'Share Tech Mono', monospace", color: 'var(--text-secondary)' }}>PATRÓN:</span>
+              <CustomSelect
+                value={selectedStyleToDrag}
+                onChange={handleStyleSelectChange}
+                groups={styleGroups}
+                draggable={true}
+                onMouseDown={() => setDraggingStyle(selectedStyleToDrag)}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('text/style-pattern', selectedStyleToDrag);
+                  e.dataTransfer.effectAllowed = 'copy';
+                  setDraggingStyle(selectedStyleToDrag);
+                }}
+                onOptionMouseDown={(val) => setDraggingStyle(val)}
+                onOptionDragStart={(val, e) => {
+                  e.dataTransfer.setData('text/style-pattern', val);
+                  e.dataTransfer.effectAllowed = 'copy';
+                  setDraggingStyle(val);
+                }}
+              />
+            </div>
+          </>
+        }
+        right={
+          <PhysicalZoomControl
+            zoomLevel={zoomLevel}
+            onZoomChange={setZoomLevel}
+            minZoom={0.4}
+            maxZoom={3.0}
+            step={0.15}
           />
-        </div>
-
-        <ChannelQuickControl channelId="chords" />
-      </div>
+        }
+      />
 
       <div 
         className="timeline-viewport" 
         ref={viewportRef}
-        onScroll={(e) => setScrollLeft(e.currentTarget.scrollLeft)}
-        onWheel={(e) => {
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            const delta = e.deltaY > 0 ? -0.1 : 0.1;
-            setZoomLevel(z => Math.max(0.5, Math.min(2.5, parseFloat((z + delta).toFixed(2)))));
-          }
+        style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
+        onScroll={(e) => {
+          const left = e.currentTarget.scrollLeft;
+          setScrollLeft(left);
+          setChordTimelineViewport({ scrollLeft: left });
         }}
       >
         <div 
+          ref={canvasRef}
           className="timeline-canvas" 
-          style={{ width: `${TOTAL_BEATS * BEAT_WIDTH}px`, height: '80px', position: 'relative' }}
+          style={{ width: `${TOTAL_BEATS * BEAT_WIDTH}px`, height: '84px', position: 'relative', userSelect: 'none', WebkitUserSelect: 'none' }}
+          onMouseDown={handleCanvasMouseDown}
           onDragOver={(e) => {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'copy';
@@ -452,14 +639,14 @@ export const Timeline: React.FC = () => {
             }
           }}
           onMouseUp={(e) => {
-            const { draggingChord, setDraggingChord, draggingStyle, setDraggingStyle, addChordBlock, setSelectedChordId } = useSongStore.getState();
+            const { draggingChord, setDraggingChord, draggingStyle, setDraggingStyle, addChordBlock: addBlock, setSelectedChordId: setSelId } = useSongStore.getState();
             const canvasRect = e.currentTarget.getBoundingClientRect();
             const dropX = e.clientX - canvasRect.left;
             const dropBeat = Math.max(0, Math.round((dropX / BEAT_WIDTH) / snapStep) * snapStep);
             
             if (draggingChord) {
-              setSelectedChordId(null);
-              addChordBlock(draggingChord, dropBeat, 4);
+              setSelId(null);
+              addBlock(draggingChord, dropBeat, 4);
               toneEngine.playChordPreviewStop(draggingChord);
               setDraggingChord(null);
             } else if (draggingStyle) {
@@ -489,356 +676,197 @@ export const Timeline: React.FC = () => {
               window.addEventListener('click', closeMenu);
             }
           }}
-          onMouseDown={(e) => {
-            const target = e.target as HTMLElement;
-            if (!target.closest('.chord-block') && !target.closest('.chord-properties-popover') && !target.closest('.style-marker-flag')) {
-              setSelectedChordId(null);
-              const canvasRect = e.currentTarget.getBoundingClientRect();
-              const clickX = e.clientX - canvasRect.left;
-              const clickedBeat = Math.max(0, Math.floor(clickX / BEAT_WIDTH));
-              toneEngine.seekToBeat(clickedBeat);
-            }
-          }}
         >
-          {/* Pista de Marcadores de Estilo (Timeline Style Markers) */}
-          <div
-            className="style-markers-ruler"
-            style={{
-              position: 'absolute',
-              top: '0px',
-              left: 0,
-              right: 0,
-              height: '20px',
-              background: 'rgba(0, 0, 0, 0.4)',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-              zIndex: 5,
-              cursor: 'pointer'
-            }}
-            title="Arrastra estilos aquí o haz clic derecho sobre un marcador para cambiarlo"
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.dataTransfer.dropEffect = 'copy';
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              const stylePattern = e.dataTransfer.getData('text/style-pattern') || useSongStore.getState().draggingStyle;
-              if (stylePattern) {
-                const canvasRect = e.currentTarget.getBoundingClientRect();
-                const dropX = e.clientX - canvasRect.left;
-                const dropBeat = Math.max(0, Math.round((dropX / BEAT_WIDTH) / snapStep) * snapStep);
-                const existing = styleMarkers.find(m => Math.abs(m.beat - dropBeat) < 0.001);
-                if (!existing) {
-                  addStyleMarker({ id: Math.random().toString(36).substr(2, 9), beat: dropBeat, pattern: stylePattern });
-                } else {
-                  updateStyleMarker(existing.id, { pattern: stylePattern });
-                }
-                setDraggingStyle(null);
-              }
-            }}
-            onMouseUp={(e) => {
-              const { draggingStyle, setDraggingStyle } = useSongStore.getState();
-              if (draggingStyle) {
-                const canvasRect = e.currentTarget.getBoundingClientRect();
-                const dropX = e.clientX - canvasRect.left;
-                const dropBeat = Math.max(0, Math.round((dropX / BEAT_WIDTH) / snapStep) * snapStep);
-                const existing = styleMarkers.find(m => Math.abs(m.beat - dropBeat) < 0.001);
-                if (!existing) {
-                  addStyleMarker({ id: Math.random().toString(36).substr(2, 9), beat: dropBeat, pattern: draggingStyle });
-                } else {
-                  updateStyleMarker(existing.id, { pattern: draggingStyle });
-                }
-                setDraggingStyle(null);
-              }
-            }}
-          >
-            {styleMarkers.map((marker) => {
-              const markerLeft = marker.beat * BEAT_WIDTH;
-              const isDragging = activeDrag?.id === marker.id && activeDrag?.type === 'move_marker';
-              const displayLeft = isDragging ? activeDrag.currentStartBeat * BEAT_WIDTH : markerLeft;
-              
-              return (
-                <div
-                  key={marker.id}
-                  className="style-marker-flag"
-                  style={{
-                    position: 'absolute',
-                    left: `${displayLeft}px`,
-                    top: '2px',
-                    height: '16px',
-                    padding: '0 5px',
-                    borderRadius: '2px',
-                    background: 'rgba(0, 229, 255, 0.12)',
-                    borderLeft: '2px solid #00e5ff',
-                    color: '#00e5ff',
-                    fontSize: '0.65rem',
-                    fontFamily: "'Share Tech Mono', monospace",
-                    display: 'flex',
-                    alignItems: 'center',
-                    zIndex: 6,
-                    cursor: 'ew-resize',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.5)'
-                  }}
-                  onMouseDown={(e) => {
-                    if (e.button !== 0) return;
-                    e.stopPropagation();
-                    const startX = e.clientX;
-                    
-                    const handleMouseMove = (moveEvent: MouseEvent) => {
-                      const deltaX = moveEvent.clientX - startX;
-                      const deltaBeats = Math.round((deltaX / BEAT_WIDTH) / snapStep) * snapStep;
-                      const newBeat = Math.max(0, marker.beat + deltaBeats);
-                      setActiveDrag({ 
-                        id: marker.id, 
-                        type: 'move_marker', 
-                        startX,
-                        initialStartBeat: marker.beat,
-                        initialDurationBeats: 0,
-                        currentStartBeat: newBeat, 
-                        currentDurationBeats: 0 
-                      });
-                    };
-                    
-                    const handleMouseUp = (upEvent: MouseEvent) => {
-                      window.removeEventListener('mousemove', handleMouseMove);
-                      window.removeEventListener('mouseup', handleMouseUp);
-                      const state = useSongStore.getState();
-                      const deltaX = upEvent.clientX - startX;
-                      const deltaBeats = Math.round((deltaX / BEAT_WIDTH) / snapStep) * snapStep;
-                      const newBeat = Math.max(0, marker.beat + deltaBeats);
-                      
-                      const existing = state.styleMarkers.find((m) => Math.abs(m.beat - newBeat) < 0.001 && m.id !== marker.id);
-                      if (!existing && newBeat !== marker.beat) {
-                        updateStyleMarker(marker.id, { beat: newBeat });
-                      }
-                      setActiveDrag(null);
-                    };
-                    
-                    window.addEventListener('mousemove', handleMouseMove);
-                    window.addEventListener('mouseup', handleMouseUp);
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setStyleMarkerMenu({
-                      markerId: marker.id,
-                      x: e.clientX,
-                      y: e.clientY,
-                      currentPattern: marker.pattern,
-                      beat: marker.beat
-                    });
-                  }}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    removeStyleMarker(marker.id);
-                  }}
-                  title={`Marcador: ${marker.pattern} en Beat ${marker.beat} — Click derecho para cambiar estilo, Doble Click para eliminar`}
-                >
-                  {marker.pattern}
-                </div>
-              );
-            })}
-          </div>
+          {/* Pista de Marcadores de Estilo y Tempo */}
+          <TimelineMarkerTrack
+            styleMarkers={styleMarkers}
+            styleGroups={styleGroups}
+            tempoMarkers={tempoMarkers}
+            beatWidth={BEAT_WIDTH}
+            snapStep={snapStep}
+            activeDrag={activeDrag}
+            setActiveDrag={setActiveDrag}
+            updateStyleMarker={updateStyleMarker}
+            removeStyleMarker={removeStyleMarker}
+            addStyleMarker={addStyleMarker}
+            updateTempoMarker={updateTempoMarker}
+            removeTempoMarker={removeTempoMarker}
+          />
 
           {/* Líneas de cuadrícula */}
           {gridLines}
 
+          {/* Líneas guía verticales de cambios de tempo */}
+          {tempoMarkers.map((tm) => (
+            <div
+              key={`tm-guide-${tm.id}`}
+              style={{
+                position: 'absolute',
+                left: `${tm.beat * BEAT_WIDTH}px`,
+                top: 0,
+                bottom: 0,
+                width: '1px',
+                borderLeft: '1px dashed rgba(0, 229, 255, 0.45)',
+                pointerEvents: 'none',
+                zIndex: 2
+              }}
+            />
+          ))}
+
           {/* Bloques de acordes */}
           {chordBlocks.map((block) => {
-            const isSelected = block.id === selectedChordId;
+            const isSelected = selectedChordIds.includes(block.id);
             const isDraggingThis = activeDrag?.id === block.id;
 
-            const startBeat = isDraggingThis && activeDrag.type === 'move'
-              ? activeDrag.currentStartBeat
-              : block.startBeat;
+            let startBeat = block.startBeat;
+            let durationBeats = block.durationBeats;
 
-            const durationBeats = isDraggingThis && activeDrag.type === 'resize'
-              ? activeDrag.currentDurationBeats
-              : block.durationBeats;
-
-            const left = startBeat * BEAT_WIDTH;
-            const width = durationBeats * BEAT_WIDTH;
-
-            const isDiad = isChordInScale(block.chord, key, scale);
-            const romanDegree = isDiad ? getChordRomanDegree(block.chord, key, scale) : '';
-            const role = getChordRole(block.chord, key, scale);
-            const inScale = isDiad;
-
-            const blockWidth = Math.max(12, width - 4);
-            const isCompact = blockWidth < 50;
-            const isMicro = blockWidth < 28;
-            const fontSize = isMicro ? '0.65rem' : isCompact ? '0.78rem' : '0.95rem';
+            if (activeDrag) {
+              if (activeDrag.id === block.id) {
+                if (activeDrag.type === 'move' || activeDrag.type === 'resize_left') {
+                  startBeat = activeDrag.currentStartBeat;
+                }
+                if (activeDrag.type === 'resize_left' || activeDrag.type === 'resize_right') {
+                  durationBeats = activeDrag.currentDurationBeats;
+                }
+              } else if (activeDrag.type === 'move' && activeDrag.groupSnapshots?.has(block.id)) {
+                const snapshot = activeDrag.groupSnapshots.get(block.id)!;
+                const delta = activeDrag.currentStartBeat - activeDrag.initialStartBeat;
+                startBeat = Math.max(0, snapshot.startBeat + delta);
+              }
+            }
 
             return (
-              <div
+              <TimelineBlock
                 key={block.id}
-                className={`chord-block ${isSelected ? 'selected' : ''} ${isDraggingThis ? 'dragging' : ''}`}
-                style={{
-                  position: 'absolute',
-                  left: `${left}px`,
-                  top: '24px',
-                  width: `${blockWidth}px`,
-                  height: '52px',
-                  zIndex: isSelected || isDraggingThis ? 10 : 3,
-                  cursor: isDraggingThis ? 'grabbing' : 'grab',
-                  padding: isMicro ? '0.2rem 2px' : isCompact ? '0.25rem 4px' : '0.4rem 0.6rem',
-                  overflow: 'hidden'
+                block={block}
+                isSelected={isSelected}
+                isDragging={isDraggingThis}
+                startBeat={startBeat}
+                durationBeats={durationBeats}
+                beatWidth={BEAT_WIDTH}
+                currentKey={key}
+                scale={scale}
+                onMouseDown={handleBlockMouseDown}
+                onContextMenu={handleBlockContextMenu}
+                onDoubleClick={(e, b) => {
+                  e.stopPropagation();
+                  setSelectedChordId(b.id);
+                  setSelectedChordIds([b.id]);
+                  setPopoverChordId(b.id);
                 }}
-                onMouseDown={(e) => handleMouseDown(e, block)}
-                onContextMenu={(e) => handleContextMenu(e, block)}
-                title={`${block.chord} (${durationBeats} beats)${romanDegree ? ` · Grado ${romanDegree}` : ''}`}
-              >
-                <div 
-                  className="block-content-only"
-                  style={{
-                    width: '100%',
-                    overflow: 'hidden',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'center',
-                    alignItems: isMicro ? 'center' : 'flex-start'
-                  }}
-                >
-                  <span 
-                    className="block-name" 
-                    style={{ 
-                      fontSize, 
-                      fontWeight: 700,
-                      width: '100%',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      textAlign: isMicro ? 'center' : 'left'
-                    }}
-                  >
-                    {block.chord}
-                    {!inScale && !isMicro && (
-                      <span 
-                        className="out-of-scale-warning" 
-                        title="Este acorde contiene notas fuera de la escala actual"
-                        style={{ marginLeft: '2px', cursor: 'help', fontSize: '0.6rem' }}
-                      >
-                        ⚠️
-                      </span>
-                    )}
-                  </span>
-                  
-                  {!isCompact && (
-                    <span 
-                      className="block-duration-label" 
-                      style={{ 
-                        fontSize: '0.62rem', 
-                        opacity: 0.85,
-                        width: '100%',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap'
-                      }}
-                    >
-                      {romanDegree ? romanDegree : `${durationBeats} ${durationBeats === 1 ? 'beat' : 'beats'}`}
-                    </span>
-                  )}
-                </div>
-
-                {/* Barrita de color del rol armónico en la base */}
-                <div 
-                  style={{
-                    position: 'absolute',
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    height: '3px',
-                    backgroundColor: `var(--role-${role})`,
-                    opacity: 0.95
-                  }}
-                />
-                
-                <div 
-                  className="resize-handle right"
-                  title="Arrastra para redimensionar duración"
-                />
-              </div>
+              />
             );
           })}
+
+          {/* Caja de Selección Lasso */}
+          {lasso.isActive && (
+            <div
+              className="timeline-lasso-box"
+              style={{
+                position: 'absolute',
+                left: `${Math.min(lasso.startX, lasso.currentX)}px`,
+                top: `${Math.min(lasso.startY, lasso.currentY)}px`,
+                width: `${Math.abs(lasso.currentX - lasso.startX)}px`,
+                height: `${Math.abs(lasso.currentY - lasso.startY)}px`,
+                border: '1px dashed rgba(255, 216, 117, 0.7)',
+                backgroundColor: 'rgba(255, 216, 117, 0.1)',
+                pointerEvents: 'none',
+                zIndex: 20
+              }}
+            />
+          )}
 
           <TimelinePlayhead beatWidth={BEAT_WIDTH} />
         </div>
       </div>
 
       {/* Popover de Propiedades */}
-      {selectedBlock && popoverChordId === selectedBlock.id && (
-        <ChordPropertiesPanel popoverLeft={popoverLeft} />
+      {popoverChordId && activePopoverBlock && (
+        <ChordPropertiesPanel
+          popoverLeft={popoverLeft}
+          blockId={activePopoverBlock.id}
+          onClose={() => setPopoverChordId(null)}
+        />
       )}
 
-      {/* Menú Contextual del Marcador de Estilo */}
-      {styleMarkerMenu && (
+      {/* Menú Contextual de Bloque(s) */}
+      {blockContextMenu && (
         <ContextMenuContainer
-          x={styleMarkerMenu.x}
-          y={styleMarkerMenu.y}
+          x={blockContextMenu.x}
+          y={blockContextMenu.y}
         >
-          <div className="menu-header" style={{ padding: '4px 8px', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: '4px' }}>
-            <span style={{ fontSize: '0.72rem', color: '#00e5ff', fontFamily: "'Share Tech Mono', monospace", fontWeight: 'bold' }}>
-              CAMBIAR ESTILO (BEAT {styleMarkerMenu.beat})
-            </span>
+          <div className="menu-header">
+            <span>{selectedChordIds.length > 1 ? `${selectedChordIds.length} ACORDES SELECCIONADOS` : `ACORDE · ${blockContextMenu.block.chord}`}</span>
           </div>
-          <div className="style-marker-menu-list" style={{ maxHeight: '220px', overflowY: 'auto' }}>
-            {allStyles.map(s => (
-              <button
-                key={s.id}
-                type="button"
-                className={`menu-item ${styleMarkerMenu.currentPattern === s.id ? 'active' : ''}`}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  width: '100%',
-                  padding: '5px 8px',
-                  background: styleMarkerMenu.currentPattern === s.id ? 'rgba(0, 229, 255, 0.15)' : 'transparent',
-                  color: styleMarkerMenu.currentPattern === s.id ? '#00e5ff' : 'var(--text-primary)',
-                  fontSize: '0.8rem',
-                  border: 'none',
-                  borderRadius: '3px',
-                  cursor: 'pointer',
-                  textAlign: 'left'
-                }}
-                onClick={() => {
-                  updateStyleMarker(styleMarkerMenu.markerId, { pattern: s.id });
-                  setStyleMarkerMenu(null);
-                }}
-              >
-                <span>{s.label}</span>
-                {styleMarkerMenu.currentPattern === s.id && (
-                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#00e5ff' }} />
-                )}
-              </button>
-            ))}
-          </div>
-          <hr className="menu-separator" style={{ margin: '4px 0', borderColor: 'rgba(255,255,255,0.08)' }} />
+
+          <button
+            type="button"
+            className="menu-item"
+            onClick={(e) => {
+              e.stopPropagation();
+              copySelectedChords();
+              setBlockContextMenu(null);
+            }}
+          >
+            <Copy size={13} /> Copiar (Ctrl+C)
+          </button>
+
+          <button
+            type="button"
+            className="menu-item"
+            onClick={(e) => {
+              e.stopPropagation();
+              duplicateSelectedChords();
+              setBlockContextMenu(null);
+            }}
+          >
+            <Layers size={13} /> Duplicar (Ctrl+D)
+          </button>
+
+          <button
+            type="button"
+            className="menu-item"
+            onClick={(e) => {
+              e.stopPropagation();
+              cutSelectedChords();
+              setBlockContextMenu(null);
+            }}
+          >
+            <Scissors size={13} /> Cortar (Ctrl+X)
+          </button>
+
+          <button
+            type="button"
+            className="menu-item"
+            onClick={(e) => {
+              e.stopPropagation();
+              setSelectedChordId(blockContextMenu.block.id);
+              setSelectedChordIds([blockContextMenu.block.id]);
+              setPopoverChordId(blockContextMenu.block.id);
+              setBlockContextMenu(null);
+            }}
+          >
+            <Grid size={13} /> Propiedades / Voicing
+          </button>
+
+          <hr className="menu-separator" />
+
           <button
             type="button"
             className="menu-danger"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              width: '100%',
-              padding: '6px 8px',
-              background: 'rgba(255, 51, 102, 0.1)',
-              color: '#ff3366',
-              border: 'none',
-              borderRadius: '3px',
-              cursor: 'pointer',
-              fontSize: '0.78rem'
-            }}
-            onClick={() => {
-              removeStyleMarker(styleMarkerMenu.markerId);
-              setStyleMarkerMenu(null);
+            onClick={(e) => {
+              e.stopPropagation();
+              deleteSelectedChords();
+              setBlockContextMenu(null);
             }}
           >
-            <Trash2 size={13} /> Eliminar Marcador
+            <Trash2 size={13} /> Eliminar {selectedChordIds.length > 1 ? `(${selectedChordIds.length})` : ''}
           </button>
         </ContextMenuContainer>
       )}
+
+
 
       {/* Menú Contextual de Pista (Right-click en fondo) */}
       {trackContextMenu && (
@@ -859,6 +887,43 @@ export const Timeline: React.FC = () => {
             }}
           >
             <Plus size={14} /> Insertar Acorde (C)
+          </button>
+
+          <button
+            type="button"
+            className="menu-item"
+            onClick={() => {
+              addTempoMarker({
+                id: Math.random().toString(36).substr(2, 9),
+                beat: trackContextMenu.beat,
+                bpm: bpm || 120
+              });
+              setTrackContextMenu(null);
+            }}
+          >
+            <span style={{ color: 'var(--accent)', fontWeight: 'bold', marginRight: '4px', fontSize: '13px' }}>♩</span> Insertar Marcador de Tempo ({bpm || 120} BPM)
+          </button>
+
+          <button
+            type="button"
+            className="menu-item"
+            onClick={() => {
+              pasteChords(trackContextMenu.beat);
+              setTrackContextMenu(null);
+            }}
+          >
+            <Clipboard size={14} /> Pegar aquí (Ctrl+V)
+          </button>
+
+          <button
+            type="button"
+            className="menu-item"
+            onClick={() => {
+              selectAllChords();
+              setTrackContextMenu(null);
+            }}
+          >
+            <Layers size={14} /> Seleccionar Todo (Ctrl+A)
           </button>
 
           <hr className="menu-separator" />

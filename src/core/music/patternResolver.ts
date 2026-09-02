@@ -240,7 +240,7 @@ export function renderChordPattern(
             list.push({
               name: resolvedNoteName,
               timeBeats: block.startBeat + beat,
-              durationBeats: Math.min(pn.durationBeats, duration - beat),
+              durationBeats: pn.durationBeats,
               velocity: pn.velocity,
               voice: pn.voice
             });

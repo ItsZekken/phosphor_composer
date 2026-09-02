@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
 export interface SelectOption {
@@ -31,7 +32,7 @@ export interface CustomSelectProps {
 export const CustomSelect: React.FC<CustomSelectProps> = ({
   value, 
   options, 
-  groups,
+  groups, 
   onChange, 
   disabled, 
   className = '', 
@@ -47,6 +48,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
   const [subMenuDirection, setSubMenuDirection] = useState<'right' | 'left'>('right');
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; minWidth: number }>({ top: 0, left: 0, minWidth: 130 });
   
   const containerRef = useRef<HTMLDivElement>(null);
   const subMenuRef = useRef<HTMLDivElement>(null);
@@ -54,7 +56,11 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        containerRef.current && !containerRef.current.contains(target) &&
+        menuRef.current && !menuRef.current.contains(target)
+      ) {
         setIsOpen(false);
         setActiveGroup(null);
       }
@@ -71,6 +77,30 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
       if (activeEl) {
         activeEl.scrollIntoView({ block: 'nearest' });
       }
+    }
+  }, [isOpen]);
+
+  useLayoutEffect(() => {
+    if (isOpen && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const windowHeight = window.innerHeight;
+      const windowWidth = window.innerWidth;
+      
+      let top = rect.bottom + 4;
+      if (top + 240 > windowHeight && rect.top - 240 > 0) {
+        top = Math.max(10, rect.top - 245);
+      }
+      
+      let left = rect.left;
+      if (left + 220 > windowWidth) {
+        left = Math.max(10, windowWidth - 230);
+      }
+
+      setMenuPos({
+        top,
+        left,
+        minWidth: Math.max(130, rect.width)
+      });
     }
   }, [isOpen]);
 
@@ -104,8 +134,26 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   selectedOption = selectedOption || { value, label: value };
 
   return (
-    <div ref={containerRef} className={`custom-select-container ${className}`} style={{ position: 'relative', zIndex: isOpen ? 9999 : 1, ...style }}>
-      {renderButton ? renderButton(selectedOption) : (
+    <div ref={containerRef} className={`custom-select-container ${className}`} style={{ position: 'relative', ...style }}>
+      {renderButton ? (
+        <div
+          onClick={(e) => {
+            if (disabled) return;
+            e.stopPropagation();
+            setIsOpen(!isOpen);
+            setActiveGroup(null);
+          }}
+          onContextMenu={(e) => {
+            if (disabled) return;
+            e.preventDefault();
+            e.stopPropagation();
+            setIsOpen(!isOpen);
+            setActiveGroup(null);
+          }}
+        >
+          {renderButton(selectedOption)}
+        </div>
+      ) : (
         <div
           role="button"
           tabIndex={disabled ? -1 : 0}
@@ -120,18 +168,33 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
             setActiveGroup(null);
           }}
           title={draggable ? 'Haz clic para seleccionar o arrastra el valor' : ''}
-          style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 8px', minHeight: '28px', cursor: draggable ? 'grab' : 'pointer', userSelect: 'none', WebkitUserSelect: 'none', opacity: disabled ? 0.5 : 1 }}
+          style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 8px', minHeight: '26px', height: '26px', cursor: draggable ? 'grab' : 'pointer', userSelect: 'none', WebkitUserSelect: 'none', opacity: disabled ? 0.5 : 1 }}
         >
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.8rem', userSelect: 'none', pointerEvents: 'none' }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.74rem', fontFamily: "'Share Tech Mono', monospace", userSelect: 'none', pointerEvents: 'none' }}>
             {labelPrefix ? `${labelPrefix} ` : ''}{selectedOption.label}
           </span>
           <ChevronDown size={14} style={{ flexShrink: 0, marginLeft: '6px', opacity: 0.6, pointerEvents: 'none' }} />
         </div>
       )}
 
-      {isOpen && !disabled && (
-        <div ref={menuRef} className="style-popover-panel" style={{ width: 'max-content', minWidth: '100%', position: 'absolute', zIndex: 99999, top: '100%', left: 0, marginTop: '4px', padding: '4px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}>
-          
+      {isOpen && !disabled && createPortal(
+        <div 
+          ref={menuRef} 
+          className="style-popover-panel" 
+          style={{ 
+            position: 'fixed', 
+            zIndex: 9999999, 
+            top: `${menuPos.top}px`, 
+            left: `${menuPos.left}px`, 
+            minWidth: `${menuPos.minWidth}px`, 
+            width: 'max-content', 
+            padding: '4px', 
+            boxShadow: '0 8px 30px rgba(0,0,0,0.85)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            background: 'var(--bg-secondary, #1c1924)'
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
           {options && (
             <div className="style-list-group" style={{ maxHeight: '250px', overflowY: 'auto' }}>
               {options.map(opt => (
@@ -154,7 +217,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
                   }}
                   style={{ userSelect: 'none', WebkitUserSelect: 'none', cursor: draggable ? 'grab' : 'pointer' }}
                 >
-                  <span className="style-name" style={{ fontSize: '0.8rem', userSelect: 'none', pointerEvents: 'none' }}>{opt.label}</span>
+                  <span className="style-name" style={{ fontSize: '0.74rem', fontFamily: "'Share Tech Mono', monospace", userSelect: 'none', pointerEvents: 'none' }}>{opt.label}</span>
                   {value === opt.value && <span className="style-led active" />}
                 </div>
               ))}
@@ -170,7 +233,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
                   style={{ display: 'flex', justifyContent: 'space-between', position: 'relative', overflow: 'visible', background: activeGroup === group.label ? 'rgba(255,255,255,0.1)' : undefined }}
                   onMouseEnter={() => setActiveGroup(group.label)}
                 >
-                  <span className="style-name" style={{ fontSize: '0.8rem' }}>{group.label}</span>
+                  <span className="style-name" style={{ fontSize: '0.74rem', fontFamily: "'Share Tech Mono', monospace" }}>{group.label}</span>
                   <ChevronRight size={14} style={{ opacity: 0.5 }} />
 
                   {/* Submenu */}
@@ -186,9 +249,11 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
                         marginRight: subMenuDirection === 'left' ? '4px' : '0',
                         width: 'max-content',
                         minWidth: '150px',
-                        zIndex: 99999,
+                        zIndex: 9999999,
                         padding: '4px',
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+                        boxShadow: '0 8px 30px rgba(0,0,0,0.85)',
+                        border: '1px solid rgba(255,255,255,0.12)',
+                        background: 'var(--bg-secondary, #1c1924)'
                       }}
                     >
                       <div className="style-list-group" style={{ maxHeight: '250px', overflowY: 'auto' }}>
@@ -196,14 +261,24 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
                           <div 
                             key={opt.value}
                             className={`style-item-row ${value === opt.value ? 'active' : ''}`}
+                            draggable={draggable}
+                            onDragStart={(e) => {
+                              if (onOptionDragStart) onOptionDragStart(opt.value, e);
+                              else if (onDragStart) onDragStart(e);
+                            }}
+                            onMouseDown={(e) => {
+                              if (onOptionMouseDown) onOptionMouseDown(opt.value, e);
+                              else if (onMouseDown) onMouseDown(e);
+                            }}
                             onClick={(e) => {
                               e.stopPropagation();
                               onChange(opt.value);
                               setIsOpen(false);
                               setActiveGroup(null);
                             }}
+                            style={{ userSelect: 'none', WebkitUserSelect: 'none', cursor: draggable ? 'grab' : 'pointer' }}
                           >
-                            <span className="style-name" style={{ fontSize: '0.8rem' }}>{opt.label}</span>
+                            <span className="style-name" style={{ fontSize: '0.74rem', fontFamily: "'Share Tech Mono', monospace", userSelect: 'none', pointerEvents: 'none' }}>{opt.label}</span>
                             {value === opt.value && <span className="style-led active" />}
                           </div>
                         ))}
@@ -214,9 +289,10 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
               ))}
             </div>
           )}
-
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
 };
+

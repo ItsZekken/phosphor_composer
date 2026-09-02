@@ -31,13 +31,13 @@ export function useGridZoom(options?: GridZoomOptions) {
   const handleZoom = (axis: 'x' | 'y', direction: 'in' | 'out') => {
     if (axis === 'x') {
       setBeatWidth(prev => {
-        const next = direction === 'in' ? prev * 1.2 : prev / 1.2;
-        return Math.max(48, Math.min(next, 192));
+        const next = direction === 'in' ? Math.round(prev * 1.2) : Math.round(prev / 1.2);
+        return Math.max(48, Math.min(next, 240));
       });
     } else {
       setRowHeight(prev => {
-        const next = direction === 'in' ? prev * 1.2 : prev / 1.2;
-        return Math.max(12, Math.min(next, 48));
+        const next = direction === 'in' ? Math.round(prev * 1.2) : Math.round(prev / 1.2);
+        return Math.max(14, Math.min(next, 48));
       });
     }
   };

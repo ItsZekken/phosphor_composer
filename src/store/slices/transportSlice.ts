@@ -2,6 +2,8 @@ import type { SliceCreator, TransportState, TransportActions } from '../types';
 
 export const initialTransportState: TransportState = {
   bpm: 120,
+  liveBpm: 120,
+  tempoMarkers: [],
   key: 'C',
   scale: 'major',
   isAutoKey: true,
@@ -25,7 +27,27 @@ export const initialTransportState: TransportState = {
 export const createTransportSlice: SliceCreator<TransportState & TransportActions> = (set, get) => ({
   ...initialTransportState,
 
-  setBpm: (bpm) => set({ bpm }),
+  setBpm: (bpm) => set((state) => ({ bpm, liveBpm: state.isPlaying ? state.liveBpm : bpm })),
+  setLiveBpm: (liveBpm) => set({ liveBpm }),
+
+  addTempoMarker: (marker) => set((state) => ({
+    tempoMarkers: [...state.tempoMarkers.filter(m => m.id !== marker.id), marker]
+      .sort((a, b) => a.beat - b.beat)
+  })),
+
+  removeTempoMarker: (id) => set((state) => ({
+    tempoMarkers: state.tempoMarkers.filter((m) => m.id !== id)
+  })),
+
+  updateTempoMarker: (id, updates) => set((state) => ({
+    tempoMarkers: state.tempoMarkers
+      .map((m) => (m.id === id ? { ...m, ...updates } : m))
+      .sort((a, b) => a.beat - b.beat)
+  })),
+
+  setTempoMarkers: (tempoMarkers) => set({
+    tempoMarkers: [...tempoMarkers].sort((a, b) => a.beat - b.beat)
+  }),
 
   setKey: (key) => {
     set({ key, isAutoKey: false });

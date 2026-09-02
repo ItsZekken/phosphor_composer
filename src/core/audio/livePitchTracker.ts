@@ -41,6 +41,11 @@ export class LivePitchTracker {
   private clarityThreshold: number;
   private onLivePitch?: (pitch: { midi: number; note: string; clarity: number } | null) => void;
 
+  private worker: Worker | null = null;
+  private isProcessing = false;
+  private currentRequestId = 0;
+  private reusableBuffer = new Float32Array(2048);
+
   // Filtro mediano circular para estabilizar el vibrato
   private pitchHistory: number[] = [];
   private historySize = 3;
@@ -59,6 +64,18 @@ export class LivePitchTracker {
     this.pitchHistory = [];
     this.transportTimeOffset = initialTransportSeconds;
     this.recordingStartTime = performance.now();
+    this.isProcessing = false;
+
+    // Inicializar Web Worker dedicado para offload de cálculos O(N^2)
+    try {
+      this.worker = new Worker(new URL('../../workers/pitchTrackerWorker.ts', import.meta.url), { type: 'module' });
+      this.worker.onmessage = (e: MessageEvent<{ id: number; result: { midi: number; frequency: number; clarity: number } | null }>) => {
+        this.handleWorkerResult(e.data.result);
+      };
+    } catch (err) {
+      console.warn('[LivePitchTracker] Web Worker no disponible, fallback síncrono activo:', err);
+      this.worker = null;
+    }
 
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -85,10 +102,33 @@ export class LivePitchTracker {
   private processAudioLoop = () => {
     if (!this.isRunning || !this.analyserNode || !this.audioCtx) return;
 
-    const buffer = new Float32Array(this.analyserNode.fftSize);
-    this.analyserNode.getFloatTimeDomainData(buffer);
+    if (this.worker) {
+      if (!this.isProcessing) {
+        this.isProcessing = true;
+        this.analyserNode.getFloatTimeDomainData(this.reusableBuffer);
+        this.worker.postMessage({
+          id: ++this.currentRequestId,
+          buffer: this.reusableBuffer,
+          sampleRate: this.audioCtx.sampleRate
+        });
+      }
+    } else {
+      // Fallback síncrono
+      this.analyserNode.getFloatTimeDomainData(this.reusableBuffer);
+      const result = this.detectPitch(this.reusableBuffer, this.audioCtx.sampleRate);
+      this.handlePitchResult(result);
+    }
 
-    const result = this.detectPitch(buffer, this.audioCtx.sampleRate);
+    this.rafId = requestAnimationFrame(this.processAudioLoop);
+  };
+
+  private handleWorkerResult(result: { midi: number; frequency: number; clarity: number } | null) {
+    this.isProcessing = false;
+    if (!this.isRunning) return;
+    this.handlePitchResult(result);
+  }
+
+  private handlePitchResult(result: { midi: number; frequency: number; clarity: number } | null) {
     const elapsedSeconds = (performance.now() - this.recordingStartTime) / 1000;
     const currentTransportTime = this.transportTimeOffset + elapsedSeconds;
 
@@ -123,9 +163,7 @@ export class LivePitchTracker {
         this.onLivePitch(null);
       }
     }
-
-    this.rafId = requestAnimationFrame(this.processAudioLoop);
-  };
+  }
 
   /**
    * Algoritmo de Autocorrelación normalizada con ventana para estimación de pitch
@@ -191,6 +229,11 @@ export class LivePitchTracker {
 
   public stop(): RecordedPitchSample[] {
     this.isRunning = false;
+
+    if (this.worker) {
+      try { this.worker.terminate(); } catch (_) {}
+      this.worker = null;
+    }
 
     if (this.rafId !== null) {
       cancelAnimationFrame(this.rafId);

@@ -3,9 +3,10 @@ const { Midi } = pkg;
 import {
   midiToNote,
   renderChordPattern,
-  getBlockNotes
+  getBlockNotes,
+  createTempoMap
 } from '../core/music';
-import type { ChordBlock, MelodyNote } from './typeDefinitions';
+import type { ChordBlock, MelodyNote, TempoMarker } from './typeDefinitions';
 import type { PatternDef } from '../patterns/patternTypes';
 
 export const midiToNoteName = midiToNote;
@@ -192,12 +193,25 @@ export function identifyPattern(
  */
 export function exportSessionToMidi(session: any, type: 'normal' | 'project'): Uint8Array {
   const midi = new Midi();
-  midi.header.setTempo(session.bpm);
+  const tempoMap = createTempoMap(session.bpm || 120, session.tempoMarkers || []);
+  midi.header.setTempo(session.bpm || 120);
+
+  if (tempoMap.segments.length > 1) {
+    tempoMap.segments.forEach(seg => {
+      if (seg.startBeat > 0) {
+        midi.header.tempos.push({
+          bpm: seg.bpm,
+          ticks: Math.round(seg.startBeat * (midi.header.ppq || 480))
+        });
+      }
+    });
+  }
 
   if (type === 'project') {
     const metadata = {
       version: '1.0',
       bpm: session.bpm,
+      tempoMarkers: session.tempoMarkers || [],
       key: session.key,
       scale: session.scale,
       timeSignature: session.timeSignature,
@@ -227,13 +241,11 @@ export function exportSessionToMidi(session: any, type: 'normal' | 'project'): U
   const chordsTrack = midi.addTrack();
   chordsTrack.name = 'Chords';
 
-  const beatDuration = 60 / session.bpm;
-
   session.melodyNotes.forEach((note: MelodyNote) => {
     melodyTrack.addNote({
       name: note.note,
-      time: note.startBeat * beatDuration,
-      duration: note.durationBeats * beatDuration,
+      time: tempoMap.beatToSeconds(note.startBeat),
+      duration: tempoMap.getDurationSeconds(note.startBeat, note.durationBeats),
       velocity: note.velocity
     });
   });
@@ -244,8 +256,8 @@ export function exportSessionToMidi(session: any, type: 'normal' | 'project'): U
       notes.forEach(note => {
         chordsTrack.addNote({
           name: note,
-          time: block.startBeat * beatDuration,
-          duration: block.durationBeats * beatDuration,
+          time: tempoMap.beatToSeconds(block.startBeat),
+          duration: tempoMap.getDurationSeconds(block.startBeat, block.durationBeats),
           velocity: 0.6
         });
       });
@@ -254,8 +266,8 @@ export function exportSessionToMidi(session: any, type: 'normal' | 'project'): U
       rendered.forEach(n => {
         chordsTrack.addNote({
           name: n.name,
-          time: n.timeBeats * beatDuration,
-          duration: n.durationBeats * beatDuration,
+          time: tempoMap.beatToSeconds(n.timeBeats),
+          duration: tempoMap.getDurationSeconds(n.timeBeats, n.durationBeats),
           velocity: n.velocity
         });
       });
@@ -275,6 +287,7 @@ export function importMidiToSession(
   success: boolean;
   isProject: boolean;
   bpm: number;
+  tempoMarkers?: TempoMarker[];
   key: string;
   scale: string;
   pattern: string;
@@ -303,6 +316,7 @@ export function importMidiToSession(
           success: true,
           isProject: true,
           bpm: state.bpm ?? bpm,
+          tempoMarkers: state.tempoMarkers ?? [],
           key: state.key ?? 'C',
           scale: state.scale ?? 'major',
           pattern: state.pattern ?? 'hold',
@@ -504,10 +518,21 @@ export function importMidiToSession(
     }
   }
 
+  const tempoMarkers: TempoMarker[] = midi.header.tempos && midi.header.tempos.length > 1
+    ? midi.header.tempos
+        .filter(t => t.ticks > 0)
+        .map((t, idx) => ({
+          id: `tm_midi_${idx}`,
+          beat: Math.round((t.ticks / (midi.header.ppq || 480)) * 4) / 4,
+          bpm: Math.round(t.bpm)
+        }))
+    : [];
+
   return {
     success: true,
     isProject: false,
     bpm,
+    tempoMarkers,
     key: 'C',
     scale: 'major',
     pattern,

@@ -31,5 +31,28 @@ const processPatternsPlugin = () => ({
 export default defineConfig({
   base: '/',
   plugins: [react(), processPatternsPlugin()],
+  build: {
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('tone') || id.includes('@tonejs') || id.includes('webmidi')) {
+              return 'vendor-audio';
+            }
+            if (id.includes('@dnd-kit')) {
+              return 'vendor-dnd';
+            }
+            if (id.includes('lucide-react')) {
+              return 'vendor-icons';
+            }
+            if (id.includes('react') || id.includes('react-dom') || id.includes('scheduler')) {
+              return 'vendor-react';
+            }
+          }
+        }
+      }
+    }
+  }
 })
 

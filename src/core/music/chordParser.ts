@@ -13,12 +13,14 @@ export type ChordQuality =
   | 'major7' 
   | 'minor7' 
   | 'diminished' 
+  | 'diminished7'
   | 'augmented' 
   | 'halfDiminished' 
   | 'sus4' 
   | 'sus2'
   | 'major6'
-  | 'minor6';
+  | 'minor6'
+  | 'add9';
 
 export interface ParsedChord {
   raw: string;
@@ -58,10 +60,16 @@ const CHORD_INTERVAL_MAP: Record<string, { quality: ChordQuality; intervals: num
   // Disminuidos
   'dim': { quality: 'diminished', intervals: [0, 3, 6], canonicalSuffix: 'dim' },
   '°': { quality: 'diminished', intervals: [0, 3, 6], canonicalSuffix: 'dim' },
+  'dim7': { quality: 'diminished7', intervals: [0, 3, 6, 9], canonicalSuffix: 'dim7' },
+  '°7': { quality: 'diminished7', intervals: [0, 3, 6, 9], canonicalSuffix: 'dim7' },
 
   // Aumentados
   'aug': { quality: 'augmented', intervals: [0, 4, 8], canonicalSuffix: 'aug' },
   '+': { quality: 'augmented', intervals: [0, 4, 8], canonicalSuffix: 'aug' },
+  'augmented': { quality: 'augmented', intervals: [0, 4, 8], canonicalSuffix: 'aug' },
+  'aug7': { quality: 'augmented', intervals: [0, 4, 8, 10], canonicalSuffix: 'aug7' },
+  '+7': { quality: 'augmented', intervals: [0, 4, 8, 10], canonicalSuffix: 'aug7' },
+  '7#5': { quality: 'augmented', intervals: [0, 4, 8, 10], canonicalSuffix: 'aug7' },
 
   // Semidisminuido / m7b5
   'm7b5': { quality: 'halfDiminished', intervals: [0, 3, 6, 10], canonicalSuffix: 'm7b5' },
@@ -75,7 +83,13 @@ const CHORD_INTERVAL_MAP: Record<string, { quality: ChordQuality; intervals: num
 
   // Sextas
   '6': { quality: 'major6', intervals: [0, 4, 7, 9], canonicalSuffix: '6' },
-  'm6': { quality: 'minor6', intervals: [0, 3, 7, 9], canonicalSuffix: 'm6' }
+  'maj6': { quality: 'major6', intervals: [0, 4, 7, 9], canonicalSuffix: '6' },
+  'm6': { quality: 'minor6', intervals: [0, 3, 7, 9], canonicalSuffix: 'm6' },
+  'min6': { quality: 'minor6', intervals: [0, 3, 7, 9], canonicalSuffix: 'm6' },
+
+  // Novena añadida
+  'add9': { quality: 'add9', intervals: [0, 4, 7, 14], canonicalSuffix: 'add9' },
+  '2': { quality: 'sus2', intervals: [0, 2, 7], canonicalSuffix: 'sus2' }
 };
 
 /**

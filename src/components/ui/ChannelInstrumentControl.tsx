@@ -36,7 +36,7 @@ export const ChannelInstrumentControl: React.FC<ChannelInstrumentControlProps> =
           { value: 'piano', label: 'Piano de Cola' },
           { value: 'synth', label: 'Sintetizador' }
         ]}
-        style={{ width: '130px', ...selectStyle }}
+        style={{ width: '142px', ...selectStyle }}
       />
       {currentInstrument === 'synth' && (
         <button
@@ -47,8 +47,8 @@ export const ChannelInstrumentControl: React.FC<ChannelInstrumentControlProps> =
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: '28px',
-            height: '28px',
+            width: '26px',
+            height: '26px',
             background: 'rgba(168, 85, 247, 0.15)',
             border: '1px solid rgba(168, 85, 247, 0.4)',
             color: '#a855f7',

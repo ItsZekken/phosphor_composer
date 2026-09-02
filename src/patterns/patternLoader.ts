@@ -1,39 +1,41 @@
 import type { PatternDef } from './patternTypes';
+import defaultPatternsJson from '../../public/patterns.json';
 
-let cachedPatterns: PatternDef[] | null = null;
+const defaultPatterns: PatternDef[] = Array.isArray(defaultPatternsJson) ? (defaultPatternsJson as PatternDef[]) : [];
+
+let cachedPatterns: PatternDef[] = defaultPatterns;
+
+/**
+ * Devuelve los patrones por defecto empaquetados estáticamente en la aplicación.
+ */
+export function getDefaultCustomPatterns(): PatternDef[] {
+  return defaultPatterns;
+}
 
 /**
  * Carga los patrones desde /patterns.json (generado por processPatterns.mjs).
- * Cachea el resultado en memoria para evitar múltiples fetches.
- * Devuelve un array vacío si el archivo no existe o hay un error.
+ * Inicializa de inmediato con los patrones estáticos para disponibilidad síncrona,
+ * y luego refresca dinámicamente si hay nuevos patrones generados.
  */
 export async function loadCustomPatterns(): Promise<PatternDef[]> {
-  if (cachedPatterns !== null) return cachedPatterns;
-
   try {
-    const response = await fetch('/patterns.json');
+    const response = await fetch(`/patterns.json?t=${Date.now()}`);
     if (!response.ok) {
-      console.warn('[patternLoader] patterns.json no encontrado o error HTTP', response.status);
-      cachedPatterns = [];
-      return [];
+      return cachedPatterns;
     }
     const data = await response.json();
     if (!Array.isArray(data)) {
-      console.warn('[patternLoader] patterns.json no es un array');
-      cachedPatterns = [];
-      return [];
+      return cachedPatterns;
     }
     cachedPatterns = data as PatternDef[];
-    console.log(`[patternLoader] Cargados ${cachedPatterns.length} patrones custom desde patterns.json`);
     return cachedPatterns;
   } catch (e) {
-    console.warn('[patternLoader] Error cargando patterns.json:', e);
-    cachedPatterns = [];
-    return [];
+    console.warn('[patternLoader] Usando patrones estáticos por defecto:', e);
+    return cachedPatterns;
   }
 }
 
 /** Invalida el caché en memoria para forzar una nueva carga. */
 export function invalidatePatternCache() {
-  cachedPatterns = null;
+  cachedPatterns = defaultPatterns;
 }

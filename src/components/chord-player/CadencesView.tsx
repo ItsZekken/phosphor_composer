@@ -18,7 +18,7 @@ interface CadencesViewProps {
 
 interface Cadence {
   name: string;
-  emoji: string;
+  tag: string;
   role: 'reposo' | 'tension' | 'subdominante' | 'spicy' | 'exotic';
   // Grados en semitones desde la tónica + calidad
   degrees: Array<{ interval: number; quality: string }>;
@@ -26,8 +26,72 @@ interface Cadence {
 
 const CADENCES: Cadence[] = [
   {
-    name: 'I – V – vi – IV',
-    emoji: '❤️',
+    name: 'i – aug – VI – ivm (Line Cliché)',
+    tag: 'Line Cliché',
+    role: 'spicy',
+    degrees: [
+      { interval: 0, quality: 'm' },
+      { interval: 11, quality: 'aug' },
+      { interval: 8, quality: '' },
+      { interval: 8, quality: 'm' },
+    ]
+  },
+  {
+    name: 'I – VII(bII) – bVI – bVII (Cromática)',
+    tag: 'Cromática',
+    role: 'spicy',
+    degrees: [
+      { interval: 0, quality: '' },
+      { interval: 11, quality: '' },
+      { interval: 8, quality: '' },
+      { interval: 10, quality: '' },
+    ]
+  },
+  {
+    name: 'I – Iaug – IV – iv (Soul / Pop)',
+    tag: 'Pop Soul',
+    role: 'spicy',
+    degrees: [
+      { interval: 0, quality: '' },
+      { interval: 0, quality: 'aug' },
+      { interval: 5, quality: '' },
+      { interval: 5, quality: 'm' },
+    ]
+  },
+  {
+    name: 'bVI – bVII – I (Épico / Cine)',
+    tag: 'Cinemática',
+    role: 'subdominante',
+    degrees: [
+      { interval: 8, quality: '' },
+      { interval: 10, quality: '' },
+      { interval: 0, quality: '' },
+    ]
+  },
+  {
+    name: 'i – bVII – bVI – V (Andaluza)',
+    tag: 'Flamenco',
+    role: 'tension',
+    degrees: [
+      { interval: 0, quality: 'm' },
+      { interval: 10, quality: '' },
+      { interval: 8, quality: '' },
+      { interval: 7, quality: '' },
+    ]
+  },
+  {
+    name: 'ii – subV7 – I (Tritono Jazz)',
+    tag: 'Jazz',
+    role: 'tension',
+    degrees: [
+      { interval: 2, quality: 'm7' },
+      { interval: 1, quality: '7' },
+      { interval: 0, quality: 'maj7' },
+    ]
+  },
+  {
+    name: 'I – V – vi – IV (Pop Hit)',
+    tag: 'Pop',
     role: 'reposo',
     degrees: [
       { interval: 0, quality: '' },
@@ -37,8 +101,8 @@ const CADENCES: Cadence[] = [
     ]
   },
   {
-    name: 'I – IV – V – I',
-    emoji: '',
+    name: 'I – IV – V – I (Clásica)',
+    tag: 'Clásica',
     role: 'reposo',
     degrees: [
       { interval: 0, quality: '' },
@@ -48,8 +112,8 @@ const CADENCES: Cadence[] = [
     ]
   },
   {
-    name: 'ii – V – I',
-    emoji: '🎷',
+    name: 'ii – V – I (Jazz 2-5-1)',
+    tag: 'Jazz',
     role: 'tension',
     degrees: [
       { interval: 2, quality: 'm' },
@@ -58,8 +122,8 @@ const CADENCES: Cadence[] = [
     ]
   },
   {
-    name: 'I – vi – IV – V',
-    emoji: '🎶',
+    name: 'I – vi – IV – V (Doo-Wop 50s)',
+    tag: 'Vintage',
     role: 'reposo',
     degrees: [
       { interval: 0, quality: '' },
@@ -69,8 +133,8 @@ const CADENCES: Cadence[] = [
     ]
   },
   {
-    name: 'i – VII – VI – VII',
-    emoji: '🌑',
+    name: 'i – VII – VI – VII (Natural)',
+    tag: 'Modal',
     role: 'spicy',
     degrees: [
       { interval: 0, quality: 'm' },
@@ -80,8 +144,8 @@ const CADENCES: Cadence[] = [
     ]
   },
   {
-    name: 'I – III – IV – iv',
-    emoji: '🎭',
+    name: 'I – III – IV – iv (Radiohead / Creep)',
+    tag: 'Alternativo',
     role: 'spicy',
     degrees: [
       { interval: 0, quality: '' },
@@ -91,8 +155,8 @@ const CADENCES: Cadence[] = [
     ]
   },
   {
-    name: 'vi – IV – I – V',
-    emoji: '🌅',
+    name: 'vi – IV – I – V (Himno Melancólico)',
+    tag: 'Himno',
     role: 'subdominante',
     degrees: [
       { interval: 9, quality: 'm' },
@@ -102,8 +166,8 @@ const CADENCES: Cadence[] = [
     ]
   },
   {
-    name: 'I – bVII – IV – I',
-    emoji: '🎪',
+    name: 'I – bVII – IV – I (Rock Clásico)',
+    tag: 'Rock',
     role: 'exotic',
     degrees: [
       { interval: 0, quality: '' },
@@ -113,8 +177,8 @@ const CADENCES: Cadence[] = [
     ]
   },
   {
-    name: 'i – VI – III – VII',
-    emoji: '🌙',
+    name: 'i – VI – III – VII (Oscuridad Épica)',
+    tag: 'Dark Fantasy',
     role: 'tension',
     degrees: [
       { interval: 0, quality: 'm' },
@@ -124,8 +188,8 @@ const CADENCES: Cadence[] = [
     ]
   },
   {
-    name: 'I – V – vi – iii – IV',
-    emoji: '🌈',
+    name: 'I – V – vi – iii – IV (Canon Pachelbel)',
+    tag: 'Canon',
     role: 'reposo',
     degrees: [
       { interval: 0, quality: '' },
@@ -181,7 +245,7 @@ const CadenceCard: React.FC<CadenceCardProps> = ({ cadence, chords, sugMap }) =>
       style={{ '--role-color': ROLE_COLORS[cadence.role] } as React.CSSProperties}
     >
       <div className="cadence-header">
-        <span className="cadence-emoji">{cadence.emoji}</span>
+        <span className="cadence-style-tag">{cadence.tag}</span>
         <span className="cadence-name">{cadence.name}</span>
         {avgProb > 0.2 && (
           <span className="cadence-match">

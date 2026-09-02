@@ -8,6 +8,7 @@ import type {
   ChordBlock, 
   PianoRollTrack, 
   StyleMarker, 
+  TempoMarker,
   ChannelConfig, 
   DrumChannel, 
   TimeSignature,
@@ -28,6 +29,7 @@ export interface SessionMetadata {
 
 export interface TransportState {
   bpm: number;
+  tempoMarkers?: TempoMarker[];
   timeSignature: TimeSignature;
   key: NoteClass;
   scale: ScaleType;
@@ -39,6 +41,8 @@ export interface HarmonyState {
   styleMarkers: StyleMarker[];
   chordOctaveShift: number;
   defaultPattern: string;
+  chordGridSnap?: '1' | '1/2' | '1/4';
+  chordTimelineViewport?: { scrollLeft: number; zoomLevel: number };
 }
 
 export interface DrumSessionState {
@@ -47,6 +51,7 @@ export interface DrumSessionState {
   activeDrumKitId: string;
   drumChannels: DrumChannel[];
   currentDrumPatternEdit?: number;
+  drumTimelineViewport?: { scrollLeft: number; zoomLevel: number };
 }
 
 export interface MixerState {

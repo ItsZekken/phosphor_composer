@@ -4,7 +4,6 @@
  */
 
 import * as Tone from 'tone';
-import type { TimeSignature } from '../../../utils/typeDefinitions';
 
 export class AudioTransport {
   public metroSynth: Tone.Synth;
@@ -52,54 +51,31 @@ export class AudioTransport {
     this.metroSynth.volume.value = gain === 0 ? -Infinity : Tone.gainToDb(gain);
   }
 
-  public syncMetronome(
-    isActive: boolean,
-    subdivision: '4n' | '8n' | '16n',
-    timeSignature: TimeSignature,
-    volumePercent: number
-  ) {
-    if (this.metroEventId !== null) {
-      try {
-        Tone.Transport.clear(this.metroEventId);
-      } catch (_) {}
-      this.metroEventId = null;
-    }
-
-    if (!isActive) return;
-
-    this.setMetroVolume(volumePercent);
-
-    this.metroEventId = Tone.Transport.scheduleRepeat((time) => {
-      try {
-        const ticks = Tone.Transport.getTicksAtTime(time);
-        const currentBeat = Math.round((ticks / Tone.Transport.PPQ) * 100) / 100;
-
-        const beatsPerMeasure = timeSignature === '3/4' ? 3 : timeSignature === '6/8' ? 6 : 4;
-        const isMeasureStart = currentBeat % beatsPerMeasure === 0;
-        const isBeat = currentBeat % 1 === 0;
-
-        let frequency = 400;
-        if (isMeasureStart) {
-          frequency = 1200;
-        } else if (isBeat) {
-          frequency = 800;
-        }
-
-        const volumeFactor = isMeasureStart || isBeat ? 1 : 0.5;
-        const gain = (volumePercent / 100) * volumeFactor;
-        const db = gain === 0 ? -Infinity : Tone.gainToDb(gain);
-
-        this.metroSynth.volume.value = db;
-        this.metroSynth.triggerAttackRelease(frequency, '32n', time);
-      } catch (e) {
-        console.error('Error en metrónomo:', e);
+  public triggerMetroClick(frequency: number, volumeFactor: number, time: number) {
+    try {
+      const volumeNode = this.metroSynth.volume;
+      const baseDb = volumeNode.value;
+      if (volumeFactor < 1.0) {
+        volumeNode.setValueAtTime(baseDb - 6, time);
       }
-    }, subdivision);
+      this.metroSynth.triggerAttackRelease(frequency, '32n', time);
+    } catch (_) {}
   }
 
-  public start(currentBeat: number, bpm: number) {
-    Tone.Transport.seconds = currentBeat * (60 / bpm);
+  public syncMetronome(
+    _isActive: boolean,
+    volumePercent: number
+  ) {
+    this.setMetroVolume(volumePercent);
+    if (this.metroEventId !== null) {
+      try { Tone.Transport.clear(this.metroEventId); } catch (_) {}
+      this.metroEventId = null;
+    }
+  }
+
+  public start(currentBeat: number, bpm: number, audioSeconds?: number) {
     Tone.Transport.bpm.value = bpm;
+    Tone.Transport.seconds = audioSeconds !== undefined ? audioSeconds : currentBeat * (60 / bpm);
     Tone.Transport.start();
   }
 
@@ -111,8 +87,9 @@ export class AudioTransport {
     Tone.Transport.stop();
   }
 
-  public seek(beat: number, bpm: number) {
-    Tone.Transport.seconds = beat * (60 / bpm);
+  public seek(beat: number, bpm: number, audioSeconds?: number) {
+    Tone.Transport.bpm.value = bpm;
+    Tone.Transport.seconds = audioSeconds !== undefined ? audioSeconds : beat * (60 / bpm);
   }
 
   public dispose() {

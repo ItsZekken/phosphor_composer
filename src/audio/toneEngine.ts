@@ -1,20 +1,24 @@
 /**
  * toneEngine.ts
  * Fachada principal y orquestador del Motor de Audio de Phosphor.
- * Delega en subsistemas modulares: MixerGraph, SynthVoiceManager, DrumSoundManager, PreviewManager y AudioTransport.
+ * Arquitectura modular y determinista con Pre-Scheduling en Tone.Transport.
+ * Delega en subsistemas especializados: MixerGraph, ChannelInstrumentManager, DrumSoundManager, PreviewManager y AudioTransport.
  */
 
 import * as Tone from 'tone';
 import { useSongStore } from '../store/songStore';
-import { NOTE_CLASSES, SCALE_INTERVALS, getBlockNotes, resolvePatternNoteToChord } from '../core/music';
-import { flattenPatternChain } from '../utils/typeDefinitions';
-import { renderSessionToWav, renderSessionToCompressed, PianoSampler } from '../core/audio';
+import { NOTE_CLASSES, SCALE_INTERVALS } from '../core/music';
+import { renderSessionToWav, renderSessionToCompressed, scheduleSessionTimeline } from '../core/audio';
 import { serializeSession } from '../core/session';
-import { MixerGraph } from '../core/audio/engine/MixerGraph';
-import { SynthVoiceManager } from '../core/audio/engine/SynthVoiceManager';
+import { MixerGraph, faderToDb } from '../core/audio/engine/MixerGraph';
+import { ChannelInstrumentManager } from '../core/audio/engine/ChannelInstrumentManager';
 import { DrumSoundManager } from '../core/audio/engine/DrumSoundManager';
 import { PreviewManager } from '../core/audio/engine/PreviewManager';
 import { AudioTransport } from '../core/audio/engine/AudioTransport';
+import { LookaheadScheduler } from '../core/audio/lookaheadScheduler';
+import { flattenPatternChain, type ChannelConfig, type SynthSettings } from '../utils/typeDefinitions';
+import type { PatternDef } from '../patterns/patternTypes';
+import { exportStageToMp4 } from '../core/video/stageVideoExporter';
 
 // Helper debounce simple
 function debounce<T extends (...args: unknown[]) => void>(fn: T, delay: number): T {
@@ -57,67 +61,168 @@ const CHROMATIC_KEY_MAP: Record<string, number> = {
 
 class ToneEngine {
   private mixerGraph: MixerGraph;
-  private synthManager: SynthVoiceManager;
+  private instrumentManager: ChannelInstrumentManager;
   private drumManager: DrumSoundManager;
   private previewManager: PreviewManager;
   private transportManager: AudioTransport;
+  private lookaheadScheduler: LookaheadScheduler;
 
-  private chordsPiano: PianoSampler | null = null;
-  private melodyPiano: PianoSampler | null = null;
   private isInitialized = false;
   private initPromise: Promise<void> | null = null;
 
-  private scheduledEvents: number[] = [];
-  private lastTriggeredBeat = -1;
-  private lastTriggeredChordId = '';
-  private lastTriggeredChordName = '';
-  private lastTriggeredVoicing = '';
-  private lastTriggeredInversion = 0;
-  private lastTriggeredDrumStep = -1;
-  private lastTriggeredDrumBeat = -1;
-
-  private cachedIsKeyboardMelodyEnabled = true;
+  private cachedIsKeyboardMelodyEnabled = false;
   private cachedIsKeyboardChromatic = false;
   private cachedKeyboardCenterNote = 'C4';
   private cachedKey = 'C';
   private cachedScale = 'major';
   private cachedBpm = 120;
-  private cachedMaxBeat = 4;
-  private cachedChordsMaxBeat = 4;
-  private cachedMelodyMaxBeat = 4;
+  private cachedMaxBeat = 16;
 
-  private playheadRafId: number | null = null;
   private unsubscribeStore: (() => void) | null = null;
+  private playheadRafId: number | null = null;
   private syncTimelineDebounced: () => void;
+
+  private activePlaybackChordNotes = new Map<string, number>();
+  private activePlaybackMelodyNotes = new Map<string, number>();
+  private visualNotesTimerId: number | null = null;
 
   constructor() {
     this.mixerGraph = new MixerGraph();
-    this.synthManager = new SynthVoiceManager(this.mixerGraph);
+    this.instrumentManager = new ChannelInstrumentManager(this.mixerGraph);
     this.drumManager = new DrumSoundManager(this.mixerGraph);
-    this.transportManager = new AudioTransport();
-
     this.previewManager = new PreviewManager({
-      synthManager: this.synthManager,
-      getChordsPiano: () => this.chordsPiano,
-      getMelodyPiano: () => this.melodyPiano,
-      isChordPianoActive: () => this.isChordPianoActive(),
-      isMelodyPianoActive: () => this.isMelodyPianoActive(),
+      instrumentManager: this.instrumentManager,
       onActiveNotesChange: (notes) => useSongStore.getState().setActiveNotes(notes),
       onActiveMelodyNotesChange: (notes) => useSongStore.getState().setActiveMelodyNotes(notes)
     });
+    this.transportManager = new AudioTransport();
 
-    this.syncTimelineDebounced = debounce(() => this.syncTimeline(), 50);
-    this.syncChannels(useSongStore.getState().channels);
+    // Lookahead Scheduler en tiempo real (Zero Audio Glitches en edición interactiva)
+    this.lookaheadScheduler = new LookaheadScheduler({
+      onTriggerChord: (evt, time) => {
+        const isPiano = useSongStore.getState().channels.chords?.instrument === 'piano';
+        this.instrumentManager.triggerAttackRelease('chords', isPiano, evt.note, evt.durationSeconds, time, evt.velocity);
+        this.scheduleVisualNote(evt.note, false, time, evt.durationSeconds);
+      },
+      onTriggerTrack: (evt, time) => {
+        const channelConfig = useSongStore.getState().channels[evt.channelId];
+        const isPiano = channelConfig?.instrument === 'piano';
+        this.instrumentManager.triggerAttackRelease(evt.channelId, isPiano, evt.note, evt.durationSeconds, time, evt.velocity);
+        this.scheduleVisualNote(evt.note, true, time, evt.durationSeconds);
+      },
+      onTriggerDrum: (evt, time) => {
+        const volDb = Tone.gainToDb((evt.volume / 100) * evt.velocity);
+        this.drumManager.triggerDrumSound(evt.channelId, evt.sampleUrl, volDb, evt.pan, time);
+      },
+      onTriggerMetronome: (freq, volumeFactor, time) => {
+        this.transportManager.triggerMetroClick(freq, volumeFactor, time);
+      },
+      onTempoChange: (newBpm, beat, audioTime) => {
+        this.cachedBpm = newBpm;
+        Tone.Transport.bpm.value = newBpm;
+        this.transportManager.setBpm(newBpm);
+        useSongStore.getState().setLiveBpm(newBpm);
+
+        // Despachar evento global del DOM para toda la aplicación
+        window.dispatchEvent(new CustomEvent('phosphor-tempo-change', {
+          detail: { bpm: newBpm, beat, audioTime }
+        }));
+      },
+      onStepChange: (beat) => {
+        const state = useSongStore.getState();
+        if (!state.isPlaying) return;
+
+        let patternIndex = state.currentDrumPatternEdit;
+        let localStepIndex = 0;
+        let currentChainItemId: string | null = null;
+        const globalStepIndex = Math.floor(beat * 4);
+
+        if (!state.isPatternRepeatOn && state.patternChain && state.patternChain.length > 0) {
+          const flatChain = flattenPatternChain(state.patternChain);
+          const totalChainSteps = flatChain.length * 16;
+          if (totalChainSteps > 0) {
+            const wrappedStep = globalStepIndex % totalChainSteps;
+            const flatIdx = Math.floor(wrappedStep / 16);
+            const step = flatChain[flatIdx];
+            if (step) {
+              patternIndex = step.patternIndex;
+              localStepIndex = wrappedStep % 16;
+              currentChainItemId = step.originalItemId;
+            }
+          }
+        } else {
+          localStepIndex = globalStepIndex % 16;
+          patternIndex = state.currentDrumPatternEdit;
+        }
+
+        if (!state.isPatternRepeatOn) {
+          state.setCurrentChainItemId(currentChainItemId);
+          if (!state.isLiveFollowLocked && state.patternChain && state.patternChain.length > 0) {
+            state.setCurrentDrumPatternEditLive(patternIndex);
+          }
+        }
+        if (state.currentDrumPatternEdit === patternIndex || state.activeView === 'visualizer') {
+          state.setPlaybackStep(localStepIndex);
+        } else {
+          state.setPlaybackStep(-1);
+        }
+      },
+      onSongEnd: () => {
+        const state = useSongStore.getState();
+        if (!state.isLooping) {
+          this.stop();
+        }
+      }
+    });
+
+    this.syncTimelineDebounced = debounce(() => {
+      this.syncTimeline();
+    }, 50);
   }
 
-  private isChordPianoActive(): boolean {
-    const chordsInst = useSongStore.getState().channels?.chords?.instrument || 'piano';
-    return chordsInst === 'piano' && !!this.chordsPiano && this.chordsPiano.loaded;
+  private scheduleVisualNote(note: string, isMelody: boolean, triggerAudioTime: number, durationSeconds: number) {
+    if (!note) return;
+    const now = Tone.now();
+    const delayMs = Math.max(0, (triggerAudioTime - now) * 1000);
+    const durationMs = Math.max(80, Math.min(3000, durationSeconds * 1000));
+
+    window.setTimeout(() => {
+      if (!useSongStore.getState().isPlaying) return;
+
+      const map = isMelody ? this.activePlaybackMelodyNotes : this.activePlaybackChordNotes;
+      map.set(note, (map.get(note) || 0) + 1);
+      this.flushVisualNotes();
+
+      window.setTimeout(() => {
+        const count = map.get(note) || 0;
+        if (count <= 1) {
+          map.delete(note);
+        } else {
+          map.set(note, count - 1);
+        }
+        this.flushVisualNotes();
+      }, durationMs);
+    }, delayMs);
   }
 
-  private isMelodyPianoActive(): boolean {
-    const melodyInst = useSongStore.getState().channels?.melody?.instrument || 'synth';
-    return melodyInst === 'piano' && !!this.melodyPiano && this.melodyPiano.loaded;
+  private flushVisualNotes() {
+    if (this.visualNotesTimerId !== null) return;
+    this.visualNotesTimerId = window.requestAnimationFrame(() => {
+      this.visualNotesTimerId = null;
+      const state = useSongStore.getState();
+      const chordNotes = Array.from(this.activePlaybackChordNotes.keys());
+      const melodyNotes = Array.from(this.activePlaybackMelodyNotes.keys());
+      state.setActiveNotes(chordNotes);
+      state.setActiveMelodyNotes(melodyNotes);
+    });
+  }
+
+  public clearActivePlaybackNotes() {
+    this.activePlaybackChordNotes.clear();
+    this.activePlaybackMelodyNotes.clear();
+    const state = useSongStore.getState();
+    if (state.activeNotes.length > 0) state.setActiveNotes([]);
+    if (state.activeMelodyNotes.length > 0) state.setActiveMelodyNotes([]);
   }
 
   public async init() {
@@ -137,45 +242,31 @@ class ToneEngine {
 
     Tone.Transport.cancel(0);
 
-    Tone.Transport.scheduleRepeat(() => {
-      const maxBeat = this.cachedMaxBeat;
-      const currentBeat = (Tone.Transport.seconds * this.cachedBpm) / 60;
-      if (currentBeat >= maxBeat) {
-        const state = useSongStore.getState();
-        if (!state.isLooping) {
-          this.stop();
-        }
-      }
-    }, '8n');
-
-    const updatePlayheadUI = () => {
-      if (useSongStore.getState().isPlaying) {
-        const beat = (Tone.Transport.seconds * this.cachedBpm) / 60;
-        useSongStore.getState().setCurrentBeat(beat);
-      }
-      this.playheadRafId = requestAnimationFrame(updatePlayheadUI);
-    };
-    this.playheadRafId = requestAnimationFrame(updatePlayheadUI);
-
-    Tone.Transport.scheduleRepeat((time) => {
-      this.triggerChordTick(time);
-      this.triggerDrumTick(time);
-    }, '16n');
-
     const initialState = useSongStore.getState();
+    const initialBpm = initialState.bpm || 120;
+    this.cachedBpm = initialBpm;
+    this.transportManager.setBpm(initialBpm);
+    Tone.Transport.bpm.value = initialBpm;
+
     this.cachedIsKeyboardMelodyEnabled = initialState.isKeyboardMelodyEnabled;
     this.cachedIsKeyboardChromatic = initialState.isKeyboardChromatic;
     this.cachedKeyboardCenterNote = initialState.keyboardCenterNote || 'C4';
     this.cachedKey = initialState.key;
     this.cachedScale = initialState.scale;
-    this.cachedBpm = initialState.bpm;
-    this.updateCachedMaxBeat(initialState);
 
-    let prevBpm = initialState.bpm;
+    let prevBpm = initialBpm;
     let prevIsPlaying = initialState.isPlaying;
-    let prevChordBlocks = initialState.chordBlocks;
-    let prevTracks = initialState.tracks;
     let prevChannels = initialState.channels;
+    let prevDrumChannels = initialState.drumChannels;
+    let prevPatternChain = initialState.patternChain;
+    let prevIsPatternRepeatOn = initialState.isPatternRepeatOn;
+    let prevCurrentDrumPatternEdit = initialState.currentDrumPatternEdit;
+    let prevChordBlocks = initialState.chordBlocks;
+    let prevStyleMarkers = initialState.styleMarkers;
+    let prevChordOctaveShift = initialState.chordOctaveShift;
+    let prevTracks = initialState.tracks;
+    let prevMelodyNotes = initialState.melodyNotes;
+    let prevCustomPatterns = initialState.customPatterns;
     let prevIsLooping = initialState.isLooping;
     let prevIsMetronomeActive = initialState.isMetronomeActive;
     let prevMetroSubdivision = initialState.metroSubdivision;
@@ -184,6 +275,7 @@ class ToneEngine {
     let prevPattern = initialState.pattern;
     let prevSwing = initialState.swing;
     let prevSustain = initialState.sustain;
+    let prevTempoMarkers = initialState.tempoMarkers;
 
     this.unsubscribeStore = useSongStore.subscribe((state) => {
       this.cachedIsKeyboardMelodyEnabled = state.isKeyboardMelodyEnabled;
@@ -192,19 +284,85 @@ class ToneEngine {
       this.cachedScale = state.scale;
       this.cachedBpm = state.bpm;
 
-      if (state.channels !== prevChannels) {
-        prevChannels = state.channels;
-        this.syncChannels(state.channels);
+      let musicalContentChanged = false;
+
+      // 1. Armonía y Acordes
+      if (state.chordBlocks !== prevChordBlocks) {
+        prevChordBlocks = state.chordBlocks;
+        musicalContentChanged = true;
+      }
+      if (state.styleMarkers !== prevStyleMarkers) {
+        prevStyleMarkers = state.styleMarkers;
+        musicalContentChanged = true;
+      }
+      if (state.chordOctaveShift !== prevChordOctaveShift) {
+        prevChordOctaveShift = state.chordOctaveShift;
+        musicalContentChanged = true;
+      }
+      if (state.pattern !== prevPattern) {
+        prevPattern = state.pattern;
+        musicalContentChanged = true;
+      }
+
+      // 2. Piano Roll y Pistas Melódicas
+      if (state.tracks !== prevTracks || state.melodyNotes !== prevMelodyNotes) {
+        prevTracks = state.tracks;
+        prevMelodyNotes = state.melodyNotes;
+        musicalContentChanged = true;
+      }
+
+      // 3. Batería: Canales, Pasos y Cadena
+      if (state.drumChannels !== prevDrumChannels) {
+        prevDrumChannels = state.drumChannels;
+        this.drumManager.preloadChannels(state.drumChannels);
+        musicalContentChanged = true;
+      }
+      if (state.patternChain !== prevPatternChain) {
+        prevPatternChain = state.patternChain;
+        musicalContentChanged = true;
+      }
+      if (state.isPatternRepeatOn !== prevIsPatternRepeatOn) {
+        prevIsPatternRepeatOn = state.isPatternRepeatOn;
+        musicalContentChanged = true;
+      }
+      if (state.currentDrumPatternEdit !== prevCurrentDrumPatternEdit) {
+        prevCurrentDrumPatternEdit = state.currentDrumPatternEdit;
+        if (state.isPatternRepeatOn) {
+          musicalContentChanged = true;
+        }
+      }
+
+      // 4. Patrones rítmicos personalizados
+      if (state.customPatterns !== prevCustomPatterns) {
+        prevCustomPatterns = state.customPatterns;
+        musicalContentChanged = true;
+      }
+
+      // 5. Estructura de Transporte y Tempo
+      if (state.isLooping !== prevIsLooping) {
+        prevIsLooping = state.isLooping;
+        musicalContentChanged = true;
+      }
+      if (state.tempoMarkers !== prevTempoMarkers) {
+        prevTempoMarkers = state.tempoMarkers;
+        musicalContentChanged = true;
       }
       if (state.bpm !== prevBpm) {
         prevBpm = state.bpm;
+        this.cachedBpm = state.bpm;
         this.transportManager.setBpm(state.bpm);
-        this.syncTimelineDebounced();
+        Tone.Transport.bpm.value = state.bpm;
+        musicalContentChanged = true;
       }
-      if (state.isLooping !== prevIsLooping) {
-        prevIsLooping = state.isLooping;
-        this.syncTimelineDebounced();
+
+      // 6. Mezclador (Mute, Solo, Volumen)
+      if (state.channels !== prevChannels) {
+        prevChannels = state.channels;
+        this.syncChannels(state.channels);
+        musicalContentChanged = true;
       }
+
+      // 7. Configuración de Metrónomo
       if (
         state.isMetronomeActive !== prevIsMetronomeActive ||
         state.metroSubdivision !== prevMetroSubdivision ||
@@ -215,155 +373,177 @@ class ToneEngine {
         prevMetroSubdivision = state.metroSubdivision;
         prevMetroVolume = state.metroVolume;
         prevTimeSignature = state.timeSignature;
-        this.transportManager.syncMetronome(
+        this.lookaheadScheduler.setMetronomeConfig(
           state.isMetronomeActive,
           state.metroSubdivision,
-          state.timeSignature,
+          state.timeSignature
+        );
+        this.transportManager.syncMetronome(
+          state.isMetronomeActive,
           state.metroVolume
         );
       }
+
+      // 8. Control de Reproducción (Play / Stop)
       if (state.isPlaying !== prevIsPlaying) {
         prevIsPlaying = state.isPlaying;
         if (state.isPlaying) {
           this.syncTimeline();
-          this.transportManager.start(state.currentBeat, state.bpm);
+          this.lookaheadScheduler.start(state.currentBeat, state.bpm, state.tempoMarkers);
+          const liveSec = this.lookaheadScheduler.getLiveSeconds();
+          this.transportManager.start(state.currentBeat, state.bpm, liveSec);
         } else {
+          this.lookaheadScheduler.stop();
           this.transportManager.pause();
           this.silence();
         }
       }
-      if (state.pattern !== prevPattern) {
-        prevPattern = state.pattern;
+
+      // 9. Hot-Reloading: sincronización continua en caliente si hay reproducción activa
+      if (musicalContentChanged && state.isPlaying) {
         this.syncTimelineDebounced();
       }
+
+      // 10. Modulaciones globales (Swing, Sustain)
       if (state.swing !== prevSwing) {
         prevSwing = state.swing;
-        this.transportManager.setSwing(state.swing);
+        Tone.Transport.swing = state.swing;
+        Tone.Transport.swingSubdivision = '16n';
       }
       if (state.sustain !== prevSustain) {
         prevSustain = state.sustain;
         this.updateSustain(state.sustain);
       }
-      if (state.chordBlocks !== prevChordBlocks || state.tracks !== prevTracks) {
-        prevChordBlocks = state.chordBlocks;
-        prevTracks = state.tracks;
-        this.updateCachedMaxBeat(state);
-        this.syncTimelineDebounced();
-      }
     });
 
-    this.synthManager.updateSynthSettings(initialState.synthSettings);
+    this.lookaheadScheduler.setMetronomeConfig(
+      initialState.isMetronomeActive,
+      initialState.metroSubdivision,
+      initialState.timeSignature
+    );
+    this.transportManager.syncMetronome(
+      initialState.isMetronomeActive,
+      initialState.metroVolume
+    );
     this.syncChannels(initialState.channels);
-    if (initialState.instrumentType === 'piano') {
-      this.setInstrument('piano');
-    }
+    this.updateSustain(initialState.sustain);
   }
 
-  private updateCachedMaxBeat(state?: any) {
-    const s = state || useSongStore.getState();
-    let chordsMax = 4;
-    (s.chordBlocks || []).forEach((b: any) => { chordsMax = Math.max(chordsMax, b.startBeat + b.durationBeats); });
-    let melodyMax = 4;
-    (s.tracks || []).forEach((t: any) => {
-      (t.notes || []).forEach((n: any) => { melodyMax = Math.max(melodyMax, n.startBeat + n.durationBeats); });
-    });
-
-    let newMax = Math.max(chordsMax, melodyMax);
-    if (!s.isPatternRepeatOn && s.patternChain && s.patternChain.length > 0) {
-      let chainSteps = 0;
-      s.patternChain.forEach((item: any) => { chainSteps += item.repeatCount * 16; });
-      newMax = Math.max(newMax, chainSteps * 0.25);
-    }
-
-    this.cachedChordsMaxBeat = chordsMax;
-    this.cachedMelodyMaxBeat = melodyMax;
-    this.cachedMaxBeat = newMax;
-    return newMax;
+  public getAnalyser(): Tone.Analyser {
+    return this.mixerGraph.getAnalyser();
   }
 
-  public syncChannels(channels: Record<string, any>) {
-    if (!channels) return;
-    this.mixerGraph.syncChannels(channels);
-    const channelList = Object.values(channels);
-    for (const ch of channelList) {
-      if (ch.synthSettings) {
-        this.synthManager.updateSynthSettings(ch.synthSettings, ch.id);
-      }
-    }
-    if (channelList.some((ch) => ch.instrument === 'piano') && (!this.chordsPiano || !this.melodyPiano)) {
-      this.setInstrument('piano');
-    }
+  public getFftAnalyser(): Tone.Analyser {
+    return this.mixerGraph.getFftAnalyser();
+  }
+
+  public getLiveBeat(): number {
+    if (!this.isInitialized) return 0;
+    return this.lookaheadScheduler.getLiveBeat();
+  }
+
+  public getLiveBpm(): number {
+    if (!this.isInitialized) return this.cachedBpm;
+    return this.lookaheadScheduler.getLiveBpm();
+  }
+
+  public getMaxBeat(): number {
+    return this.cachedMaxBeat;
+  }
+
+  public getWaveformData(target?: Float32Array): Float32Array {
+    return this.mixerGraph.getWaveformData(target);
+  }
+
+  public getFrequencyData(target?: Float32Array): Float32Array {
+    return this.mixerGraph.getFrequencyData(target);
   }
 
   public getChannelMeterLevel(id: string): number {
     return this.mixerGraph.getChannelMeterLevel(id);
   }
 
-  public getWaveformData(): Float32Array {
-    return this.mixerGraph.getWaveformData();
+  public updateSynthSettings(settings: Partial<SynthSettings>, channelId?: string) {
+    this.instrumentManager.updateSynthSettings(settings, channelId);
   }
 
-  public getFrequencyData(): Float32Array {
-    return this.mixerGraph.getFrequencyData();
+  public getChannelWaveformData(channelId: string, target?: Float32Array): Float32Array {
+    return this.instrumentManager.getChannelWaveform(channelId, target);
   }
 
-  public updateSynthSettings(settings: any, channelId?: string) {
-    this.synthManager.updateSynthSettings(settings, channelId);
+  public getChannelFrequencyData(channelId: string, target?: Float32Array): Float32Array {
+    return this.instrumentManager.getChannelFrequency(channelId, target);
   }
 
-  public bumpSynthSettingsVersion() {
-    this.synthManager.updateSynthSettings(useSongStore.getState().synthSettings);
+  public disconnectSynthAnalysers() {
+    this.instrumentManager.disconnectAnalysers();
   }
 
-  public async setInstrument(type: 'synth' | 'piano') {
+  public isPianoLoaded(channelId = 'melody'): boolean {
+    return this.instrumentManager.isPianoLoaded(channelId);
+  }
+
+  public isPianoLoading(channelId = 'melody'): boolean {
+    return this.instrumentManager.isPianoLoading(channelId);
+  }
+
+  public async loadPiano(channelId = 'melody'): Promise<boolean> {
+    const piano = this.instrumentManager.getChannelPiano(channelId);
+    return piano.load();
+  }
+
+  public async preloadProjectAudio(
+    channels?: Record<string, ChannelConfig>,
+    drumChannels?: Array<{ id: string; sampleUrl: string; pan?: number }>
+  ): Promise<void> {
     if (!this.isInitialized) await this.init();
+    const state = useSongStore.getState();
+    const targetChannels = channels || state.channels;
+    const targetDrumChannels = drumChannels || state.drumChannels;
 
-    if (type === 'piano') {
-      useSongStore.getState().setIsAudioLoading(true);
-      try {
-        const chordsNode = this.mixerGraph.getChannelNode('chords');
-        const melodyNode = this.mixerGraph.getChannelNode('melody');
-
-        if (!this.chordsPiano) {
-          this.chordsPiano = new PianoSampler(chordsNode.volumeNode);
-        }
-        if (!this.melodyPiano) {
-          this.melodyPiano = new PianoSampler(melodyNode.volumeNode);
-        }
-        await Promise.all([this.chordsPiano.load(), this.melodyPiano.load()]);
-      } catch (e) {
-        console.error('Error inicializando el piano:', e);
-      } finally {
-        useSongStore.getState().setIsAudioLoading(false);
-      }
+    if (state.bpm) {
+      this.transportManager.setBpm(state.bpm);
+      Tone.Transport.bpm.value = state.bpm;
+      this.cachedBpm = state.bpm;
     }
-    this.syncTimeline();
+    this.syncChannels(targetChannels);
+
+    const instrumentPreload = this.instrumentManager.preloadChannelInstruments(targetChannels);
+    const drumPreload = this.drumManager.preloadChannels(targetDrumChannels || []);
+    await Promise.allSettled([instrumentPreload, drumPreload]);
   }
 
-  public silence() {
-    this.synthManager.releaseAll();
-    if (this.chordsPiano) {
-      try { this.chordsPiano.stopAll(); } catch (_) {}
-    }
-    if (this.melodyPiano) {
-      try { this.melodyPiano.stopAll(); } catch (_) {}
-    }
-    try { this.transportManager.metroSynth.triggerRelease(); } catch (_) {}
+  public syncChannels(channels: Record<string, ChannelConfig>) {
+    if (!channels) return;
+    this.mixerGraph.syncChannels(channels);
+    this.instrumentManager.syncActiveChannels(Object.keys(channels));
+    this.instrumentManager.preloadChannelInstruments(channels);
   }
 
-  public playChordPreview(chordName: string) {
-    if (!this.isInitialized) this.init();
-    this.previewManager.playChordPreview(chordName, useSongStore.getState().chordOctaveShift || 0);
+  public playNotePreview(note: string, channelId: string = 'melody') {
+    const isPiano = useSongStore.getState().channels[channelId]?.instrument === 'piano';
+    this.previewManager.playNotePreview(note, channelId, isPiano);
   }
 
-  public playChordPreviewStart(chordName: string) {
-    if (!this.isInitialized) this.init();
+  public playChordPreview(chordName: string, chordOctaveShift = 0) {
+    this.previewManager.playChordPreview(chordName, chordOctaveShift);
+  }
+
+  public playChordPreviewStart(
+    chordName: string,
+    options?: {
+      pattern?: string;
+      chordOctaveShift?: number;
+      bpm?: number;
+      customPatterns?: PatternDef[];
+    }
+  ) {
     const state = useSongStore.getState();
     this.previewManager.playChordPreviewStart(chordName, {
-      pattern: state.pattern || 'hold',
-      chordOctaveShift: state.chordOctaveShift || 0,
-      bpm: state.bpm,
-      customPatterns: state.customPatterns || []
+      pattern: options?.pattern || state.pattern || 'hold',
+      chordOctaveShift: options?.chordOctaveShift ?? state.chordOctaveShift ?? 0,
+      bpm: options?.bpm ?? state.bpm ?? 120,
+      customPatterns: options?.customPatterns || state.customPatterns || []
     });
   }
 
@@ -371,59 +551,43 @@ class ToneEngine {
     this.previewManager.playChordPreviewStop();
   }
 
-  public getChannelSynth(channelId: string) {
-    return this.synthManager.getChannelSynth(channelId);
+  public startNote(note: string, channelId = 'melody') {
+    const isPiano = useSongStore.getState().channels[channelId]?.instrument === 'piano';
+    this.previewManager.startNote(note, channelId, isPiano);
   }
 
-  public playNotePreview(noteName: string, channelId?: string) {
-    if (!this.isInitialized) this.init();
-    const state = useSongStore.getState();
-    const activeTrack = state.tracks.find((t) => t.id === state.activeTrackId);
-    const targetChannelId = channelId || (activeTrack ? activeTrack.channelId : 'melody');
-    const channelConfig = state.channels[targetChannelId];
-    const usePiano = channelConfig ? channelConfig.instrument === 'piano' : this.isMelodyPianoActive();
-
-    this.previewManager.playNotePreview(noteName, targetChannelId, usePiano);
+  public stopNote(note: string, channelId = 'melody') {
+    const isPiano = useSongStore.getState().channels[channelId]?.instrument === 'piano';
+    this.previewManager.stopNote(note, channelId, isPiano);
   }
 
-  public startNote(noteName: string) {
-    if (!this.isInitialized) {
-      this.init().then(() => this.startNote(noteName));
-      return;
-    }
-    const state = useSongStore.getState();
-    const activeTrack = state.tracks.find((t) => t.id === state.activeTrackId);
-    const targetChannelId = activeTrack ? activeTrack.channelId : 'melody';
-    const channelConfig = state.channels[targetChannelId];
-    const usePiano = channelConfig ? channelConfig.instrument === 'piano' : this.isMelodyPianoActive();
-
-    this.previewManager.startNote(noteName, targetChannelId, usePiano);
-  }
-
-  public stopNote(noteName: string) {
-    if (!this.isInitialized) return;
-    const state = useSongStore.getState();
-    const activeTrack = state.tracks.find((t) => t.id === state.activeTrackId);
-    const targetChannelId = activeTrack ? activeTrack.channelId : 'melody';
-    const channelConfig = state.channels[targetChannelId];
-    const usePiano = channelConfig ? channelConfig.instrument === 'piano' : this.isMelodyPianoActive();
-
-    this.previewManager.stopNote(noteName, targetChannelId, usePiano);
+  public silence() {
+    this.clearActivePlaybackNotes();
+    this.instrumentManager.releaseAll();
+    this.previewManager.dispose();
+    this.drumManager.stopAll();
   }
 
   public stop() {
+    this.lookaheadScheduler.stop();
     this.transportManager.stop();
-    useSongStore.getState().setPlaying(false);
-    useSongStore.getState().setCurrentBeat(0);
-    this.lastTriggeredBeat = -1;
-    this.lastTriggeredChordId = '';
-    this.lastTriggeredChordName = '';
-    this.lastTriggeredVoicing = '';
-    this.lastTriggeredInversion = 0;
-    this.lastTriggeredDrumStep = -1;
-    this.lastTriggeredDrumBeat = -1;
     this.silence();
-    this.previewManager.clearAllActiveNotes();
+    const state = useSongStore.getState();
+    state.setPlaying(false);
+    state.setCurrentBeat(0);
+    state.setPlaybackStep(-1);
+    state.setCurrentChainItemId(null);
+    state.setLiveBpm(state.bpm);
+  }
+
+  public setVolume(val: number) {
+    const masterNode = this.mixerGraph.getChannelNode('master');
+    masterNode.volumeNode.volume.value = faderToDb(val);
+  }
+
+  public getLiveSeconds(): number {
+    if (!this.isInitialized) return 0;
+    return this.lookaheadScheduler.getLiveSeconds();
   }
 
   public setSeconds(seconds: number) {
@@ -434,11 +598,14 @@ class ToneEngine {
 
   public seekToBeat(beat: number) {
     if (!this.isInitialized) this.init();
-    this.lastTriggeredBeat = -1;
-    this.lastTriggeredChordId = '';
-    this.lastTriggeredChordName = '';
-    this.transportManager.seek(beat, useSongStore.getState().bpm);
+    this.lookaheadScheduler.seek(beat);
+    const bpmAtBeat = this.lookaheadScheduler.getLiveBpm();
+    this.cachedBpm = bpmAtBeat;
+    Tone.Transport.bpm.value = bpmAtBeat;
+    const liveSec = this.lookaheadScheduler.getLiveSeconds();
+    this.transportManager.seek(beat, bpmAtBeat, liveSec);
     useSongStore.getState().setCurrentBeat(beat);
+    useSongStore.getState().setLiveBpm(bpmAtBeat);
     if (!useSongStore.getState().isPlaying) {
       this.silence();
     }
@@ -548,363 +715,31 @@ class ToneEngine {
     this.drumManager.triggerDrumSound(channel.id, channel.sampleUrl, volDb, channel.pan ?? 0);
   }
 
-  private triggerDrumTick(time: number) {
-    const state = useSongStore.getState();
-    if (!state.isPlaying) return;
-
-    const bpm = Tone.Transport.bpm.value;
-    const beat = Tone.Transport.getSecondsAtTime(time) * (bpm / 60);
-
-    let patternIndex = state.currentDrumPatternEdit;
-    let localStepIndex = 0;
-    let currentChainItemId: string | null = null;
-    let globalStepIndex = 0;
-
-    if (!state.isPatternRepeatOn && state.patternChain && state.patternChain.length > 0) {
-      const flatChain = flattenPatternChain(state.patternChain);
-      const totalChainSteps = flatChain.length * 16;
-
-      if (totalChainSteps > 0) {
-        globalStepIndex = Math.round(beat / 0.25) % totalChainSteps;
-        const flatIdx = Math.floor(globalStepIndex / 16);
-        const step = flatChain[flatIdx];
-
-        if (step) {
-          patternIndex = step.patternIndex;
-          localStepIndex = globalStepIndex % 16;
-          currentChainItemId = step.originalItemId;
-        }
-      }
-    } else {
-      globalStepIndex = Math.round(beat / 0.25) % 16;
-      patternIndex = state.currentDrumPatternEdit;
-      localStepIndex = globalStepIndex;
-    }
-
-    if (this.lastTriggeredDrumStep === globalStepIndex && Math.abs(beat - this.lastTriggeredDrumBeat) < 0.1) {
-      return;
-    }
-
-    this.lastTriggeredDrumStep = globalStepIndex;
-    this.lastTriggeredDrumBeat = beat;
-
-    const anyChannelSolo = Object.values(state.channels).filter(c => c.id !== 'master').some((c) => c.solo);
-    const globalDrumsChannel = state.channels.drums;
-    const isGlobalDrumsSilenced = globalDrumsChannel
-      ? globalDrumsChannel.muted || (anyChannelSolo && !globalDrumsChannel.solo)
-      : false;
-
-    state.drumChannels.forEach((channel) => {
-      if (isGlobalDrumsSilenced) return;
-      if (channel.muted) return;
-
-      const isAnySolo = state.drumChannels.some((c) => c.solo);
-      if (isAnySolo && !channel.solo) return;
-
-      if (!channel.patterns || !channel.patterns[patternIndex]) return;
-      const step = channel.patterns[patternIndex][localStepIndex];
-      if (step && step.isActive) {
-        const volDb = Tone.gainToDb((channel.volume / 100) * step.velocity);
-        this.drumManager.triggerDrumSound(channel.id, channel.sampleUrl, volDb, channel.pan ?? 0, time);
-      }
-    });
-
-    Tone.Draw.schedule(() => {
-      const currentState = useSongStore.getState();
-      if (!currentState.isPatternRepeatOn) {
-        currentState.setCurrentChainItemId(currentChainItemId);
-        if (currentState.isPlaying && !currentState.isLiveFollowLocked && currentState.patternChain && currentState.patternChain.length > 0) {
-          currentState.setCurrentDrumPatternEditLive(patternIndex);
-        }
-      }
-      if (useSongStore.getState().currentDrumPatternEdit === patternIndex) {
-        useSongStore.getState().setPlaybackStep(localStepIndex);
-      } else {
-        useSongStore.getState().setPlaybackStep(-1);
-      }
-    }, time);
-  }
-
-  private triggerChordTick(time: number) {
-    const state = useSongStore.getState();
-    if (!state.isPlaying) return;
-
-    const bpm = Tone.Transport.bpm.value;
-    const beat = Tone.Transport.getSecondsAtTime(time) * (bpm / 60);
-    const tickBeat = Math.round(beat * 4) / 4;
-
-    let localTickBeat = tickBeat;
-    if (this.cachedChordsMaxBeat > 0 && this.cachedChordsMaxBeat < this.cachedMaxBeat) {
-      localTickBeat = tickBeat % this.cachedChordsMaxBeat;
-    }
-
-    if (localTickBeat < this.lastTriggeredBeat) {
-      this.lastTriggeredBeat = -1;
-      this.lastTriggeredChordId = '';
-      this.lastTriggeredChordName = '';
-    }
-
-    if (localTickBeat === this.lastTriggeredBeat) return;
-    this.lastTriggeredBeat = localTickBeat;
-
-    const block = state.chordBlocks.find(
-      (b) => localTickBeat >= b.startBeat && localTickBeat < b.startBeat + b.durationBeats
-    );
-    if (!block) return;
-
-    const activeMarker = (state.styleMarkers || [])
-      .filter((m) => localTickBeat >= m.beat)
-      .pop();
-    const pattern = activeMarker ? activeMarker.pattern : state.pattern || 'hold';
-    const relativeBeat = localTickBeat - block.startBeat;
-    const usePiano = this.isChordPianoActive();
-    const beatDuration = 60 / bpm;
-
-    const notes = getBlockNotes({
-      chord: block.chord,
-      voicing: block.voicing,
-      inversion: block.inversion,
-      octaveShift: state.chordOctaveShift || 0,
-      type: block.type,
-      bassNote: block.bassNote
-    });
-    if (notes.length === 0) return;
-
-    const currentVoicing = block.voicing || 'default';
-    const currentInversion = block.inversion || 0;
-
-    const hasChordChanged =
-      block.id !== this.lastTriggeredChordId ||
-      block.chord !== this.lastTriggeredChordName ||
-      currentVoicing !== this.lastTriggeredVoicing ||
-      currentInversion !== this.lastTriggeredInversion;
-
-    if (hasChordChanged) {
-      if (usePiano && this.chordsPiano && this.chordsPiano.loaded) {
-        try { this.chordsPiano.stopAll(); } catch (_) {}
-      } else {
-        try { this.synthManager.chordSynth.releaseAll(); } catch (_) {}
-      }
-      this.lastTriggeredChordId = block.id;
-      this.lastTriggeredChordName = block.chord;
-      this.lastTriggeredVoicing = currentVoicing;
-      this.lastTriggeredInversion = currentInversion;
-    }
-
-    const playNote = (note: string, durBeats: number, velocity = 0.6) => {
-      const durSec = durBeats * beatDuration;
-      if (usePiano && this.chordsPiano && this.chordsPiano.loaded) {
-        try {
-          this.chordsPiano.keyDown({ note, time, velocity });
-          this.chordsPiano.keyUp({ note, time: time + durSec });
-        } catch (e) { console.error(e); }
-      } else {
-        try {
-          this.synthManager.chordSynth.triggerAttackRelease(note, durSec, time, velocity);
-        } catch (e) { console.error(e); }
-      }
-      this.previewManager.trackNote(note, durSec, time, 'harmony');
-    };
-
-    const playChord = (durBeats: number, velocity = 0.6) => {
-      const durSec = durBeats * beatDuration;
-      if (usePiano && this.chordsPiano && this.chordsPiano.loaded) {
-        notes.forEach((note) => {
-          try {
-            this.chordsPiano!.keyDown({ note, time, velocity });
-            this.chordsPiano!.keyUp({ note, time: time + durSec });
-          } catch (e) { console.error(e); }
-          this.previewManager.trackNote(note, durSec, time, 'harmony');
-        });
-      } else {
-        try {
-          this.synthManager.chordSynth.triggerAttackRelease(notes, durSec, time, velocity);
-        } catch (e) { console.error(e); }
-        notes.forEach((note) => this.previewManager.trackNote(note, durSec, time, 'harmony'));
-      }
-    };
-
-    if (pattern === 'hold') {
-      if (relativeBeat === 0 || hasChordChanged) {
-        const remainingBeats = block.durationBeats - relativeBeat;
-        if (remainingBeats > 0) {
-          playChord(remainingBeats, 0.6);
-        }
-      }
-    } else if (pattern === 'quarters') {
-      if (relativeBeat % 1 === 0) {
-        playChord(0.8, 0.6);
-      }
-    } else if (pattern === 'eighths') {
-      if (relativeBeat % 0.5 === 0) {
-        playChord(0.4, 0.55);
-      }
-    } else if (pattern === 'pop') {
-      const beatInPattern = relativeBeat % 4;
-      if (beatInPattern === 0) {
-        playChord(0.8, 0.6);
-      } else if (beatInPattern === 1.5) {
-        playChord(0.4, 0.55);
-      } else if (beatInPattern === 2.5) {
-        playChord(0.7, 0.6);
-      } else if (beatInPattern === 3.5) {
-        playChord(0.4, 0.55);
-      }
-    } else if (pattern === 'arpeggio') {
-      if ((relativeBeat === 0 || hasChordChanged) && notes.length > 1 && block.type !== 'chord-only') {
-        const remainingBeats = block.durationBeats - relativeBeat;
-        if (remainingBeats > 0) {
-          playNote(notes[0], remainingBeats, 0.7);
-        }
-      }
-      if (relativeBeat % 0.5 === 0) {
-        const arpNotes = notes.length > 1 && block.type !== 'chord-only' ? notes.slice(1) : notes;
-        const period = (arpNotes.length - 1) * 2;
-        const step = Math.round(relativeBeat / 0.5);
-        let noteIndex = 0;
-        if (period > 0) {
-          const mod = step % period;
-          noteIndex = mod < arpNotes.length ? mod : period - mod;
-        }
-        playNote(arpNotes[noteIndex], 0.4, 0.55);
-      }
-    } else if (pattern === 'strum') {
-      if (relativeBeat === 0 || hasChordChanged) {
-        const remainingBeats = block.durationBeats - relativeBeat;
-        if (remainingBeats > 0) {
-          notes.forEach((note, index) => {
-            const strumOffset = index * 0.025;
-            const noteTime = time + strumOffset;
-            const noteDur = remainingBeats * beatDuration - strumOffset;
-
-            if (usePiano && this.chordsPiano && this.chordsPiano.loaded) {
-              try {
-                this.chordsPiano.keyDown({ note, time: noteTime, velocity: 0.6 - index * 0.05 });
-                this.chordsPiano.keyUp({ note, time: noteTime + noteDur });
-              } catch (e) { console.error(e); }
-            } else {
-              try {
-                this.synthManager.chordSynth.triggerAttackRelease(note, noteDur, noteTime, 0.6 - index * 0.05);
-              } catch (e) { console.error(e); }
-            }
-          });
-        }
-      }
-    } else {
-      const customPattern = state.customPatterns?.find((p) => p.name === pattern);
-      if (customPattern) {
-        const cycleOffset = relativeBeat % customPattern.totalBeats;
-        const tickBeatRounded = Math.round(cycleOffset * 4) / 4;
-        const toPlay = customPattern.notes.filter((pn) => Math.round(pn.beatOffset * 4) / 4 === tickBeatRounded);
-
-        for (const pn of toPlay) {
-          if (block.type === 'bass-only' && pn.voice !== 'bass') continue;
-          if (block.type === 'chord-only' && pn.voice !== 'chord') continue;
-
-          const refOctave = pn.voice === 'bass' ? 2 : 4;
-          const noteName = resolvePatternNoteToChord(pn, block.chord, refOctave, state.chordOctaveShift || 0);
-          const durSec = pn.durationBeats * beatDuration;
-
-          if (usePiano && this.chordsPiano && this.chordsPiano.loaded) {
-            try {
-              this.chordsPiano.keyDown({ note: noteName, time, velocity: pn.velocity });
-              this.chordsPiano.keyUp({ note: noteName, time: time + durSec });
-            } catch (e) { console.error(e); }
-          } else {
-            try {
-              this.synthManager.chordSynth.triggerAttackRelease(noteName, durSec, time, pn.velocity);
-            } catch (e) { console.error(e); }
-          }
-          this.previewManager.trackNote(noteName, durSec, time, 'harmony');
-        }
-      }
-    }
-  }
-
+  /**
+   * Sincronización continua de la sesión en el LookaheadScheduler (Zero Audio Glitches).
+   */
   private syncTimeline() {
     if (!this.isInitialized) return;
 
     const state = useSongStore.getState();
-    const bpm = state.bpm;
-    const beatDuration = 60 / bpm;
-    const currentPos = Tone.Transport.seconds;
+    const bpm = state.bpm || 120;
+    this.cachedBpm = bpm;
 
-    this.scheduledEvents.forEach((id) => {
-      try { Tone.Transport.clear(id); } catch (_) {}
-    });
-    this.scheduledEvents = [];
+    this.transportManager.setBpm(bpm);
+    Tone.Transport.bpm.value = bpm;
 
-    const repeats = this.cachedMelodyMaxBeat > 0 && this.cachedMelodyMaxBeat < this.cachedMaxBeat
-      ? Math.ceil(this.cachedMaxBeat / this.cachedMelodyMaxBeat)
-      : 1;
+    const session = serializeSession(state);
+    const scheduled = scheduleSessionTimeline(session, state.customPatterns || []);
+    this.cachedMaxBeat = scheduled.totalBeats;
 
-    const tracksToPlay = state.tracks || [];
+    this.lookaheadScheduler.setEvents(scheduled, bpm, state.isLooping, state.tempoMarkers);
 
-    for (let r = 0; r < repeats; r++) {
-      const offsetBeat = r * this.cachedMelodyMaxBeat;
-      tracksToPlay.forEach((track) => {
-        const channelConfig = state.channels[track.channelId];
-        if (channelConfig && channelConfig.muted) return;
-        const isAnySolo = Object.values(state.channels).filter(c => c.id !== 'master').some((c) => c.solo);
-        if (isAnySolo && channelConfig && !channelConfig.solo) return;
-
-        (track.notes || []).forEach((note) => {
-          const startTimeSeconds = (note.startBeat + offsetBeat) * beatDuration;
-          const durationSeconds = note.durationBeats * beatDuration;
-
-          if (startTimeSeconds >= this.cachedMaxBeat * beatDuration) return;
-
-          const id = Tone.Transport.schedule((time) => {
-            const isPiano = channelConfig?.instrument === 'piano';
-            if (isPiano && this.melodyPiano && this.melodyPiano.loaded) {
-              try {
-                this.melodyPiano.keyDown({ note: note.note, time, velocity: note.velocity });
-                this.melodyPiano.keyUp({ note: note.note, time: time + durationSeconds });
-              } catch (e) { console.error('Error tocando nota de piano:', e); }
-            } else {
-              const synth = this.synthManager.getChannelSynth(track.channelId);
-              if (channelConfig?.synthSettings) {
-                try {
-                  synth.set({
-                    oscillator: { type: channelConfig.synthSettings.waveType },
-                    envelope: channelConfig.synthSettings.envelope,
-                    detune: channelConfig.synthSettings.detune
-                  });
-                } catch (_) {}
-              }
-              try {
-                synth.triggerAttackRelease(note.note, durationSeconds, time, note.velocity);
-              } catch (e) { console.error('Error tocando sintetizador de pista:', e); }
-            }
-            this.previewManager.trackNote(note.note, durationSeconds, time, 'melody');
-          }, startTimeSeconds);
-          this.scheduledEvents.push(id);
-        });
-      });
-    }
-
-    const maxBeat = this.updateCachedMaxBeat(state);
-    const loopEndSeconds = maxBeat * beatDuration;
-
+    const loopEndSeconds = scheduled.totalDurationSeconds - 2.0;
     this.transportManager.setLoop(state.isLooping, 0, loopEndSeconds);
-
-    if (currentPos > loopEndSeconds) {
-      Tone.Transport.seconds = loopEndSeconds;
-    }
   }
 
   private updateSustain(sustain: boolean) {
-    this.synthManager.updateSustain(sustain);
-    [this.chordsPiano, this.melodyPiano].forEach((piano) => {
-      if (piano) {
-        try {
-          if (sustain) piano.pedalDown();
-          else piano.pedalUp();
-        } catch (e) {
-          console.error('Error al aplicar pedal de sustain en el piano:', e);
-        }
-      }
-    });
+    this.instrumentManager.updateSustain(sustain);
   }
 
   public exportToWav(
@@ -999,6 +834,34 @@ class ToneEngine {
     };
   }
 
+  public async exportStageVideo(
+    options: {
+      resolution?: '1080p' | '720p';
+      visualizerMode?: 'oscilloscope' | 'spectrum' | 'lissajous';
+      isCrtEnabled?: boolean;
+      onProgress?: (progress: number, phase: string, elapsedMs: number) => void;
+      signal?: AbortSignal;
+    } = {}
+  ): Promise<Blob> {
+    const state = useSongStore.getState();
+    const session = serializeSession(state);
+    const drumBuffers = this.drumManager.getLoadedBuffers();
+
+    const width = options.resolution === '720p' ? 1280 : 1920;
+    const height = options.resolution === '720p' ? 720 : 1080;
+
+    return exportStageToMp4(session, state.customPatterns || [], {
+      width,
+      height,
+      fps: 30,
+      visualizerMode: options.visualizerMode || 'oscilloscope',
+      isCrtEnabled: options.isCrtEnabled ?? true,
+      drumBuffers,
+      onProgress: options.onProgress,
+      signal: options.signal
+    });
+  }
+
   public dispose() {
     this.stop();
     Tone.Transport.cancel(0);
@@ -1011,7 +874,7 @@ class ToneEngine {
       this.playheadRafId = null;
     }
     this.mixerGraph.dispose();
-    this.synthManager.dispose();
+    this.instrumentManager.dispose();
     this.drumManager.dispose();
     this.previewManager.dispose();
     this.transportManager.dispose();

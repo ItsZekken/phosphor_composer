@@ -1,6 +1,6 @@
 import { useSongStore } from '../../store/songStore';
 import { useShallow } from 'zustand/react/shallow';
-import { X, Volume2, Music, Settings, Tv } from 'lucide-react';
+import { X, Music, Settings, Tv } from 'lucide-react';
 
 export const SettingsPanel = () => {
   const {
@@ -8,16 +8,6 @@ export const SettingsPanel = () => {
     setSettingsOpen,
     isCrtEnabled,
     setCrtEnabled,
-    crtParams,
-    setCrtParams,
-    instrumentType,
-    setInstrumentType,
-    isMetronomeActive,
-    setMetronomeActive,
-    metroSubdivision,
-    setMetroSubdivision,
-    metroVolume,
-    setMetroVolume,
     timeSignature,
     setTimeSignature,
     pattern,
@@ -40,16 +30,6 @@ export const SettingsPanel = () => {
     setSettingsOpen: state.setSettingsOpen,
     isCrtEnabled: state.isCrtEnabled,
     setCrtEnabled: state.setCrtEnabled,
-    crtParams: state.crtParams,
-    setCrtParams: state.setCrtParams,
-    instrumentType: state.instrumentType,
-    setInstrumentType: state.setInstrumentType,
-    isMetronomeActive: state.isMetronomeActive,
-    setMetronomeActive: state.setMetronomeActive,
-    metroSubdivision: state.metroSubdivision,
-    setMetroSubdivision: state.setMetroSubdivision,
-    metroVolume: state.metroVolume,
-    setMetroVolume: state.setMetroVolume,
     timeSignature: state.timeSignature,
     setTimeSignature: state.setTimeSignature,
     pattern: state.pattern,
@@ -70,10 +50,6 @@ export const SettingsPanel = () => {
   })));
 
   if (!isSettingsOpen) return null;
-
-  const handleParamChange = (key: keyof typeof crtParams, val: number) => {
-    setCrtParams({ [key]: val });
-  };
 
   return (
     <div className="settings-sidebar">
@@ -104,215 +80,6 @@ export const SettingsPanel = () => {
             <span className="slider-toggle" />
           </label>
         </div>
-
-        {isCrtEnabled && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginTop: '4px' }}>
-            <div className="settings-row">
-              <span className="settings-label">Opacidad scanlines</span>
-              <input
-                type="range"
-                min="0"
-                max="0.5"
-                step="0.01"
-                value={crtParams.scanlineOpacity}
-                onChange={(e) => handleParamChange('scanlineOpacity', parseFloat(e.target.value))}
-              />
-              <span className="settings-val">{crtParams.scanlineOpacity.toFixed(2)}</span>
-            </div>
-
-            <div className="settings-row">
-              <span className="settings-label">Tamaño scanlines</span>
-              <input
-                type="range"
-                min="1"
-                max="6"
-                step="0.5"
-                value={crtParams.scanlineSize}
-                onChange={(e) => handleParamChange('scanlineSize', parseFloat(e.target.value))}
-              />
-              <span className="settings-val">{crtParams.scanlineSize.toFixed(1)}px</span>
-            </div>
-
-            <div className="settings-row">
-              <span className="settings-label">Curvatura barril</span>
-              <input
-                type="range"
-                min="0"
-                max="60"
-                step="1"
-                value={crtParams.curvature}
-                onChange={(e) => handleParamChange('curvature', parseFloat(e.target.value))}
-              />
-              <span className="settings-val">{crtParams.curvature.toFixed(0)}</span>
-            </div>
-
-            <div className="settings-row">
-              <span className="settings-label">Aberración</span>
-              <input
-                type="range"
-                min="0"
-                max="8"
-                step="0.5"
-                value={crtParams.aberration}
-                onChange={(e) => handleParamChange('aberration', parseFloat(e.target.value))}
-              />
-              <span className="settings-val">{crtParams.aberration.toFixed(1)}px</span>
-            </div>
-
-            <div className="settings-row">
-              <span className="settings-label">Fósforo Hue (Color)</span>
-              <input
-                type="range"
-                min="0"
-                max="360"
-                step="1"
-                value={crtParams.phosphorHue}
-                onChange={(e) => handleParamChange('phosphorHue', parseInt(e.target.value))}
-              />
-              <span className="settings-val">{crtParams.phosphorHue}°</span>
-            </div>
-
-            <div className="settings-row">
-              <span className="settings-label">Fósforo Sat</span>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value={crtParams.phosphorSat}
-                onChange={(e) => handleParamChange('phosphorSat', parseInt(e.target.value))}
-              />
-              <span className="settings-val">{crtParams.phosphorSat}%</span>
-            </div>
-
-            <div className="settings-row">
-              <span className="settings-label">Intensidad tinte</span>
-              <input
-                type="range"
-                min="0"
-                max="0.2"
-                step="0.01"
-                value={crtParams.tintStrength}
-                onChange={(e) => handleParamChange('tintStrength', parseFloat(e.target.value))}
-              />
-              <span className="settings-val">{crtParams.tintStrength.toFixed(2)}</span>
-            </div>
-
-            <div className="settings-row">
-              <span className="settings-label">Ruido estático</span>
-              <input
-                type="range"
-                min="0"
-                max="0.1"
-                step="0.005"
-                value={crtParams.noise}
-                onChange={(e) => handleParamChange('noise', parseFloat(e.target.value))}
-              />
-              <span className="settings-val">{crtParams.noise.toFixed(3)}</span>
-            </div>
-
-            <div className="settings-row">
-              <span className="settings-label">Parpadeo CRT</span>
-              <input
-                type="range"
-                min="0"
-                max="0.2"
-                step="0.01"
-                value={crtParams.flicker}
-                onChange={(e) => handleParamChange('flicker', parseFloat(e.target.value))}
-              />
-              <span className="settings-val">{crtParams.flicker.toFixed(2)}</span>
-            </div>
-
-            <div className="settings-row">
-              <span className="settings-label">Viñeta</span>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={crtParams.vignette}
-                onChange={(e) => handleParamChange('vignette', parseFloat(e.target.value))}
-              />
-              <span className="settings-val">{crtParams.vignette.toFixed(2)}</span>
-            </div>
-
-            <div className="settings-row">
-              <span className="settings-label">Brillo</span>
-              <input
-                type="range"
-                min="0.8"
-                max="1.4"
-                step="0.02"
-                value={crtParams.brightness}
-                onChange={(e) => handleParamChange('brightness', parseFloat(e.target.value))}
-              />
-              <span className="settings-val">{crtParams.brightness.toFixed(2)}</span>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* SECCIÓN 2: AUDIO & INSTRUMENTOS */}
-      <div className="settings-section">
-        <div className="settings-section-title">
-          <Volume2 size={12} style={{ marginRight: '4px', verticalAlign: 'middle', display: 'inline' }} />
-          Instrumento & Metrónomo
-        </div>
-        <div className="switch-container">
-          <span className="settings-label">Tipo Instrumento</span>
-          <select
-            className="panel-select"
-            value={instrumentType}
-            onChange={(e) => setInstrumentType(e.target.value as 'synth' | 'piano')}
-            style={{ width: '130px', padding: '0.25rem 0.5rem', fontSize: '0.78rem' }}
-          >
-            <option value="synth">Sintetizador</option>
-            <option value="piano">Piano</option>
-          </select>
-        </div>
-
-        <div className="switch-container">
-          <span className="settings-label">Metrónomo activo</span>
-          <label className="switch">
-            <input
-              type="checkbox"
-              checked={isMetronomeActive}
-              onChange={(e) => setMetronomeActive(e.target.checked)}
-            />
-            <span className="slider-toggle" />
-          </label>
-        </div>
-
-        {isMetronomeActive && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginTop: '4px' }}>
-            <div className="settings-row">
-              <span className="settings-label">Subdivisión click</span>
-              <select
-                className="panel-select"
-                value={metroSubdivision}
-                onChange={(e) => setMetroSubdivision(e.target.value as any)}
-                style={{ gridColumn: '2 / 4', padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
-              >
-                <option value="4n">1/4 (Negra)</option>
-                <option value="8n">1/8 (Corchea)</option>
-                <option value="16n">1/16 (Semicorchea)</option>
-              </select>
-            </div>
-
-            <div className="settings-row">
-              <span className="settings-label">Volumen click</span>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={metroVolume}
-                onChange={(e) => setMetroVolume(parseInt(e.target.value))}
-              />
-              <span className="settings-val">{metroVolume}%</span>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* SECCIÓN: TECLADO MELODÍA */}

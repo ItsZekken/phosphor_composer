@@ -4,17 +4,20 @@ import { useShallow } from 'zustand/react/shallow';
 import type { ChordSuggestion } from '../../utils/typeDefinitions';
 import type { PaletteMode } from '../../store/songStore';
 import { toneEngine } from '../../audio/toneEngine';
-import { NOTE_CLASSES, getDiatonicChords } from '../../core/music';
+import { NOTE_CLASSES, getDiatonicChords, getChromaticDegreePalette } from '../../core/music';
 import type { NoteClass, ScaleType } from '../../utils/typeDefinitions';
 import { CircleFifthsView } from './CircleFifthsView';
 import { CadencesView } from './CadencesView';
+import { HarmonicFlowView } from './HarmonicFlowView';
+import { ChordBuilderView } from './ChordBuilderView';
+import { LayoutGrid, GitFork, Sliders, Disc, Music } from 'lucide-react';
 
 // ------- Helpers -------
 
 /** Función hash del chord a color de función armónica */
 export function getChordRole(chord: string, key: NoteClass, _scale: ScaleType): 'reposo' | 'tension' | 'subdominante' | 'spicy' | 'exotic' {
   const NOTE_IDX = NOTE_CLASSES;
-  const match = chord.match(/^([A-G]#?)(m|maj7|min7|7|maj|min|dim|aug|m7b5|sus4|sus2)?$/);
+  const match = chord.match(/^([A-G]#?)(m|maj7|min7|7|maj|min|dim|aug|m7b5|sus4|sus2|6|m6|add9)?$/);
   if (!match) return 'spicy';
   const rootNote = match[1] as NoteClass;
   const type = match[2] || '';
@@ -52,17 +55,21 @@ const ROLE_CONFIG = {
 
 // Variaciones de acordes para la matriz por grado
 const VARIATION_ROWS: { label: string; suffix: string }[] = [
-  { label: 'sus2', suffix: 'sus2' },
-  { label: 'sus4', suffix: 'sus4' },
-  { label: 'Tríada', suffix: '' },
-  { label: '7th',   suffix: '7th' }, // resuelto dinámicamente
-  { label: 'Modal', suffix: 'modal' }, // intercambio modal dinámico
+  { label: 'sus2',    suffix: 'sus2' },
+  { label: 'sus4',    suffix: 'sus4' },
+  { label: 'Tríada',  suffix: '' },
+  { label: '7th',     suffix: '7th' },
+  { label: 'aug (+)', suffix: 'aug' },
+  { label: '6th',     suffix: '6' },
+  { label: 'Modal',   suffix: 'modal' },
 ];
 
 function getVariationSuffix(baseSuffix: string, baseQuality: string): string {
   if (baseSuffix === '') return baseQuality; // Tríada base
-  if (baseSuffix === 'sus2') return `${baseSuffix}`;
-  if (baseSuffix === 'sus4') return `${baseSuffix}`;
+  if (baseSuffix === 'sus2') return 'sus2';
+  if (baseSuffix === 'sus4') return 'sus4';
+  if (baseSuffix === 'aug') return 'aug';
+  if (baseSuffix === '6') return baseQuality === 'm' ? 'm6' : '6';
   if (baseSuffix === '7th') {
     if (baseQuality === '') return 'maj7';
     if (baseQuality === 'm') return 'm7';
@@ -168,13 +175,32 @@ interface MatrixViewProps {
 }
 
 const MatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggestions }) => {
-  const diatonic = useMemo(() => getDiatonicChords(key_, scale), [key_, scale]);
-  const ROMAN_DEGREES = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
+  const matrixMode = useSongStore(state => state.matrixMode);
+  const setMatrixMode = useSongStore(state => state.setMatrixMode);
 
-  const parseChord = (chord: string) => {
-    const m = chord.match(/^([A-G]#?)(m|dim|aug)?$/);
-    return { root: m ? m[1] : chord, quality: m ? (m[2] || '') : '' };
-  };
+  const columns = useMemo(() => {
+    if (matrixMode === 'chromatic') {
+      const chromatic = getChromaticDegreePalette(key_);
+      return chromatic.map(c => ({
+        degree: c.degree,
+        baseChord: c.root,
+        root: c.root,
+        quality: ''
+      }));
+    } else {
+      const diatonic = getDiatonicChords(key_, scale);
+      const ROMAN_DEGREES = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
+      return diatonic.map((baseChord, idx) => {
+        const m = baseChord.match(/^([A-G]#?)(m|dim|aug)?$/);
+        return {
+          degree: ROMAN_DEGREES[idx],
+          baseChord,
+          root: m ? m[1] : baseChord,
+          quality: m ? (m[2] || '') : ''
+        };
+      });
+    }
+  }, [key_, scale, matrixMode]);
 
   const sugMap = useMemo(() => {
     const m: Record<string, number> = {};
@@ -186,24 +212,44 @@ const MatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggestions }) => 
 
   return (
     <div className="matrix-view">
+      <div className="matrix-controls-bar">
+        <div className="matrix-mode-pills">
+          <button
+            type="button"
+            className={`matrix-mode-pill ${matrixMode === 'diatonic' ? 'active' : ''}`}
+            onClick={() => setMatrixMode('diatonic')}
+            title="Mostrar los 7 grados diatónicos de la escala"
+          >
+            Diatónico (7)
+          </button>
+          <button
+            type="button"
+            className={`matrix-mode-pill ${matrixMode === 'chromatic' ? 'active' : ''}`}
+            onClick={() => setMatrixMode('chromatic')}
+            title="Mostrar los 12 grados cromáticos completos de la tonalidad"
+          >
+            Cromático (12)
+          </button>
+        </div>
+      </div>
+
       <div className="matrix-grid" style={{ 
-        gridTemplateColumns: `80px repeat(${diatonic.length}, 1fr)`,
+        gridTemplateColumns: `80px repeat(${columns.length}, 1fr)`,
         gridTemplateRows: `auto repeat(${rows.length}, 1fr)`
       }}>
         <div className="matrix-row-label" />
-        {diatonic.map((_, idx) => (
+        {columns.map((col, idx) => (
           <div key={idx} className="matrix-degree-header">
-            {ROMAN_DEGREES[idx]}
+            {col.degree}
           </div>
         ))}
 
         {rows.map((row) => (
           <React.Fragment key={row.suffix}>
             <div className="matrix-row-label">{row.label}</div>
-            {diatonic.map((baseChord, colIdx) => {
-              const { root, quality } = parseChord(baseChord);
-              const varSuffix = getVariationSuffix(row.suffix, quality);
-              const chordName = `${root}${varSuffix}`;
+            {columns.map((col, colIdx) => {
+              const varSuffix = getVariationSuffix(row.suffix, col.quality);
+              const chordName = `${col.root}${varSuffix}`;
               const role = getChordRole(chordName, key_, scale);
               const prob = sugMap[chordName];
               return (
@@ -226,13 +272,32 @@ const MatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggestions }) => 
 // ------- Transposed Matrix View (Móvil: Grados Verticales, Variaciones Horizontales sin Divisiones) -------
 
 const TransposedMatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggestions }) => {
-  const diatonic = useMemo(() => getDiatonicChords(key_, scale), [key_, scale]);
-  const ROMAN_DEGREES = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
+  const matrixMode = useSongStore(state => state.matrixMode);
+  const setMatrixMode = useSongStore(state => state.setMatrixMode);
 
-  const parseChord = (chord: string) => {
-    const m = chord.match(/^([A-G]#?)(m|dim|aug)?$/);
-    return { root: m ? m[1] : chord, quality: m ? (m[2] || '') : '' };
-  };
+  const columns = useMemo(() => {
+    if (matrixMode === 'chromatic') {
+      const chromatic = getChromaticDegreePalette(key_);
+      return chromatic.map(c => ({
+        degree: c.degree,
+        baseChord: c.root,
+        root: c.root,
+        quality: ''
+      }));
+    } else {
+      const diatonic = getDiatonicChords(key_, scale);
+      const ROMAN_DEGREES = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
+      return diatonic.map((baseChord, idx) => {
+        const m = baseChord.match(/^([A-G]#?)(m|dim|aug)?$/);
+        return {
+          degree: ROMAN_DEGREES[idx],
+          baseChord,
+          root: m ? m[1] : baseChord,
+          quality: m ? (m[2] || '') : ''
+        };
+      });
+    }
+  }, [key_, scale, matrixMode]);
 
   const sugMap = useMemo(() => {
     const m: Record<string, number> = {};
@@ -244,6 +309,25 @@ const TransposedMatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggesti
 
   return (
     <div className="transposed-matrix-view">
+      <div className="matrix-controls-bar mobile">
+        <div className="matrix-mode-pills">
+          <button
+            type="button"
+            className={`matrix-mode-pill ${matrixMode === 'diatonic' ? 'active' : ''}`}
+            onClick={() => setMatrixMode('diatonic')}
+          >
+            Diatónico (7)
+          </button>
+          <button
+            type="button"
+            className={`matrix-mode-pill ${matrixMode === 'chromatic' ? 'active' : ''}`}
+            onClick={() => setMatrixMode('chromatic')}
+          >
+            Cromático (12)
+          </button>
+        </div>
+      </div>
+
       <div className="transposed-single-grid">
         <div className="transposed-grid-header-corner" />
         {variations.map((v) => (
@@ -252,32 +336,29 @@ const TransposedMatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggesti
           </div>
         ))}
 
-        {diatonic.map((baseChord, degreeIdx) => {
-          const { root, quality } = parseChord(baseChord);
-          return (
-            <React.Fragment key={degreeIdx}>
-              <div className="transposed-grid-degree-label">
-                <span className="degree-roman">{ROMAN_DEGREES[degreeIdx]}</span>
-                <span className="degree-base">{baseChord}</span>
-              </div>
-              {variations.map((row) => {
-                const varSuffix = getVariationSuffix(row.suffix, quality);
-                const chordName = `${root}${varSuffix}`;
-                const role = getChordRole(chordName, key_, scale);
-                const prob = sugMap[chordName];
-                return (
-                  <ChordCard
-                    key={`${degreeIdx}-${row.suffix}`}
-                    chord={chordName}
-                    probability={prob}
-                    role={role}
-                    small={row.suffix !== ''}
-                  />
-                );
-              })}
-            </React.Fragment>
-          );
-        })}
+        {columns.map((col, degreeIdx) => (
+          <React.Fragment key={degreeIdx}>
+            <div className="transposed-grid-degree-label">
+              <span className="degree-roman">{col.degree}</span>
+              <span className="degree-base">{col.baseChord}</span>
+            </div>
+            {variations.map((row) => {
+              const varSuffix = getVariationSuffix(row.suffix, col.quality);
+              const chordName = `${col.root}${varSuffix}`;
+              const role = getChordRole(chordName, key_, scale);
+              const prob = sugMap[chordName];
+              return (
+                <ChordCard
+                  key={`${degreeIdx}-${row.suffix}`}
+                  chord={chordName}
+                  probability={prob}
+                  role={role}
+                  small={row.suffix !== ''}
+                />
+              );
+            })}
+          </React.Fragment>
+        ))}
       </div>
     </div>
   );
@@ -297,7 +378,9 @@ export const ChordPalette: React.FC = () => {
     setDraggingChord,
     isAutoSuggestions,
     detectedKey,
-    isAutoKey
+    isAutoKey,
+    paletteMode,
+    setPaletteMode
   } = useSongStore(useShallow(state => ({
     key: state.key,
     scale: state.scale,
@@ -309,13 +392,14 @@ export const ChordPalette: React.FC = () => {
     setDraggingChord: state.setDraggingChord,
     isAutoSuggestions: state.isAutoSuggestions,
     detectedKey: state.detectedKey,
-    isAutoKey: state.isAutoKey
+    isAutoKey: state.isAutoKey,
+    paletteMode: state.paletteMode,
+    setPaletteMode: state.setPaletteMode,
   })));
 
   const [isMouseOutside, setIsMouseOutside] = React.useState(false);
   const [mousePos, setMousePos] = React.useState({ x: 0, y: 0 });
   const [touchPos, setTouchPos] = useState<{ x: number; y: number } | null>(null);
-  const [paletteMode, setPaletteMode] = useState<PaletteMode>('matrix');
 
   const lastHoveredTouchChordRef = React.useRef<string | null>(null);
   const initialDragChordRef = React.useRef<string | null>(null);
@@ -419,10 +503,12 @@ export const ChordPalette: React.FC = () => {
     };
   }, [draggingChord, setDraggingChord]);
 
-  const paletteModes: { id: PaletteMode; label: string; icon: string }[] = [
-    { id: 'matrix',   label: 'Matriz',   icon: '⊞' },
-    { id: 'fifths',   label: 'Quintas',  icon: '◎' },
-    { id: 'cadences', label: 'Cadencias', icon: '♩' },
+  const paletteModes: { id: PaletteMode; label: string; icon: React.ReactNode }[] = [
+    { id: 'matrix',   label: 'Matriz',      icon: <LayoutGrid size={13} /> },
+    { id: 'alchemy',  label: 'Alquimia',    icon: <GitFork size={13} /> },
+    { id: 'builder',  label: 'Constructor', icon: <Sliders size={13} /> },
+    { id: 'fifths',   label: 'Quintas',     icon: <Disc size={13} /> },
+    { id: 'cadences', label: 'Cadencias',   icon: <Music size={13} /> },
   ];
 
   const activeGhostChord = initialDragChordRef.current || draggingChord;
@@ -466,8 +552,6 @@ export const ChordPalette: React.FC = () => {
             </div>
           </div>
         </div>
-
-
       </div>
 
       <div className="palette-body-wrap">
@@ -480,6 +564,12 @@ export const ChordPalette: React.FC = () => {
               <TransposedMatrixView key_={key} scale={scale} suggestions={chordSuggestions} />
             </div>
           </>
+        )}
+        {paletteMode === 'alchemy' && (
+          <HarmonicFlowView currentKey={key} scale={scale} />
+        )}
+        {paletteMode === 'builder' && (
+          <ChordBuilderView currentKey={key} />
         )}
         {paletteMode === 'fifths' && (
           <CircleFifthsView currentKey={key} scale={scale} suggestions={chordSuggestions} />
@@ -511,7 +601,7 @@ export const ChordPalette: React.FC = () => {
             zIndex: 9999,
             background: 'var(--accent)',
             border: '1px solid rgba(255,255,255,0.25)',
-            color: '#fff',
+            color: '#000',
             padding: '6px 12px',
             borderRadius: '4px',
             fontWeight: 'bold',
@@ -520,7 +610,7 @@ export const ChordPalette: React.FC = () => {
             transform: 'translate(-50%, -50%)'
           }}
         >
-          ➕ {activeGhostChord}
+          {activeGhostChord}
         </div>
       )}
     </div>

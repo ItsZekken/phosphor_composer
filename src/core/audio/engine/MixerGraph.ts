@@ -1,6 +1,7 @@
 /**
  * MixerGraph.ts
- * Administrador del grafo de mezcla Web Audio y nodos de ruteo estéreo.
+ * Administrador del grafo de mezcla Web Audio y nodos de ruteo estéreo de alta fidelidad.
+ * Garantiza un canal estéreo explícito (channelCount: 2) en todos los nodos para evitar el colapso mono.
  */
 
 import * as Tone from 'tone';
@@ -10,6 +11,15 @@ export interface ChannelNode {
   volumeNode: Tone.Volume;
   pannerNode: Tone.Panner;
   meterNode: Tone.Meter;
+}
+
+/**
+ * Convierte el valor de fader (0 a 100 con 80 = 0 dB) al valor en decibeles exacto del mixer.
+ */
+export function faderToDb(volume: number): number {
+  if (volume <= 0) return -Infinity;
+  const db = ((volume - 80) / 80) * 30;
+  return Math.max(-60, Math.min(6, db));
 }
 
 export class MixerGraph {
@@ -53,6 +63,10 @@ export class MixerGraph {
         const pannerNode = new Tone.Panner({ pan: 0 });
         const meterNode = new Tone.Meter({ smoothing: 0.8 });
 
+        // Configuración estéreo explícita en los nodos nativos Web Audio para preservar la separación L/R
+        this.enforceStereoNode(volumeNode);
+        this.enforceStereoNode(pannerNode);
+
         volumeNode.connect(pannerNode);
 
         if (id === 'master') {
@@ -67,7 +81,7 @@ export class MixerGraph {
         node = { volumeNode, pannerNode, meterNode };
         this.channelNodes.set(id, node);
       } catch (_) {
-        // Fallback seguro para tests en Node.js o entornos sin AudioParam
+        // Fallback seguro para entornos de prueba sin AudioParam
         node = {
           volumeNode: { volume: { value: 0 }, mute: false, connect: () => {}, dispose: () => {} } as any,
           pannerNode: { pan: { value: 0 }, connect: () => {}, toDestination: () => {}, dispose: () => {} } as any,
@@ -77,6 +91,25 @@ export class MixerGraph {
       }
     }
     return node;
+  }
+
+  /**
+   * Fuerza modo estéreo explícito (channelCount: 2) para prevenir downmixing a mono accidental.
+   */
+  private enforceStereoNode(toneNode: any) {
+    try {
+      const raw = toneNode.input || toneNode.output || toneNode._gainNode || toneNode._panner || toneNode;
+      if (raw) {
+        raw.channelCount = 2;
+        raw.channelCountMode = 'explicit';
+        raw.channelInterpretation = 'speakers';
+      }
+      if (toneNode._panner) {
+        toneNode._panner.channelCount = 2;
+        toneNode._panner.channelCountMode = 'explicit';
+        toneNode._panner.channelInterpretation = 'speakers';
+      }
+    } catch (_) {}
   }
 
   public syncChannels(channels: Record<string, ChannelConfig>) {
@@ -92,12 +125,7 @@ export class MixerGraph {
       node.volumeNode.mute = isSilenced;
 
       if (!isSilenced) {
-        if (ch.volume <= 0) {
-          node.volumeNode.volume.value = -Infinity;
-        } else {
-          const db = ((ch.volume - 80) / 80) * 30;
-          node.volumeNode.volume.value = Math.max(-60, Math.min(6, db));
-        }
+        node.volumeNode.volume.value = faderToDb(ch.volume);
       }
       const clampedPan = Math.max(-1, Math.min(1, ch.pan));
       node.pannerNode.pan.value = clampedPan;
@@ -108,6 +136,8 @@ export class MixerGraph {
           nativePanner.pan.cancelScheduledValues(0);
         } catch (_) {}
         nativePanner.pan.value = clampedPan;
+        nativePanner.channelCount = 2;
+        nativePanner.channelCountMode = 'explicit';
       }
     }
   }
@@ -123,21 +153,46 @@ export class MixerGraph {
     }
   }
 
-  public getWaveformData(): Float32Array {
+  private waveformBuffer = new Float32Array(512);
+  private frequencyBuffer = new Float32Array(64);
+
+  public getWaveformData(target?: Float32Array): Float32Array {
+    const dest = target || this.waveformBuffer;
     try {
       if (!this.analyserNode) this.getAnalyser();
-      return this.analyserNode!.getValue() as Float32Array;
+      const raw = (this.analyserNode as any)?._analyser;
+      if (raw && typeof raw.getFloatTimeDomainData === 'function') {
+        raw.getFloatTimeDomainData(dest);
+        return dest;
+      }
+      const val = this.analyserNode!.getValue() as Float32Array;
+      if (target && target !== val) {
+        target.set(val);
+        return target;
+      }
+      return val;
     } catch (_) {
-      return new Float32Array(512);
+      return dest;
     }
   }
 
-  public getFrequencyData(): Float32Array {
+  public getFrequencyData(target?: Float32Array): Float32Array {
+    const dest = target || this.frequencyBuffer;
     try {
       if (!this.fftNode) this.getFftAnalyser();
-      return this.fftNode!.getValue() as Float32Array;
+      const raw = (this.fftNode as any)?._analyser;
+      if (raw && typeof raw.getFloatFrequencyData === 'function') {
+        raw.getFloatFrequencyData(dest);
+        return dest;
+      }
+      const val = this.fftNode!.getValue() as Float32Array;
+      if (target && target !== val) {
+        target.set(val);
+        return target;
+      }
+      return val;
     } catch (_) {
-      return new Float32Array(64);
+      return dest;
     }
   }
 

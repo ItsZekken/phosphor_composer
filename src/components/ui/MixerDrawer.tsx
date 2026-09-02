@@ -340,7 +340,7 @@ const ChannelStrip: React.FC<{
   toggleMute: (id: string) => void;
   toggleSolo: (id: string) => void;
   openSynthConfigForChannel: (id: string) => void;
-}> = ({
+}> = React.memo(({
   ch, isMaster, isSilenced, isClipping, vuPct, dbReadout, peakDisplay, peakDb,
   clearClipAndPeak, moveChannel, validChannelIds,
   setChannelVolume, setChannelPan, setChannelInstrument, updateChannel,
@@ -542,4 +542,4 @@ const ChannelStrip: React.FC<{
       </div>
     </div>
   );
-};
+});

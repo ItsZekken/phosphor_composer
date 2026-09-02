@@ -10,19 +10,20 @@ import type {
   ScheduledDrumEvent, 
   ScheduledSessionEvents 
 } from './audioTypes';
-import { renderChordPattern } from '../music';
+import { renderChordPattern, createTempoMap } from '../music';
 import { flattenPatternChain } from '../../utils/typeDefinitions';
 import type { PatternDef } from '../../patterns/patternTypes';
 
 /**
- * Calcula los eventos programados en segundos para una sesión completa.
+ * Calcula los eventos programados en segundos para una sesión completa usando el mapa de tempo.
  */
 export function scheduleSessionTimeline(
   session: SessionV2, 
   customPatterns: PatternDef[] = []
 ): ScheduledSessionEvents {
   const bpm = session.transport.bpm || 120;
-  const secondsPerBeat = 60 / bpm;
+  const tempoMarkers = session.transport.tempoMarkers || [];
+  const tempoMap = createTempoMap(bpm, tempoMarkers);
 
   const chordEvents: ScheduledChordEvent[] = [];
   const trackEvents: ScheduledTrackEvent[] = [];
@@ -67,8 +68,8 @@ export function scheduleSessionTimeline(
     rendered.forEach(rn => {
       chordEvents.push({
         note: rn.name,
-        timeSeconds: rn.timeBeats * secondsPerBeat,
-        durationSeconds: rn.durationBeats * secondsPerBeat,
+        timeSeconds: tempoMap.beatToSeconds(rn.timeBeats),
+        durationSeconds: tempoMap.getDurationSeconds(rn.timeBeats, rn.durationBeats),
         velocity: rn.velocity
       });
     });
@@ -86,8 +87,8 @@ export function scheduleSessionTimeline(
         trackId: track.id,
         channelId: track.channelId,
         note: n.note,
-        timeSeconds: n.startBeat * secondsPerBeat,
-        durationSeconds: n.durationBeats * secondsPerBeat,
+        timeSeconds: tempoMap.beatToSeconds(n.startBeat),
+        durationSeconds: tempoMap.getDurationSeconds(n.startBeat, n.durationBeats),
         velocity: typeof n.velocity === 'number' ? n.velocity : 0.8
       });
     });
@@ -114,7 +115,7 @@ export function scheduleSessionTimeline(
 
         for (let stepIdx = 0; stepIdx < 16; stepIdx++) {
           const stepBeat = measureStartBeat + (stepIdx * 0.25);
-          const timeSeconds = stepBeat * secondsPerBeat;
+          const timeSeconds = tempoMap.beatToSeconds(stepBeat);
 
           drumChannels.forEach(ch => {
             if (ch.muted) return;
@@ -144,7 +145,7 @@ export function scheduleSessionTimeline(
         const measureStartBeat = m * 4;
         for (let stepIdx = 0; stepIdx < 16; stepIdx++) {
           const stepBeat = measureStartBeat + (stepIdx * 0.25);
-          const timeSeconds = stepBeat * secondsPerBeat;
+          const timeSeconds = tempoMap.beatToSeconds(stepBeat);
 
           drumChannels.forEach(ch => {
             if (ch.muted) return;
@@ -169,7 +170,7 @@ export function scheduleSessionTimeline(
   }
 
   // Duración total en segundos con 2 segundos de cola para release/decay
-  const totalDurationSeconds = (maxBeat * secondsPerBeat) + 2.0;
+  const totalDurationSeconds = tempoMap.getTotalDurationSeconds(maxBeat) + 2.0;
 
   return {
     totalBeats: maxBeat,

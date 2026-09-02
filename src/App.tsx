@@ -1,20 +1,22 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
 import { Header } from './components/layout/Header';
 import { ViewToggle } from './components/layout/ViewToggle';
-import { ChordPlayerView } from './components/chord-player/ChordPlayerView';
-import { PianoRollView } from './components/piano-roll/PianoRollView';
-import { DrumSequencerView } from './components/sequencer/DrumSequencerView';
-import { StageVisualizerView } from './components/visualizer/StageVisualizerView';
 import { useSongStore } from './store/songStore';
 import { toneEngine } from './audio/toneEngine';
 import { loadCustomPatterns } from './patterns/patternLoader';
 import { PianoVisualizer } from './components/piano-roll/PianoVisualizer';
 import { CRTOverlay } from './components/ui/CRTOverlay';
-import { SettingsPanel } from './components/ui/SettingsPanel';
-import { SynthConfigModal } from './components/ui/SynthConfigModal';
-import { MixerDrawer } from './components/ui/MixerDrawer';
 import { GlobalLoader } from './components/ui/GlobalLoader';
 import { exportSessionToJson } from './core/session';
+
+// Carga bajo demanda (Code-Splitting) para optimizar memoria y tiempo de carga inicial
+const ChordPlayerView = React.lazy(() => import('./components/chord-player/ChordPlayerView').then(m => ({ default: m.ChordPlayerView })));
+const PianoRollView = React.lazy(() => import('./components/piano-roll/PianoRollView').then(m => ({ default: m.PianoRollView })));
+const DrumSequencerView = React.lazy(() => import('./components/sequencer/DrumSequencerView').then(m => ({ default: m.DrumSequencerView })));
+const StageVisualizerView = React.lazy(() => import('./components/visualizer/StageVisualizerView').then(m => ({ default: m.StageVisualizerView })));
+const SettingsPanel = React.lazy(() => import('./components/ui/SettingsPanel').then(m => ({ default: m.SettingsPanel })));
+const SynthConfigModal = React.lazy(() => import('./components/ui/SynthConfigModal').then(m => ({ default: m.SynthConfigModal })));
+const MixerDrawer = React.lazy(() => import('./components/ui/MixerDrawer').then(m => ({ default: m.MixerDrawer })));
 
 export default function App() {
   const activeView = useSongStore(state => state.activeView);
@@ -40,11 +42,17 @@ export default function App() {
     });
   }, [setCustomPatterns]);
 
-  // Guardar estado reactivamente en localStorage con debounce
+  // Guardar estado reactivamente en localStorage con debounce (solo ante cambios en el modelo musical)
   useEffect(() => {
     if (!isLoaded) return;
     let timeoutId: number;
+    let prevModelKey = '';
+
     const unsubscribe = useSongStore.subscribe((state) => {
+      const currentModelKey = `${state.bpm}_${state.key}_${state.scale}_${state.tracks.length}_${state.chordBlocks.length}_${state.drumChannels.length}_${state.patternChain.length}_${state.pattern}`;
+      if (currentModelKey === prevModelKey) return;
+      prevModelKey = currentModelKey;
+
       clearTimeout(timeoutId);
       timeoutId = window.setTimeout(() => {
         try {
@@ -97,13 +105,31 @@ export default function App() {
         return;
       }
 
+      const handleStopAndResetCurrentView = () => {
+        toneEngine.stop();
+        const currentStore = useSongStore.getState();
+        if (currentStore.activeView === 'chord') {
+          currentStore.resetChordTimelineScroll();
+          const el = document.querySelector('.timeline-viewport');
+          if (el) el.scrollLeft = 0;
+        } else if (currentStore.activeView === 'piano-roll') {
+          currentStore.resetActiveTrackScroll();
+          const el = document.querySelector('.piano-roll-container');
+          if (el) el.scrollLeft = 0;
+        } else if (currentStore.activeView === 'sequencer') {
+          currentStore.resetDrumTimelineScroll();
+          const el = document.querySelector('.pattern-chain-track-wrapper');
+          if (el) el.scrollLeft = 0;
+        }
+      };
+
       if (e.key.toLowerCase() === 'w' && !e.shiftKey) {
         // En modo teclado melódico + cromático, W es Do#4, así que se desactiva como parada de reproducción
         if (store.isKeyboardMelodyEnabled && store.isKeyboardChromatic) {
           // Dejar pasar al trigger de la nota
         } else {
           e.preventDefault();
-          toneEngine.stop();
+          handleStopAndResetCurrentView();
           return;
         }
       }
@@ -111,7 +137,7 @@ export default function App() {
       // Atajo alternativo para detener/reiniciar (Q) cuando W está ocupado por la nota Do#
       if (e.key.toLowerCase() === 'q' && store.isKeyboardMelodyEnabled && store.isKeyboardChromatic && !e.shiftKey) {
         e.preventDefault();
-        toneEngine.stop();
+        handleStopAndResetCurrentView();
         return;
       }
 
@@ -186,22 +212,28 @@ export default function App() {
         <div className="crt-chassis">
           <div id="crt-root" className={isCrtEnabled ? 'enabled' : ''}>
           <CRTOverlay />
-          <MixerDrawer />
+          <Suspense fallback={null}>
+            <MixerDrawer />
+          </Suspense>
           
           <div className="crt-screen-content">
             <PianoVisualizer />
             <Header />
             <ViewToggle />
             <main className="app-main">
-              {activeView === 'chord' && <ChordPlayerView />}
-              {activeView === 'piano-roll' && <PianoRollView />}
-              {activeView === 'sequencer' && <DrumSequencerView />}
-              {activeView === 'visualizer' && <StageVisualizerView />}
+              <Suspense fallback={<div className="view-loading-fallback" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>Cargando vista...</div>}>
+                {activeView === 'chord' && <ChordPlayerView />}
+                {activeView === 'piano-roll' && <PianoRollView />}
+                {activeView === 'sequencer' && <DrumSequencerView />}
+                {activeView === 'visualizer' && <StageVisualizerView />}
+              </Suspense>
             </main>
           </div>
 
-          <SettingsPanel />
-          <SynthConfigModal />
+          <Suspense fallback={null}>
+            <SettingsPanel />
+            <SynthConfigModal />
+          </Suspense>
         </div>
       </div>
     </div>

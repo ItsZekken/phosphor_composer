@@ -102,8 +102,19 @@ export const createTrackSlice: SliceCreator<TrackState & TrackActions> = (set, g
     };
   }),
 
-  updateTrackViewport: (id, viewport) => set((state) => ({
-    tracks: state.tracks.map(t => t.id === id ? { ...t, viewport: { ...t.viewport, ...viewport } } : t)
+  updateTrackViewport: (id, viewport) => set((state) => {
+    const track = state.tracks.find(t => t.id === id);
+    if (!track || !viewport) return state;
+    const currentVp = track.viewport || {};
+    const hasChange = Object.entries(viewport).some(([k, v]) => (currentVp as any)[k] !== v);
+    if (!hasChange) return state;
+    return {
+      tracks: state.tracks.map(t => t.id === id ? { ...t, viewport: { ...t.viewport, ...viewport } } : t)
+    };
+  }),
+
+  resetActiveTrackScroll: () => set((state) => ({
+    tracks: state.tracks.map(t => t.id === state.activeTrackId ? { ...t, viewport: { ...t.viewport, scrollLeft: 0 } } : t)
   })),
 
   setTrackNotes: (trackId, notes) => set((state) => ({

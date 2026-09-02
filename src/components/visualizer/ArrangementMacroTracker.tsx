@@ -35,7 +35,32 @@ export const ArrangementMacroTracker: React.FC = React.memo(() => {
     toneEngine.seekToBeat(targetBeat);
   };
 
-  const playheadPercent = Math.min(100, Math.max(0, (currentBeat / totalBeats) * 100));
+  const playheadRef = useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    let animId: number;
+
+    const update = () => {
+      const playing = useSongStore.getState().isPlaying;
+      const beat = playing ? toneEngine.getLiveBeat() : (useSongStore.getState().currentBeat ?? 0);
+      const percent = Math.min(100, Math.max(0, (beat / totalBeats) * 100));
+
+      if (playheadRef.current) {
+        playheadRef.current.style.left = `${percent}%`;
+      }
+
+      if (playing) {
+        animId = requestAnimationFrame(update);
+      }
+    };
+
+    update();
+    if (isPlaying) {
+      animId = requestAnimationFrame(update);
+    }
+
+    return () => cancelAnimationFrame(animId);
+  }, [isPlaying, totalBeats, currentBeat]);
 
   return (
     <div className="stage-arrangement-tracker">
@@ -47,8 +72,9 @@ export const ArrangementMacroTracker: React.FC = React.memo(() => {
       >
         {/* Cursor / Playhead de reproducción */}
         <div
+          ref={playheadRef}
           className={`stage-macro-playhead ${isPlaying ? 'moving' : ''}`}
-          style={{ left: `${playheadPercent}%` }}
+          style={{ left: `${Math.min(100, Math.max(0, (currentBeat / totalBeats) * 100))}%` }}
         />
 
         {/* 1. Carril de Acordes (Armonía) */}

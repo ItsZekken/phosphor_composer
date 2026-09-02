@@ -13,12 +13,36 @@ import { exportSessionToJson } from '../../core/session';
 import { ExportProgressModal } from '../ui/ExportProgressModal';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { PhosphorLogo } from '../ui/PhosphorLogo';
+import { StageExportModal } from '../visualizer/StageExportModal';
 
 const BeatDisplay = () => {
-  const currentBeat = useSongStore(state => state.currentBeat);
+  const spanRef = useRef<HTMLDivElement>(null);
+  const isPlaying = useSongStore((state) => state.isPlaying);
+  const staticBeat = useSongStore((state) => state.currentBeat);
+
+  useEffect(() => {
+    if (!isPlaying) {
+      if (spanRef.current) {
+        spanRef.current.textContent = `Beat: ${staticBeat.toFixed(2)}`;
+      }
+      return;
+    }
+
+    let rafId: number;
+    const update = () => {
+      if (spanRef.current) {
+        const liveBeat = toneEngine.getLiveBeat();
+        spanRef.current.textContent = `Beat: ${liveBeat.toFixed(2)}`;
+      }
+      rafId = requestAnimationFrame(update);
+    };
+    rafId = requestAnimationFrame(update);
+    return () => cancelAnimationFrame(rafId);
+  }, [isPlaying, staticBeat]);
+
   return (
-    <div className="beat-display" style={{ fontFamily: '"Share Tech Mono", monospace' }}>
-      Beat: {currentBeat.toFixed(2)}
+    <div ref={spanRef} className="beat-display" style={{ fontFamily: '"Share Tech Mono", monospace' }}>
+      Beat: {staticBeat.toFixed(2)}
     </div>
   );
 };
@@ -89,13 +113,15 @@ export const Header = () => {
   })));
 
   // Estado local del BPM — solo escribe al store en onBlur/Enter
+  const liveBpm = useSongStore((state) => state.liveBpm);
   const [bpmInput, setBpmInput] = useState(String(bpm));
   const [confirmModalConfig, setConfirmModalConfig] = useState<{isOpen: boolean}>({isOpen: false});
+  const [isStageVideoModalOpen, setIsStageVideoModalOpen] = useState(false);
 
-  // Sincronizar si el store cambia externamente (ej: Tap BPM)
+  // Sincronizar el indicador de BPM en vivo: muestra liveBpm durante reproducción y base bpm en reposo
   useEffect(() => {
-    setBpmInput(String(bpm));
-  }, [bpm]);
+    setBpmInput(String(isPlaying ? (liveBpm || bpm) : bpm));
+  }, [bpm, liveBpm, isPlaying]);
 
   const commitBpm = useCallback((raw: string) => {
     const parsed = parseInt(raw, 10);
@@ -308,6 +334,7 @@ export const Header = () => {
           if (result.success) {
             importSong({
               bpm: result.bpm,
+              tempoMarkers: result.tempoMarkers || [],
               key: result.key as any,
               scale: result.scale as any,
               pattern: result.pattern,
@@ -539,7 +566,17 @@ export const Header = () => {
                 Exportar Audio (.wav)
               </button>
               <button className="export-dropdown-item" onClick={handleExportCompressedAudio}>
-                Exportar Audio Comprimido (.ogg / .webm)
+                Exportar Audio Comprimido (.mp3)
+              </button>
+              <div style={{ height: '1px', background: 'rgba(255,255,255,0.08)', margin: '4px 0' }} />
+              <button
+                className="export-dropdown-item"
+                onClick={() => {
+                  setExportDropdownOpen(false);
+                  setIsStageVideoModalOpen(true);
+                }}
+              >
+                Exportar Video del Stage (.mp4)
               </button>
             </div>
           )}
@@ -596,6 +633,11 @@ export const Header = () => {
         setConfirmModalConfig({ isOpen: false });
       }}
       onCancel={() => setConfirmModalConfig({ isOpen: false })}
+    />
+
+    <StageExportModal
+      isOpen={isStageVideoModalOpen}
+      onClose={() => setIsStageVideoModalOpen(false)}
     />
   </>  
   );

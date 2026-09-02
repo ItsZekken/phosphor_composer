@@ -1,47 +1,63 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StageTelemetryHUD } from './StageTelemetryHUD';
 import type { VisualizerMode } from './StageTelemetryHUD';
-import { MasterAudioVisualizer } from './MasterAudioVisualizer';
-import { MidiWaterfallCanvas } from './MidiWaterfallCanvas';
-import { ChannelActivityDeck } from './ChannelActivityDeck';
-import { ArrangementMacroTracker } from './ArrangementMacroTracker';
+import { StageCanvas } from './StageCanvas';
+import { StageExportModal } from './StageExportModal';
 
 export const StageVisualizerView: React.FC = () => {
   const [visualizerMode, setVisualizerMode] = useState<VisualizerMode>('oscilloscope');
   const [isZenMode, setIsZenMode] = useState(false);
+  const [isControlsVisible, setIsControlsVisible] = useState(true);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const idleTimerRef = useRef<number | null>(null);
+
+  // Ocultar la barra superior tras 2.5 segundos de inactividad del cursor
+  const handleMouseMove = () => {
+    setIsControlsVisible(true);
+    if (idleTimerRef.current) {
+      window.clearTimeout(idleTimerRef.current);
+    }
+    idleTimerRef.current = window.setTimeout(() => {
+      setIsControlsVisible(false);
+    }, 2500);
+  };
+
+  useEffect(() => {
+    idleTimerRef.current = window.setTimeout(() => {
+      setIsControlsVisible(false);
+    }, 3000);
+
+    return () => {
+      if (idleTimerRef.current) window.clearTimeout(idleTimerRef.current);
+    };
+  }, []);
 
   return (
-    <div className={`stage-view-container ${isZenMode ? 'zen-mode' : ''}`}>
-      {/* 1. Telemetría de Cabina Superior */}
-      <StageTelemetryHUD
-        visualizerMode={visualizerMode}
-        onSelectMode={setVisualizerMode}
-        isZenMode={isZenMode}
-        onToggleZen={() => setIsZenMode(!isZenMode)}
+    <div
+      className={`stage-stage-wrapper ${isZenMode ? 'zen-mode' : ''}`}
+      onMouseMove={handleMouseMove}
+      onMouseEnter={handleMouseMove}
+    >
+      {/* LIENZO UNIFICADO: Ejecuta las 4 capas del Stage con el mismo motor gráfico puro */}
+      <StageCanvas mode={visualizerMode} />
+
+      {/* HUD de Telemetría Superior (se oculta automáticamente por inactividad) */}
+      <div className={`stage-floating-top-bar ${!isControlsVisible ? 'idle-hidden' : ''}`}>
+        <StageTelemetryHUD
+          visualizerMode={visualizerMode}
+          onSelectMode={setVisualizerMode}
+          isZenMode={isZenMode}
+          onToggleZen={() => setIsZenMode(!isZenMode)}
+          onOpenExportVideo={() => setIsExportModalOpen(true)}
+        />
+      </div>
+
+      {/* Panel Lateral de Exportación de Video */}
+      <StageExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        defaultVisualizerMode={visualizerMode}
       />
-
-      {/* 2. Escenario Audiovisual Principal */}
-      <div className="stage-hero-grid">
-        {/* Visualizador de Audio Maestro (Osciloscopio / FFT / Lissajous) */}
-        <div className="stage-hero-scope">
-          <MasterAudioVisualizer mode={visualizerMode} />
-        </div>
-
-        {/* Cascada MIDI Multi-Canal a 60 FPS */}
-        <div className="stage-hero-waterfall">
-          <MidiWaterfallCanvas />
-        </div>
-      </div>
-
-      {/* 3. Tira de Actividad de Canales (VU Meters y Notas en Vivo) */}
-      <div className="stage-deck-section">
-        <ChannelActivityDeck />
-      </div>
-
-      {/* 4. Secuenciador y Arranger Ultrasimplificado en Vivo */}
-      <div className="stage-tracker-section">
-        <ArrangementMacroTracker />
-      </div>
     </div>
   );
 };

@@ -16,14 +16,18 @@ import type {
   DrumStep,
   PatternChainItem,
   PianoRollTrack,
-  StyleMarker
+  StyleMarker,
+  TempoMarker
 } from '../utils/typeDefinitions';
 import type { PatternDef } from '../patterns/patternTypes';
 
-export type PaletteMode = 'matrix' | 'fifths' | 'cadences';
+export type PaletteMode = 'matrix' | 'alchemy' | 'builder' | 'fifths' | 'cadences';
+export type MatrixMode = 'diatonic' | 'chromatic';
 
 export interface TransportState {
   bpm: number;
+  liveBpm: number;
+  tempoMarkers: TempoMarker[];
   key: NoteClass;
   scale: ScaleType;
   isAutoKey: boolean;
@@ -46,6 +50,11 @@ export interface TransportState {
 
 export interface TransportActions {
   setBpm: (bpm: number) => void;
+  setLiveBpm: (bpm: number) => void;
+  addTempoMarker: (marker: TempoMarker) => void;
+  removeTempoMarker: (id: string) => void;
+  updateTempoMarker: (id: string, updates: Partial<TempoMarker>) => void;
+  setTempoMarkers: (markers: TempoMarker[]) => void;
   setKey: (key: NoteClass) => void;
   setScale: (scale: ScaleType) => void;
   setIsAutoKey: (isAutoKey: boolean) => void;
@@ -68,9 +77,14 @@ export interface TransportActions {
 export interface HarmonyState {
   chordBlocks: ChordBlock[];
   selectedChordId: string | null;
+  selectedChordIds: string[];
+  chordGridSnap: '1' | '1/2' | '1/4';
+  chordClipboard: ChordBlock[];
+  chordTimelineViewport: { scrollLeft: number; zoomLevel: number };
   chordSuggestions: ChordSuggestion[];
   ghostNotes: GhostNote[];
   paletteMode: PaletteMode;
+  matrixMode: MatrixMode;
   pattern: string;
   customPatterns: PatternDef[];
   chordOctaveShift: number;
@@ -85,7 +99,20 @@ export interface HarmonyActions {
   updateChordBlock: (id: string, updates: Partial<Omit<ChordBlock, 'id'>>) => void;
   removeChordBlock: (id: string) => void;
   setSelectedChordId: (id: string | null) => void;
+  setSelectedChordIds: (ids: string[]) => void;
+  toggleSelectChordId: (id: string, multi?: boolean) => void;
+  selectAllChords: () => void;
+  setChordGridSnap: (gridSnap: '1' | '1/2' | '1/4') => void;
+  setChordTimelineViewport: (viewport: Partial<{ scrollLeft: number; zoomLevel: number }>) => void;
+  resetChordTimelineScroll: () => void;
+  copySelectedChords: () => void;
+  cutSelectedChords: () => void;
+  pasteChords: (targetBeat?: number) => void;
+  duplicateSelectedChords: () => void;
+  deleteSelectedChords: () => void;
+  moveSelectedChords: (deltaBeats: number) => void;
   setPaletteMode: (paletteMode: PaletteMode) => void;
+  setMatrixMode: (matrixMode: MatrixMode) => void;
   setPattern: (pattern: string) => void;
   setCustomPatterns: (customPatterns: PatternDef[]) => void;
   setChordOctaveShift: (chordOctaveShift: number) => void;
@@ -113,6 +140,7 @@ export interface TrackActions {
   renamePianoRollTrack: (id: string, name: string) => void;
   setActiveTrackId: (id: string) => void;
   updateTrackViewport: (id: string, viewport: Partial<PianoRollTrack['viewport']>) => void;
+  resetActiveTrackScroll: () => void;
   setTrackNotes: (trackId: string, notes: MelodyNote[]) => void;
   addMelodyNote: (note: Omit<MelodyNote, 'id'>) => void;
   updateMelodyNote: (id: string, updates: Partial<Omit<MelodyNote, 'id'>>) => void;
@@ -129,6 +157,9 @@ export interface DrumState {
   isLiveFollowLocked: boolean;
   clipboardPattern: DrumStep[][] | null;
   patternChain: PatternChainItem[];
+  selectedChainIds: string[];
+  chainClipboard: PatternChainItem[];
+  drumTimelineViewport: { scrollLeft: number; zoomLevel: number };
   isPatternRepeatOn: boolean;
   currentChainItemId: string | null;
 }
@@ -145,8 +176,24 @@ export interface DrumActions {
   setDrumStepVelocity: (channelId: string, stepIndex: number, patternIndex: number, velocity: number) => void;
   copyDrumPattern: (sourcePatternIndex: number) => void;
   pasteDrumPattern: (targetPatternIndex: number) => void;
+  addDrumPattern: () => number;
+  duplicateDrumPattern: (sourceIndex: number) => number;
+  removeDrumPattern: (targetIndex: number) => void;
+  clearDrumPattern: (targetIndex: number) => void;
   setPatternRepeatOn: (active: boolean) => void;
   setCurrentChainItemId: (id: string | null) => void;
+  setSelectedChainIds: (ids: string[]) => void;
+  toggleSelectChainId: (id: string, multi?: boolean) => void;
+  selectAllChainItems: () => void;
+  copySelectedChainItems: () => void;
+  cutSelectedChainItems: () => void;
+  pasteChainItems: (targetId?: string) => void;
+  duplicateSelectedChainItems: () => void;
+  deleteSelectedChainItems: () => void;
+  groupSelectedChainItems: () => void;
+  ungroupSelectedChainItems: () => void;
+  setDrumTimelineViewport: (viewport: Partial<{ scrollLeft: number; zoomLevel: number }>) => void;
+  resetDrumTimelineScroll: () => void;
   addChainItem: (patternIndex: number, repeatCount?: number) => void;
   updateChainItem: (id: string, updates: Partial<PatternChainItem>) => void;
   removeChainItem: (id: string) => void;

@@ -89,6 +89,7 @@ export const useSongStore = create<SongStore>()(
 
         set({
           bpm: session.transport.bpm,
+          tempoMarkers: session.transport.tempoMarkers || [],
           key: session.transport.key,
           scale: session.transport.scale,
           isAutoKey: session.transport.isAutoKey,
@@ -98,6 +99,8 @@ export const useSongStore = create<SongStore>()(
           chordBlocks: session.harmony.chordBlocks,
           styleMarkers: session.harmony.styleMarkers,
           chordOctaveShift: session.harmony.chordOctaveShift,
+          chordGridSnap: session.harmony.chordGridSnap || '1',
+          chordTimelineViewport: session.harmony.chordTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 },
           tracks: session.tracks,
           activeTrackId: session.activeTrackId,
           melodyNotes: activeMelodyNotes,
@@ -105,27 +108,39 @@ export const useSongStore = create<SongStore>()(
           isPatternRepeatOn: session.drums.isPatternRepeatOn,
           activeDrumKitId: session.drums.activeDrumKitId,
           drumChannels: session.drums.drumChannels,
+          drumTimelineViewport: session.drums.drumTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 },
+          selectedChainIds: [],
           channels: session.mixer.channels,
           channelOrder: session.mixer.channelOrder,
           selectedChordId: null,
+          selectedChordIds: [],
           currentBeat: 0,
           isPlaying: false,
-          ...(session.ui?.isCrtEnabled !== undefined && { isCrtEnabled: session.ui.isCrtEnabled }),
-          ...(session.ui?.crtParams && { crtParams: { ...get().crtParams, ...session.ui.crtParams } }),
+          isCrtEnabled: get().isCrtEnabled,
           ...(session.ui?.isKeyboardMelodyEnabled !== undefined && { isKeyboardMelodyEnabled: session.ui.isKeyboardMelodyEnabled }),
           ...(session.ui?.isKeyboardChromatic !== undefined && { isKeyboardChromatic: session.ui.isKeyboardChromatic }),
           ...(session.ui?.keyboardCenterNote && { keyboardCenterNote: session.ui.keyboardCenterNote })
         });
 
         get().updateSuggestions();
+
+        // Pre-cargar todos los samples de batería, piano y nodos de audio del proyecto importado
+        import('../audio/toneEngine').then(({ toneEngine }) => {
+          toneEngine.preloadProjectAudio(session.mixer.channels, session.drums.drumChannels);
+        }).catch((err) => {
+          console.warn('[songStore] Advertencia al pre-cargar audio del proyecto importado:', err);
+        });
       }
     }),
     {
       partialize: (state) => ({
         bpm: state.bpm,
+        tempoMarkers: state.tempoMarkers,
         key: state.key,
         scale: state.scale,
         chordBlocks: state.chordBlocks,
+        chordGridSnap: state.chordGridSnap,
+        chordTimelineViewport: state.chordTimelineViewport,
         tracks: state.tracks,
         styleMarkers: state.styleMarkers,
         timeSignature: state.timeSignature,
@@ -133,6 +148,7 @@ export const useSongStore = create<SongStore>()(
         chordOctaveShift: state.chordOctaveShift,
         drumChannels: state.drumChannels,
         patternChain: state.patternChain,
+        drumTimelineViewport: state.drumTimelineViewport,
       }),
     }
   )

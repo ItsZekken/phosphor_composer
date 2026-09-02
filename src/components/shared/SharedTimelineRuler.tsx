@@ -14,7 +14,7 @@ export const SharedTimelineRuler: React.FC<SharedTimelineRulerProps> = React.mem
   TOTAL_BEATS, 
   beatWidth, 
   canvasWidth, 
-  chordBlocks, 
+  chordBlocks = [], 
   setCurrentBeat,
   beatsPerMeasure = 4
 }) => {
@@ -34,6 +34,9 @@ export const SharedTimelineRuler: React.FC<SharedTimelineRulerProps> = React.mem
       style={{ 
         width: `${canvasWidth}px`, 
         height: '42px', 
+        minHeight: '42px',
+        maxHeight: '42px',
+        boxSizing: 'border-box',
         position: 'sticky', 
         top: 0, 
         zIndex: 10,

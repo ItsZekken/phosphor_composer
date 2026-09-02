@@ -1,15 +1,18 @@
 /**
  * DrumSoundManager.ts
  * Gestor de reproducción de muestras de batería y síntesis de percusión con Tone.js.
+ * Incluye caché global de AudioBuffers decodificados y pre-carga instantánea zero-latency.
  */
 
 import * as Tone from 'tone';
 import type { MixerGraph } from './MixerGraph';
 
 export class DrumSoundManager {
-  private drumPlayers = new Map<string, { player: Tone.Player; sampleUrl: string }>();
+  private activeSources = new Set<Tone.ToneBufferSource>();
   private drumChannelNodes = new Map<string, { volumeNode: Tone.Volume; pannerNode: Tone.Panner }>();
   private drumSynths = new Map<string, Tone.MembraneSynth | Tone.NoiseSynth | Tone.MetalSynth>();
+  private bufferCache = new Map<string, Tone.ToneAudioBuffer>();
+  private loadingPromises = new Map<string, Promise<Tone.ToneAudioBuffer | null>>();
   private mixerGraph: MixerGraph;
 
   constructor(mixerGraph: MixerGraph) {
@@ -78,22 +81,73 @@ export class DrumSoundManager {
     this.getChannelAudioNode(channelId, pan);
   }
 
+  /**
+   * Pre-carga un archivo de audio y lo almacena decodificado en la caché de buffers.
+   */
+  public async preloadSample(sampleUrl: string): Promise<Tone.ToneAudioBuffer | null> {
+    if (!sampleUrl || (!sampleUrl.startsWith('/') && !sampleUrl.endsWith('.wav') && !sampleUrl.endsWith('.mp3'))) {
+      return null;
+    }
+    const cached = this.bufferCache.get(sampleUrl);
+    if (cached && (cached as any).loaded) {
+      return cached;
+    }
+    if (this.loadingPromises.has(sampleUrl)) {
+      return this.loadingPromises.get(sampleUrl)!;
+    }
+
+    const promise = new Promise<Tone.ToneAudioBuffer | null>((resolve) => {
+      try {
+        const buffer = new Tone.ToneAudioBuffer(
+          sampleUrl,
+          () => {
+            this.bufferCache.set(sampleUrl, buffer);
+            this.loadingPromises.delete(sampleUrl);
+            resolve(buffer);
+          },
+          (err) => {
+            console.warn(`[DrumSoundManager] Error pre-cargando buffer de audio: ${sampleUrl}`, err);
+            this.loadingPromises.delete(sampleUrl);
+            resolve(null);
+          }
+        );
+      } catch (e) {
+        console.warn(`[DrumSoundManager] Excepción al pre-cargar buffer: ${sampleUrl}`, e);
+        this.loadingPromises.delete(sampleUrl);
+        resolve(null);
+      }
+    });
+
+    this.loadingPromises.set(sampleUrl, promise);
+    return promise;
+  }
+
+  /**
+   * Pre-carga anticipadamente los buffers de audio y nodos de canal de batería.
+   */
+  public async preloadChannels(channels: Array<{ id: string; sampleUrl: string; pan?: number }>): Promise<void> {
+    if (!channels || channels.length === 0) return;
+
+    await Promise.all(
+      channels.map(async (ch) => {
+        if (!ch.sampleUrl) return;
+        this.getChannelAudioNode(ch.id, ch.pan ?? 0);
+        await this.preloadSample(ch.sampleUrl);
+      })
+    );
+  }
+
   public getLoadedBuffers(): Map<string, any> {
     const map = new Map<string, any>();
-    this.drumPlayers.forEach(({ player, sampleUrl }) => {
-      if (player && player.buffer && (player.buffer as any).loaded) {
-        map.set(sampleUrl, player.buffer);
+    this.bufferCache.forEach((buffer, url) => {
+      if (buffer && (buffer as any).loaded) {
+        map.set(url, buffer);
       }
     });
     return map;
   }
 
   public removeDrumPlayer(channelId: string) {
-    const cachedPlayer = this.drumPlayers.get(channelId);
-    if (cachedPlayer) {
-      try { cachedPlayer.player.dispose(); } catch (_) {}
-      this.drumPlayers.delete(channelId);
-    }
     const cachedNode = this.drumChannelNodes.get(channelId);
     if (cachedNode) {
       try { cachedNode.volumeNode.dispose(); } catch (_) {}
@@ -102,51 +156,43 @@ export class DrumSoundManager {
     }
   }
 
-  private getOrCreateDrumPlayer(channelId: string, sampleUrl: string, pan: number): {
-    player: Tone.Player | null;
-    channelNode: { volumeNode: Tone.Volume; pannerNode: Tone.Panner };
-  } {
-    const channelNode = this.getChannelAudioNode(channelId, pan);
-    const cached = this.drumPlayers.get(channelId);
-
-    if (cached) {
-      if (cached.sampleUrl === sampleUrl) {
-        return { player: cached.player, channelNode };
-      }
-      try { cached.player.dispose(); } catch (_) {}
-      this.drumPlayers.delete(channelId);
-    }
-
-    if (sampleUrl.startsWith('/') || sampleUrl.endsWith('.wav') || sampleUrl.endsWith('.mp3')) {
-      const player = new Tone.Player({
-        url: sampleUrl,
-        autostart: false,
-        onerror: (err) => {
-          console.warn(`[DrumSoundManager] Error cargando sample de batería: ${sampleUrl}`, err);
-        }
-      }).connect(channelNode.volumeNode);
-
-      this.drumPlayers.set(channelId, { player, sampleUrl });
-      return { player, channelNode };
-    }
-
-    return { player: null, channelNode };
-  }
-
+  /**
+   * Dispara una muestra de batería de forma polifónica y superponible (Polyphonic One-Shot).
+   * Los sonidos largos (crashes, open hihats, 808s) continúan sonando naturalmente
+   * sin cortarse cuando se activa un nuevo golpe en el mismo canal.
+   */
   public triggerDrumSound(channelId: string, sampleUrl: string, volDb: number, pan: number, time?: number) {
-    const { player, channelNode } = this.getOrCreateDrumPlayer(channelId, sampleUrl, pan);
-    channelNode.volumeNode.volume.value = volDb;
+    const channelNode = this.getChannelAudioNode(channelId, pan);
 
-    if (player && player.loaded) {
-      if (time !== undefined) {
-        player.start(time);
-      } else {
-        player.start();
-      }
-      return;
+    // 1. Obtener buffer pre-cargado desde caché
+    let cachedBuffer = this.bufferCache.get(sampleUrl);
+
+    if (!cachedBuffer && (sampleUrl.startsWith('/') || sampleUrl.endsWith('.wav') || sampleUrl.endsWith('.mp3'))) {
+      this.preloadSample(sampleUrl);
     }
 
-    // Fallback sintético si el sample no ha cargado
+    if (cachedBuffer && (cachedBuffer as any).loaded) {
+      try {
+        const source = new Tone.ToneBufferSource(cachedBuffer);
+        source.connect(channelNode.volumeNode);
+
+        const gainFactor = Tone.dbToGain(volDb);
+        source.start(time, 0, undefined, gainFactor);
+
+        this.activeSources.add(source);
+        source.onended = () => {
+          this.activeSources.delete(source);
+          try {
+            source.dispose();
+          } catch (_) {}
+        };
+        return;
+      } catch (e) {
+        console.warn(`[DrumSoundManager] Error disparando muestra polifónica ${sampleUrl}:`, e);
+      }
+    }
+
+    // 2. Fallback sintético si el buffer aún no está disponible
     let synth = this.drumSynths.get(sampleUrl);
     if (!synth) {
       const urlLower = sampleUrl.toLowerCase();
@@ -180,11 +226,21 @@ export class DrumSoundManager {
     }
   }
 
-  public dispose() {
-    this.drumPlayers.forEach(({ player }) => {
-      try { player.dispose(); } catch (_) {}
+  /**
+   * Detiene inmediatamente todas las muestras de batería activas al pausar/detener la reproducción.
+   */
+  public stopAll() {
+    this.activeSources.forEach((source) => {
+      try {
+        source.stop();
+        source.dispose();
+      } catch (_) {}
     });
-    this.drumPlayers.clear();
+    this.activeSources.clear();
+  }
+
+  public dispose() {
+    this.stopAll();
 
     this.drumChannelNodes.forEach(({ volumeNode, pannerNode }) => {
       try { volumeNode.dispose(); } catch (_) {}
@@ -196,5 +252,11 @@ export class DrumSoundManager {
       try { synth.dispose(); } catch (_) {}
     });
     this.drumSynths.clear();
+
+    this.bufferCache.forEach((buf) => {
+      try { buf.dispose(); } catch (_) {}
+    });
+    this.bufferCache.clear();
+    this.loadingPromises.clear();
   }
 }

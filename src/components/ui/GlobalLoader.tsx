@@ -18,13 +18,11 @@ export const GlobalLoader: React.FC = () => {
 
     const autoBoot = async () => {
       try {
-        // Inicializar audio
+        // Inicializar audio y pre-cargar todos los samples (batería, piano y nodos de mezcla)
         await toneEngine.init();
         if (!isMounted) return;
 
-        if (instrumentType === 'piano') {
-          await toneEngine.setInstrument('piano');
-        }
+        await toneEngine.preloadProjectAudio();
         if (!isMounted) return;
 
         // Breve pausa para contemplar el logo antes de abrir la cortina

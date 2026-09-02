@@ -4,7 +4,7 @@
  */
 
 import type { NoteClass } from './pitchClass';
-import { noteToMod12 } from './pitchClass';
+import { noteToMod12, mod12ToNote } from './pitchClass';
 import { parseChord, getChordNotes } from './chordParser';
 import type { ScaleType } from './scaleDefinitions';
 import { getDiatonicChords, getChordRomanDegree } from './scaleDefinitions';
@@ -108,7 +108,7 @@ export function getHarmonicSuggestions(
     });
   });
 
-  // Agregar intercambio modal (Spicy)
+  // Agregar intercambio modal (Spicy / Préstamos emocionales)
   parallelDiatonicBases.forEach((chordBase, index) => {
     if (!diatonicBases.includes(chordBase)) {
       const isDominant = index === 4;
@@ -119,12 +119,52 @@ export function getHarmonicSuggestions(
         const probPenalty = varIndex * 0.05;
         rawSuggestions.push({
           chord: varChord,
-          baseProb: Math.max(0.18, 0.42 - probPenalty),
+          baseProb: Math.max(0.20, 0.44 - probPenalty),
           category: 'spicy'
         });
       });
     }
   });
+
+  // Agregar acordes de paso cromático y aumentados si hay un acorde previo
+  if (chordProgression.length > 0) {
+    const last1 = chordProgression[chordProgression.length - 1];
+    if (last1) {
+      const parsedLast = parseChord(last1);
+      if (parsedLast) {
+        const lastRootVal = noteToMod12(parsedLast.root);
+
+        // Aumentado de paso (Line cliché: ej Dm -> Dbaug o D -> Daug)
+        const semitoneBelow = mod12ToNote((lastRootVal + 11) % 12);
+        rawSuggestions.push({
+          chord: `${semitoneBelow}aug`,
+          baseProb: 0.38,
+          category: 'spicy'
+        });
+        rawSuggestions.push({
+          chord: `${parsedLast.root}aug`,
+          baseProb: 0.36,
+          category: 'spicy'
+        });
+
+        // Aproximación cromática de semitono
+        const upperApproch = mod12ToNote((lastRootVal + 1) % 12);
+        rawSuggestions.push({
+          chord: upperApproch,
+          baseProb: 0.32,
+          category: 'spicy'
+        });
+
+        // Disminuido de paso
+        const sharpRoot = mod12ToNote((lastRootVal + 1) % 12);
+        rawSuggestions.push({
+          chord: `${sharpRoot}dim`,
+          baseProb: 0.34,
+          category: 'tensión'
+        });
+      }
+    }
+  }
 
   // Deduplicación inicial
   const seen = new Set<string>();

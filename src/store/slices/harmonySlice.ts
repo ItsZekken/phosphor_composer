@@ -1,17 +1,22 @@
 import type { SliceCreator, HarmonyState, HarmonyActions } from '../types';
-import type { ChordBlock } from '../../utils/typeDefinitions';
+import type { ChordBlock, NoteClass } from '../../utils/typeDefinitions';
 import { getHarmonicSuggestions, detectKey } from '../../core/music';
-import { loadCustomPatterns, invalidatePatternCache } from '../../patterns/patternLoader';
+import { loadCustomPatterns, invalidatePatternCache, getDefaultCustomPatterns } from '../../patterns/patternLoader';
 import { generateId } from '../../utils/idGenerator';
 
 export const initialHarmonyState: HarmonyState = {
   chordBlocks: [],
   selectedChordId: null,
+  selectedChordIds: [],
+  chordGridSnap: '1',
+  chordClipboard: [],
+  chordTimelineViewport: { scrollLeft: 0, zoomLevel: 1.0 },
   chordSuggestions: [],
   ghostNotes: [],
   paletteMode: 'matrix',
+  matrixMode: 'diatonic',
   pattern: 'hold',
-  customPatterns: [],
+  customPatterns: getDefaultCustomPatterns(),
   chordOctaveShift: 0,
   styleMarkers: [],
   isAutoSuggestions: false,
@@ -23,6 +28,7 @@ export const createHarmonySlice: SliceCreator<HarmonyState & HarmonyActions> = (
   ...initialHarmonyState,
 
   setPaletteMode: (paletteMode) => set({ paletteMode }),
+  setMatrixMode: (matrixMode) => set({ matrixMode }),
   setPattern: (pattern) => set({ pattern }),
   setCustomPatterns: (customPatterns) => set({ customPatterns }),
   setChordOctaveShift: (chordOctaveShift) => set({ chordOctaveShift }),
@@ -30,6 +36,15 @@ export const createHarmonySlice: SliceCreator<HarmonyState & HarmonyActions> = (
   setAutoSuggestions: (isAutoSuggestions) => set({ isAutoSuggestions }),
   setDraggingChord: (draggingChord) => set({ draggingChord }),
   setDraggingStyle: (draggingStyle) => set({ draggingStyle }),
+  setChordGridSnap: (chordGridSnap) => set({ chordGridSnap }),
+
+  setChordTimelineViewport: (viewport) => set((state) => ({
+    chordTimelineViewport: { ...state.chordTimelineViewport, ...viewport }
+  })),
+
+  resetChordTimelineScroll: () => set((state) => ({
+    chordTimelineViewport: { ...state.chordTimelineViewport, scrollLeft: 0 }
+  })),
 
   addChordBlock: (chord, startBeat, durationBeats = 4) => {
     const newBlock: ChordBlock = {
@@ -40,7 +55,11 @@ export const createHarmonySlice: SliceCreator<HarmonyState & HarmonyActions> = (
     };
     set((state) => {
       const filtered = state.chordBlocks.filter(b => b.startBeat !== startBeat);
-      return { chordBlocks: [...filtered, newBlock].sort((a, b) => a.startBeat - b.startBeat) };
+      return {
+        chordBlocks: [...filtered, newBlock].sort((a, b) => a.startBeat - b.startBeat),
+        selectedChordId: newBlock.id,
+        selectedChordIds: [newBlock.id]
+      };
     });
     if (get().isAutoSuggestions) get().updateSuggestions();
   },
@@ -56,13 +75,175 @@ export const createHarmonySlice: SliceCreator<HarmonyState & HarmonyActions> = (
   removeChordBlock: (id) => {
     set((state) => ({
       chordBlocks: state.chordBlocks.filter(b => b.id !== id),
-      selectedChordId: state.selectedChordId === id ? null : state.selectedChordId
+      selectedChordId: state.selectedChordId === id ? null : state.selectedChordId,
+      selectedChordIds: state.selectedChordIds.filter(selectedId => selectedId !== id)
     }));
     if (get().isAutoSuggestions) get().updateSuggestions();
   },
 
   setSelectedChordId: (selectedChordId) => {
-    set({ selectedChordId });
+    set({
+      selectedChordId,
+      selectedChordIds: selectedChordId ? [selectedChordId] : []
+    });
+    if (get().isAutoSuggestions) get().updateSuggestions();
+  },
+
+  setSelectedChordIds: (selectedChordIds) => {
+    set({
+      selectedChordIds,
+      selectedChordId: selectedChordIds[0] || null
+    });
+    if (get().isAutoSuggestions) get().updateSuggestions();
+  },
+
+  toggleSelectChordId: (id, multi = false) => {
+    set((state) => {
+      if (!multi) {
+        return {
+          selectedChordId: id,
+          selectedChordIds: id ? [id] : []
+        };
+      }
+      const exists = state.selectedChordIds.includes(id);
+      const nextIds = exists
+        ? state.selectedChordIds.filter(i => i !== id)
+        : [...state.selectedChordIds, id];
+      return {
+        selectedChordIds: nextIds,
+        selectedChordId: nextIds[0] || null
+      };
+    });
+    if (get().isAutoSuggestions) get().updateSuggestions();
+  },
+
+  selectAllChords: () => {
+    set((state) => ({
+      selectedChordIds: state.chordBlocks.map(b => b.id),
+      selectedChordId: state.chordBlocks[0]?.id || null
+    }));
+  },
+
+  copySelectedChords: () => {
+    const { chordBlocks, selectedChordIds } = get();
+    if (selectedChordIds.length === 0) return;
+    const selected = chordBlocks.filter(b => selectedChordIds.includes(b.id));
+    if (selected.length === 0) return;
+    set({ chordClipboard: JSON.parse(JSON.stringify(selected)) });
+  },
+
+  cutSelectedChords: () => {
+    const { chordBlocks, selectedChordIds } = get();
+    if (selectedChordIds.length === 0) return;
+    const selected = chordBlocks.filter(b => selectedChordIds.includes(b.id));
+    if (selected.length === 0) return;
+    set((state) => ({
+      chordClipboard: JSON.parse(JSON.stringify(selected)),
+      chordBlocks: state.chordBlocks.filter(b => !selectedChordIds.includes(b.id)),
+      selectedChordId: null,
+      selectedChordIds: []
+    }));
+    if (get().isAutoSuggestions) get().updateSuggestions();
+  },
+
+  pasteChords: (targetBeat) => {
+    const { chordClipboard, chordBlocks } = get();
+    if (!chordClipboard || chordClipboard.length === 0) return;
+
+    // Determinar beat base de pegado
+    const baseBeat = targetBeat !== undefined
+      ? targetBeat
+      : get().currentBeat || 0;
+
+    const sortedClipboard = [...chordClipboard].sort((a, b) => a.startBeat - b.startBeat);
+    const minStart = sortedClipboard[0].startBeat;
+
+    const newBlocks: ChordBlock[] = sortedClipboard.map((b) => {
+      const offset = b.startBeat - minStart;
+      return {
+        ...b,
+        id: generateId('cb'),
+        startBeat: baseBeat + offset
+      };
+    });
+
+    const newIds = newBlocks.map(b => b.id);
+    const newStartBeats = new Set(newBlocks.map(b => b.startBeat));
+
+    set({
+      chordBlocks: [
+        ...chordBlocks.filter(b => !newStartBeats.has(b.startBeat)),
+        ...newBlocks
+      ].sort((a, b) => a.startBeat - b.startBeat),
+      selectedChordIds: newIds,
+      selectedChordId: newIds[0] || null
+    });
+
+    if (get().isAutoSuggestions) get().updateSuggestions();
+  },
+
+  duplicateSelectedChords: () => {
+    const { chordBlocks, selectedChordIds } = get();
+    if (selectedChordIds.length === 0) return;
+    const selected = chordBlocks.filter(b => selectedChordIds.includes(b.id));
+    if (selected.length === 0) return;
+
+    const sortedSelected = [...selected].sort((a, b) => a.startBeat - b.startBeat);
+    const minStart = sortedSelected[0].startBeat;
+    const maxEnd = sortedSelected.reduce((max, b) => Math.max(max, b.startBeat + b.durationBeats), 0);
+    const totalSpan = maxEnd - minStart;
+
+    const duplicatedBlocks: ChordBlock[] = sortedSelected.map((b) => ({
+      ...b,
+      id: generateId('cb'),
+      startBeat: b.startBeat + totalSpan
+    }));
+
+    const newIds = duplicatedBlocks.map(b => b.id);
+    const newStartBeats = new Set(duplicatedBlocks.map(b => b.startBeat));
+
+    set({
+      chordBlocks: [
+        ...chordBlocks.filter(b => !newStartBeats.has(b.startBeat)),
+        ...duplicatedBlocks
+      ].sort((a, b) => a.startBeat - b.startBeat),
+      selectedChordIds: newIds,
+      selectedChordId: newIds[0] || null
+    });
+
+    if (get().isAutoSuggestions) get().updateSuggestions();
+  },
+
+  deleteSelectedChords: () => {
+    const { selectedChordIds } = get();
+    if (selectedChordIds.length === 0) return;
+    set((state) => ({
+      chordBlocks: state.chordBlocks.filter(b => !selectedChordIds.includes(b.id)),
+      selectedChordId: null,
+      selectedChordIds: []
+    }));
+    if (get().isAutoSuggestions) get().updateSuggestions();
+  },
+
+  moveSelectedChords: (deltaBeats) => {
+    if (deltaBeats === 0) return;
+    const { selectedChordIds, chordBlocks } = get();
+    if (selectedChordIds.length === 0) return;
+
+    const selected = chordBlocks.filter(b => selectedChordIds.includes(b.id));
+    const minStart = selected.reduce((min, b) => Math.min(min, b.startBeat), Infinity);
+    const safeDelta = Math.max(-minStart, deltaBeats);
+
+    set((state) => ({
+      chordBlocks: state.chordBlocks.map((b) => {
+        if (!state.selectedChordIds.includes(b.id)) return b;
+        return {
+          ...b,
+          startBeat: Math.max(0, b.startBeat + safeDelta)
+        };
+      }).sort((a, b) => a.startBeat - b.startBeat)
+    }));
+
     if (get().isAutoSuggestions) get().updateSuggestions();
   },
 
@@ -96,61 +277,45 @@ export const createHarmonySlice: SliceCreator<HarmonyState & HarmonyActions> = (
   updateSuggestions: () => {
     const state = get();
     const { chordBlocks, tracks, activeTrackId, selectedChordId, currentBeat } = state;
-    let { key, scale } = state;
 
-    // --- Auto-detección de tonalidad ---
-    if (state.isAutoKey && chordBlocks.length > 0) {
-      const chordNames = chordBlocks.map(b => b.chord);
-      const detected = detectKey(chordNames);
-      if (detected) {
-        const detectedLabel = `${detected.key} ${detected.scale}`;
-        if (state.detectedKey !== detectedLabel) {
-          set({ key: detected.key, scale: detected.scale, detectedKey: detectedLabel });
-        }
-        key = detected.key;
-        scale = detected.scale;
-      }
-    } else if (state.isAutoKey && chordBlocks.length === 0) {
-      set({ detectedKey: null });
+    if (chordBlocks.length === 0) {
+      set({ chordSuggestions: [], ghostNotes: [] });
+      return;
     }
 
-    // --- Extraer notas melódicas del compás activo desde la fuente única (tracks) ---
-    let chordProgression: string[] = [];
-    let startRange = 0;
-    let endRange = 16;
+    const currentBlock = selectedChordId
+      ? chordBlocks.find((b) => b.id === selectedChordId)
+      : chordBlocks.find(
+          (b) => currentBeat >= b.startBeat && currentBeat < b.startBeat + b.durationBeats
+        ) || chordBlocks[chordBlocks.length - 1];
 
-    if (selectedChordId) {
-      const selectedIdx = chordBlocks.findIndex(b => b.id === selectedChordId);
-      if (selectedIdx !== -1) {
-        const selected = chordBlocks[selectedIdx];
-        chordProgression = chordBlocks.slice(0, selectedIdx + 1).map(b => b.chord);
-        startRange = selected.startBeat;
-        endRange = selected.startBeat + selected.durationBeats;
-      }
-    } else {
-      const currentMeasure = Math.floor(currentBeat / 4);
-      startRange = currentMeasure * 4;
-      endRange = startRange + 4;
-      chordProgression = chordBlocks.map(b => b.chord);
+    if (!currentBlock) {
+      set({ chordSuggestions: [] });
+      return;
     }
 
-    const currentTrack = tracks.find(t => t.id === activeTrackId) || tracks[0];
-    const trackNotes = currentTrack ? currentTrack.notes : [];
+    const effectiveKey = (state.key || detectKey(chordBlocks.map((b) => b.chord))) as NoteClass;
+    const suggestions = getHarmonicSuggestions(
+      effectiveKey,
+      state.scale,
+      chordBlocks.map((b) => b.chord)
+    );
 
-    const activeMelodyNotes = trackNotes.filter(n => {
-      const noteEnd = n.startBeat + n.durationBeats;
-      return n.startBeat < endRange && noteEnd > startRange;
-    });
+    const activeTrack = tracks.find((t) => t.id === activeTrackId);
+    const activeMelodyNotes = activeTrack ? activeTrack.notes : [];
 
-    const uniquePitchClasses = Array.from(new Set(activeMelodyNotes.map(n => n.midi % 12)));
-    const suggestions = getHarmonicSuggestions(key, scale, chordProgression, uniquePitchClasses);
+    const activeNotesAtTime = activeMelodyNotes.filter(
+      (n) => n.startBeat >= currentBlock.startBeat && n.startBeat < currentBlock.startBeat + currentBlock.durationBeats
+    );
 
-    const currentSuggestions = state.chordSuggestions;
-    const isSame = currentSuggestions.length === suggestions.length &&
-      currentSuggestions.every((s, i) => s.chord === suggestions[i].chord && s.probability === suggestions[i].probability);
+    const ghostNotes = activeNotesAtTime.map((n) => ({
+      id: n.id,
+      note: n.note,
+      midi: n.midi,
+      startBeat: n.startBeat,
+      durationBeats: n.durationBeats
+    }));
 
-    if (!isSame) {
-      set({ chordSuggestions: suggestions });
-    }
-  },
+    set({ chordSuggestions: suggestions, ghostNotes });
+  }
 });

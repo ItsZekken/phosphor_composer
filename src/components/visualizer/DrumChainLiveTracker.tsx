@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { useSongStore } from '../../store/songStore';
-import { Drum } from 'lucide-react';
+import { Drum, VolumeX } from 'lucide-react';
 import { flattenPatternChain } from '../../utils/typeDefinitions';
 import type { PatternChainItem } from '../../utils/typeDefinitions';
 
@@ -22,67 +22,46 @@ export const DrumChainLiveTracker: React.FC = React.memo(() => {
   const currentChainItemId = useSongStore((state) => state.currentChainItemId);
   const playbackStep = useSongStore((state) => state.playbackStep);
   const isPlaying = useSongStore((state) => state.isPlaying);
-  const drumChannels = useSongStore((state) => state.drumChannels);
 
-  // Aplanar la cadena de patrones para visualización continua
-  const flatChain = useMemo(() => {
-    if (!patternChain || patternChain.length === 0) return [];
-    return flattenPatternChain(patternChain);
+  // Determinar número total de pasos de la cadena completa
+  const totalMeasures = useMemo(() => {
+    return flattenPatternChain(patternChain).length;
   }, [patternChain]);
 
-  // Si no hay cadena o está en modo repetición de un solo patrón
-  if (isPatternRepeatOn || flatChain.length === 0) {
-    const activeColor = DRUM_PATTERN_COLORS[currentDrumPatternEdit % DRUM_PATTERN_COLORS.length];
-
+  // Si no hay cadena o está vacía
+  if (!patternChain || patternChain.length === 0) {
     return (
-      <div className="stage-drum-tracker">
-        <div className="stage-drum-header">
-          <Drum size={12} style={{ color: activeColor }} />
-          <span className="stage-drum-num" style={{ color: activeColor }}>
-            P{currentDrumPatternEdit + 1}
-          </span>
-        </div>
-
-        {/* 16 pasos LED en vivo */}
-        <div className="stage-step-strip">
-          {Array.from({ length: 16 }).map((_, stepIdx) => {
-            const isStepActive = playbackStep === stepIdx && isPlaying;
-            // Verificar si algún canal tiene golpe en este paso
-            const hasHit = drumChannels.some(
-              (ch) => ch.patterns?.[currentDrumPatternEdit]?.[stepIdx]?.isActive
-            );
-
-            return (
-              <span
-                key={stepIdx}
-                className={`stage-step-dot ${isStepActive ? 'active' : ''} ${hasHit ? 'has-hit' : ''}`}
-                style={{
-                  backgroundColor: isStepActive
-                    ? '#ffffff'
-                    : hasHit
-                    ? activeColor
-                    : 'rgba(255, 255, 255, 0.08)',
-                  boxShadow: isStepActive ? `0 0 8px ${activeColor}` : undefined
-                }}
-              />
-            );
-          })}
+      <div className="stage-drum-chain-tracker empty">
+        <div className="stage-drum-chain-meta">
+          <Drum size={13} className="stage-drum-icon" />
+          <span className="stage-drum-label">PATRÓN ÚNICO P{currentDrumPatternEdit + 1} (LOOP)</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="stage-drum-tracker">
-      <div className="stage-drum-header">
-        <Drum size={12} />
+    <div className="stage-drum-chain-tracker">
+      <div className="stage-drum-chain-meta">
+        <div className="stage-drum-meta-left">
+          <Drum size={13} className="stage-drum-icon" />
+          <span className="stage-drum-label">
+            CADENA DE BATERÍA ({patternChain.length} {patternChain.length === 1 ? 'bloque' : 'bloques'} · {totalMeasures} {totalMeasures === 1 ? 'compás' : 'compases'})
+          </span>
+        </div>
+        {isPatternRepeatOn && (
+          <span className="stage-chain-repeat-warning" title="El botón 'Repetir Patrón' está activo: ignorando la cadena">
+            [MODO LOOP 1 PATRÓN ACTIVO]
+          </span>
+        )}
       </div>
 
       {/* Cadena visual de bloques de patrones */}
       <div className="stage-drum-chain-blocks">
         {patternChain.map((item: PatternChainItem, idx: number) => {
-          const patternIdx = item.patternIndex ?? 0;
-          const color = DRUM_PATTERN_COLORS[patternIdx % DRUM_PATTERN_COLORS.length];
+          const isRest = item.type === 'rest' || item.patternIndex === -1;
+          const patternIdx = isRest ? -1 : (item.patternIndex ?? 0);
+          const color = isRest ? 'rgba(255, 255, 255, 0.35)' : DRUM_PATTERN_COLORS[patternIdx % DRUM_PATTERN_COLORS.length];
           const isItemActive = item.id === currentChainItemId && isPlaying;
 
           return (
@@ -95,16 +74,20 @@ export const DrumChainLiveTracker: React.FC = React.memo(() => {
               }}
             >
               <div className="stage-drum-chain-tag">
-                <span className="stage-drum-chip" style={{ backgroundColor: color }}>
-                  P{patternIdx + 1}
+                <span className="stage-drum-chip" style={{ backgroundColor: color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {isRest ? (
+                    <VolumeX size={11} />
+                  ) : (
+                    `P${patternIdx + 1}`
+                  )}
                 </span>
                 {item.repeatCount > 1 && (
                   <span className="stage-repeat-count">×{item.repeatCount}</span>
                 )}
               </div>
 
-              {/* 16 pasos si este patrón está activo */}
-              {isItemActive && (
+              {/* 16 pasos si este patrón está activo y no es silencio */}
+              {isItemActive && !isRest && (
                 <div className="stage-mini-step-strip">
                   {Array.from({ length: 16 }).map((_, stepIdx) => (
                     <span

@@ -22,7 +22,90 @@ interface Props {
   isDragOver?: boolean;
 }
 
-export const DrumChannelRow: React.FC<Props> = ({ 
+// Subcomponente aislado para el LED del medidor de actividad
+const DrumActivityLed: React.FC<{ channelColor: string; activePattern: any[] }> = React.memo(({ channelColor, activePattern }) => {
+  const isPlaying = useSongStore(s => s.isPlaying);
+  const playbackStep = useSongStore(s => s.playbackStep);
+  const isPlayingActiveStep = isPlaying && activePattern && activePattern[playbackStep]?.isActive;
+
+  return (
+    <div className="drum-activity-meter">
+      <div className={`meter-led ${isPlayingActiveStep ? 'lit' : ''}`} style={{ '--led-color': channelColor } as React.CSSProperties} />
+    </div>
+  );
+});
+
+// Subcomponente aislado para la grilla de 16 pasos
+const DrumStepsRow: React.FC<{
+  channelColor: string;
+  activePattern: any[];
+  onStepMouseDown: (index: number, active: boolean) => void;
+  onStepMouseEnter: (index: number, active: boolean) => void;
+  onStopDrawing: () => void;
+}> = React.memo(({ channelColor, activePattern, onStepMouseDown, onStepMouseEnter, onStopDrawing }) => {
+  const isPlaying = useSongStore(s => s.isPlaying);
+  const playbackStep = useSongStore(s => s.playbackStep);
+
+  return (
+    <div className="drum-steps" onMouseLeave={onStopDrawing} style={{ userSelect: 'none' }}>
+      {activePattern && activePattern.map((step, i) => {
+        const isDownbeat = i % 4 === 0;
+        const isPlayingThisStep = isPlaying && playbackStep === i;
+        return (
+          <div 
+            key={i}
+            className={`drum-step ${step.isActive ? 'active' : ''} ${isDownbeat ? 'downbeat' : ''} ${isPlayingThisStep ? 'playback-head' : ''}`}
+            style={{ '--switch-color': channelColor } as React.CSSProperties}
+            onMouseDown={() => onStepMouseDown(i, step.isActive)}
+            onMouseEnter={() => onStepMouseEnter(i, step.isActive)}
+            onTouchStart={(e) => {
+              e.preventDefault();
+              onStepMouseDown(i, step.isActive);
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+});
+
+// Subcomponente aislado para el panel de edición de velocity
+const DrumVelocityRow: React.FC<{
+  channelColor: string;
+  activePattern: any[];
+  onVelocityMouseDown: (e: React.MouseEvent | React.TouchEvent, stepIndex: number) => void;
+  onVelocityMouseMove: (e: React.MouseEvent | React.TouchEvent, stepIndex: number) => void;
+  onStopDrawing: () => void;
+}> = React.memo(({ channelColor, activePattern, onVelocityMouseDown, onVelocityMouseMove, onStopDrawing }) => {
+  const isPlaying = useSongStore(s => s.isPlaying);
+  const playbackStep = useSongStore(s => s.playbackStep);
+
+  return (
+    <div className="drum-velocity-panel">
+      <div className="velocity-editor" onMouseLeave={onStopDrawing}>
+        {activePattern && activePattern.map((step, i) => (
+          <div 
+            key={i} 
+            className={`velocity-bar-container ${i % 4 === 0 ? 'downbeat-bg' : ''} ${isPlaying && playbackStep === i ? 'playback-head-vel' : ''}`}
+            onMouseDown={(e) => onVelocityMouseDown(e, i)}
+            onMouseMove={(e) => onVelocityMouseMove(e, i)}
+            onTouchStart={(e) => onVelocityMouseDown(e, i)}
+            onTouchMove={(e) => onVelocityMouseMove(e, i)}
+          >
+            {step.isActive && (
+              <div 
+                className="velocity-bar" 
+                style={{ height: `${(step.velocity ?? 0.8) * 100}%`, background: channelColor }}
+              />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+});
+
+export const DrumChannelRow: React.FC<Props> = React.memo(({ 
   channel, 
   channelIndex, 
   isExpanded, 
@@ -34,7 +117,11 @@ export const DrumChannelRow: React.FC<Props> = ({
   isDragging,
   isDragOver
 }) => {
-  const { toggleDrumStep, setDrumStepVelocity, updateDrumChannel, removeDrumChannel, playbackStep, isPlaying, currentDrumPatternEdit } = useSongStore();
+  const toggleDrumStep = useSongStore(s => s.toggleDrumStep);
+  const setDrumStepVelocity = useSongStore(s => s.setDrumStepVelocity);
+  const updateDrumChannel = useSongStore(s => s.updateDrumChannel);
+  const removeDrumChannel = useSongStore(s => s.removeDrumChannel);
+  const currentDrumPatternEdit = useSongStore(s => s.currentDrumPatternEdit);
   
   // Smart Draw State
   const [isDrawing, setIsDrawing] = useState(false);
@@ -57,7 +144,7 @@ export const DrumChannelRow: React.FC<Props> = ({
   // Velocity Draw State
   const [isDrawingVelocity, setIsDrawingVelocity] = useState(false);
 
-  const handleStepMouseDown = (index: number, currentlyActive: boolean) => {
+  const handleStepMouseDown = useCallback((index: number, currentlyActive: boolean) => {
     setIsDrawing(true);
     const newState = !currentlyActive;
     setDrawAction(newState);
@@ -65,15 +152,15 @@ export const DrumChannelRow: React.FC<Props> = ({
     if (newState) {
       toneEngine.playDrumPreview(channel.id, channel.patterns[currentDrumPatternEdit][index].velocity);
     }
-  };
+  }, [channel.id, channel.patterns, currentDrumPatternEdit, toggleDrumStep]);
 
-  const handleStepMouseEnter = (index: number, currentlyActive: boolean) => {
+  const handleStepMouseEnter = useCallback((index: number, currentlyActive: boolean) => {
     if (isDrawing && drawAction !== null) {
       if (currentlyActive !== drawAction) {
         toggleDrumStep(channel.id, index, currentDrumPatternEdit, drawAction);
       }
     }
-  };
+  }, [channel.id, currentDrumPatternEdit, drawAction, isDrawing, toggleDrumStep]);
 
   const stopDrawing = useCallback(() => {
     setIsDrawing(false);
@@ -102,25 +189,30 @@ export const DrumChannelRow: React.FC<Props> = ({
   };
 
   // Velocity Draw Logic
-  const handleVelocityDraw = (e: React.MouseEvent | React.TouchEvent, stepIndex: number, forceDraw = false) => {
-    if (!forceDraw && !isDrawingVelocity) return;
-    
+  const handleVelocityMouseDown = useCallback((e: React.MouseEvent | React.TouchEvent, stepIndex: number) => {
+    setIsDrawingVelocity(true);
     let currentElement = e.currentTarget as HTMLElement;
     const rect = currentElement.getBoundingClientRect();
     const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
-    
     const relativeY = Math.max(0, Math.min(rect.height, clientY - rect.top));
     const newVelocity = 1 - (relativeY / rect.height);
     setDrumStepVelocity(channel.id, stepIndex, currentDrumPatternEdit, newVelocity);
-  };
+  }, [channel.id, currentDrumPatternEdit, setDrumStepVelocity]);
+
+  const handleVelocityMouseMove = useCallback((e: React.MouseEvent | React.TouchEvent, stepIndex: number) => {
+    if (!isDrawingVelocity) return;
+    let currentElement = e.currentTarget as HTMLElement;
+    const rect = currentElement.getBoundingClientRect();
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+    const relativeY = Math.max(0, Math.min(rect.height, clientY - rect.top));
+    const newVelocity = 1 - (relativeY / rect.height);
+    setDrumStepVelocity(channel.id, stepIndex, currentDrumPatternEdit, newVelocity);
+  }, [channel.id, currentDrumPatternEdit, isDrawingVelocity, setDrumStepVelocity]);
 
   // Colores de la paleta
   const colors = ['var(--reposo)', 'var(--subdominante)', 'var(--tension)', 'var(--spicy)', 'var(--exotic)'];
   const channelColor = colors[channelIndex % colors.length];
-
-  // Activity Meter logic
   const activePattern = channel.patterns[currentDrumPatternEdit];
-  const isPlayingActiveStep = isPlaying && activePattern && activePattern[playbackStep]?.isActive;
 
   // Cargar lista de muestras por categorías
   const selectGroups: SelectGroup[] = DRUM_CATEGORIES.map(cat => ({
@@ -163,7 +255,7 @@ export const DrumChannelRow: React.FC<Props> = ({
   return (
     <div className={`drum-channel-container ${isExpanded ? 'expanded' : ''} ${isDragging ? 'dragging-channel' : ''} ${isDragOver ? 'drag-over-channel' : ''}`}>
       <div className="drum-channel-row">
-        {/* Panel Izquierdo: Controles (Toda la cabecera es arrastrable excepto al interactuar con controles) */}
+        {/* Panel Izquierdo: Controles */}
         <div 
           className={`drum-controls ${isDragging ? 'is-dragging' : ''}`}
           draggable={!isEditingName && !isInteractiveHovered}
@@ -240,7 +332,6 @@ export const DrumChannelRow: React.FC<Props> = ({
                 type="button"
                 onClick={() => {
                   setContextMenuPos(null);
-                  // Rellenar cada 4 pasos (0, 4, 8, 12)
                   const pattern = channel.patterns[currentDrumPatternEdit] || [];
                   pattern.forEach((_, stepIdx) => {
                     const shouldBeActive = stepIdx % 4 === 0;
@@ -257,7 +348,6 @@ export const DrumChannelRow: React.FC<Props> = ({
                 type="button"
                 onClick={() => {
                   setContextMenuPos(null);
-                  // Limpiar todos los pasos del patrón
                   const pattern = channel.patterns[currentDrumPatternEdit] || [];
                   pattern.forEach((step, stepIdx) => {
                     if (step.isActive) {
@@ -299,9 +389,7 @@ export const DrumChannelRow: React.FC<Props> = ({
             />
           </div>
           
-          <div className="drum-activity-meter">
-            <div className={`meter-led ${isPlayingActiveStep ? 'lit' : ''}`} style={{ '--led-color': channelColor } as React.CSSProperties} />
-          </div>
+          <DrumActivityLed channelColor={channelColor} activePattern={activePattern} />
           
           <div 
             className="drum-knobs"
@@ -342,55 +430,26 @@ export const DrumChannelRow: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Panel Derecho: Switches (16 Steps) */}
-        <div className="drum-steps" onMouseLeave={stopDrawing} style={{ userSelect: 'none' }}>
-          {activePattern && activePattern.map((step, i) => {
-            const isDownbeat = i % 4 === 0;
-            const isPlayingThisStep = isPlaying && playbackStep === i;
-            return (
-              <div 
-                key={i}
-                className={`drum-step ${step.isActive ? 'active' : ''} ${isDownbeat ? 'downbeat' : ''} ${isPlayingThisStep ? 'playback-head' : ''}`}
-                style={{ '--switch-color': channelColor } as React.CSSProperties}
-                onMouseDown={() => handleStepMouseDown(i, step.isActive)}
-                onMouseEnter={() => handleStepMouseEnter(i, step.isActive)}
-                onTouchStart={(e) => {
-                  e.preventDefault();
-                  handleStepMouseDown(i, step.isActive);
-                }}
-              />
-            );
-          })}
-        </div>
+        {/* Panel Derecho: Switches aislados (16 Steps) */}
+        <DrumStepsRow
+          channelColor={channelColor}
+          activePattern={activePattern}
+          onStepMouseDown={handleStepMouseDown}
+          onStepMouseEnter={handleStepMouseEnter}
+          onStopDrawing={stopDrawing}
+        />
       </div>
 
-      {/* Accordion Detalle: Velocity */}
+      {/* Accordion Detalle: Velocity aislado */}
       {isExpanded && (
-        <div className="drum-velocity-panel">
-          <div 
-            className="velocity-editor"
-            onMouseLeave={stopDrawing}
-          >
-            {activePattern && activePattern.map((step, i) => (
-              <div 
-                key={i} 
-                className={`velocity-bar-container ${i % 4 === 0 ? 'downbeat-bg' : ''} ${isPlaying && playbackStep === i ? 'playback-head-vel' : ''}`}
-                onMouseDown={(e) => { setIsDrawingVelocity(true); handleVelocityDraw(e, i, true); }}
-                onMouseMove={(e) => handleVelocityDraw(e, i)}
-                onTouchStart={(e) => { setIsDrawingVelocity(true); handleVelocityDraw(e, i, true); }}
-                onTouchMove={(e) => handleVelocityDraw(e, i)}
-              >
-                {step.isActive && (
-                  <div 
-                    className="velocity-bar" 
-                    style={{ height: `${(step.velocity ?? 0.8) * 100}%`, background: channelColor }}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
+        <DrumVelocityRow
+          channelColor={channelColor}
+          activePattern={activePattern}
+          onVelocityMouseDown={handleVelocityMouseDown}
+          onVelocityMouseMove={handleVelocityMouseMove}
+          onStopDrawing={stopDrawing}
+        />
       )}
     </div>
   );
-};
+});

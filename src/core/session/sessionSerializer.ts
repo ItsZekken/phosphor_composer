@@ -9,12 +9,14 @@ import type {
   ChordBlock, 
   MelodyNote, 
   StyleMarker, 
+  TempoMarker,
   ChannelConfig, 
   DrumChannel,
   TimeSignature
 } from '../../utils/typeDefinitions';
 import type { NoteClass, ScaleType } from '../music';
 import { normalizePitchClass, noteToMidi } from '../music';
+import { normalizeSynthSettings } from '../audio/engine/synthPresets';
 
 export const createEmptyPatterns = (numPatterns = 8, length = 16) => 
   Array.from({ length: numPatterns }).map(() => 
@@ -31,10 +33,10 @@ export const DEFAULT_DRUM_CHANNELS: DrumChannel[] = [
 ];
 
 export const DEFAULT_CHANNELS: Record<string, ChannelConfig> = {
-  master: { id: 'master', name: 'Master', type: 'master', volume: 0, pan: 0, muted: false, solo: false, color: '#ffffff', instrument: 'synth' },
-  chords: { id: 'chords', name: 'Acordes', type: 'chords', volume: 0, pan: 0, muted: false, solo: false, color: '#00e5ff', instrument: 'synth' },
-  melody: { id: 'melody', name: 'Melodía', type: 'melody', volume: 0, pan: 0, muted: false, solo: false, color: '#ff00aa', instrument: 'synth' },
-  drums: { id: 'drums', name: 'Batería', type: 'drums', volume: 0, pan: 0, muted: false, solo: false, color: '#ffaa00', instrument: 'sampler' }
+  master: { id: 'master', name: 'Master', type: 'master', volume: 80, pan: 0, muted: false, solo: false, color: '#ffffff', instrument: 'synth' },
+  chords: { id: 'chords', name: 'Acordes', type: 'chords', volume: 80, pan: 0, muted: false, solo: false, color: '#00e5ff', instrument: 'synth' },
+  melody: { id: 'melody', name: 'Melodía', type: 'melody', volume: 85, pan: 0, muted: false, solo: false, color: '#ff00aa', instrument: 'synth' },
+  drums: { id: 'drums', name: 'Batería', type: 'drums', volume: 80, pan: 0, muted: false, solo: false, color: '#ffaa00', instrument: 'sampler' }
 };
 
 export const DEFAULT_VIEWPORT = { scrollLeft: 0, scrollTop: 600, beatWidth: 40, rowHeight: 20 };
@@ -54,6 +56,17 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
     : 'major';
   const timeSignature: TimeSignature = (raw.timeSignature === '3/4' || raw.timeSignature === '6/8') ? raw.timeSignature : '4/4';
   const isAutoKey = Boolean(raw.isAutoKey);
+  const rawTempoMarkers = (raw as any).transport?.tempoMarkers || (raw as any).tempoMarkers;
+  const tempoMarkers: TempoMarker[] = Array.isArray(rawTempoMarkers)
+    ? rawTempoMarkers
+        .filter((tm: any) => typeof tm === 'object' && typeof tm.bpm === 'number')
+        .map((tm: any, index: number) => ({
+          id: tm.id || `tm_${Date.now()}_${index}`,
+          beat: typeof tm.beat === 'number' ? Math.max(0, tm.beat) : 0,
+          bpm: Math.max(30, Math.min(360, tm.bpm))
+        }))
+        .sort((a: TempoMarker, b: TempoMarker) => a.beat - b.beat)
+    : [];
 
   // 2. Normalizar Armonía
   const chordBlocks: ChordBlock[] = Array.isArray(raw.chordBlocks)
@@ -166,6 +179,7 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
     Object.keys(raw.channels).forEach(chId => {
       const ch = raw.channels![chId];
       if (ch && typeof ch === 'object') {
+        const rawSynth = ch.synthSettings || (ch.instrument === 'synth' ? raw.synthSettings : undefined);
         channels[chId] = {
           id: chId,
           name: ch.name || chId,
@@ -176,7 +190,7 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
           solo: Boolean(ch.solo),
           color: ch.color || '#00e5ff',
           instrument: ch.instrument || 'synth',
-          synthSettings: ch.synthSettings
+          synthSettings: rawSynth ? normalizeSynthSettings(rawSynth) : undefined
         };
       }
     });
@@ -194,7 +208,8 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
         muted: false,
         solo: false,
         color: track.color || '#ff00aa',
-        instrument: 'synth'
+        instrument: 'synth',
+        synthSettings: track.synthSettings ? normalizeSynthSettings(track.synthSettings) : undefined
       };
     }
   });
@@ -214,6 +229,7 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
     },
     transport: {
       bpm,
+      tempoMarkers,
       timeSignature,
       key,
       scale,
@@ -223,7 +239,9 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
       chordBlocks,
       styleMarkers,
       chordOctaveShift,
-      defaultPattern
+      defaultPattern,
+      chordGridSnap: (raw as any).chordGridSnap || (raw as any).harmony?.chordGridSnap || '1',
+      chordTimelineViewport: (raw as any).chordTimelineViewport || (raw as any).harmony?.chordTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 }
     },
     tracks,
     activeTrackId,
@@ -231,7 +249,8 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
       patternChain,
       isPatternRepeatOn,
       activeDrumKitId,
-      drumChannels
+      drumChannels,
+      drumTimelineViewport: (raw as any).drumTimelineViewport || (raw as any).drums?.drumTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 }
     },
     mixer: {
       channels,
@@ -270,6 +289,15 @@ export function deserializeSession(rawInput: unknown): { session: SessionV2; war
 
   // Si ya es un schemaVersion: 2 válido con campos completos
   if (parsedObj.schemaVersion === 2 && parsedObj.transport && parsedObj.tracks && parsedObj.harmony) {
+    // Normalizar synthSettings en todos los canales existentes para robustez total
+    if (parsedObj.mixer?.channels) {
+      Object.keys(parsedObj.mixer.channels).forEach((chId) => {
+        const ch = parsedObj.mixer.channels[chId];
+        if (ch && ch.synthSettings) {
+          ch.synthSettings = normalizeSynthSettings(ch.synthSettings);
+        }
+      });
+    }
     return { session: parsedObj as SessionV2, warnings: [] };
   }
 
@@ -299,6 +327,7 @@ export function serializeSession(state: any, metadataUpdates?: Partial<SessionMe
     },
     transport: {
       bpm: state.bpm || 120,
+      tempoMarkers: state.tempoMarkers || [],
       timeSignature: state.timeSignature || '4/4',
       key: state.key || 'C',
       scale: state.scale || 'major',
@@ -308,7 +337,9 @@ export function serializeSession(state: any, metadataUpdates?: Partial<SessionMe
       chordBlocks: state.chordBlocks || [],
       styleMarkers: state.styleMarkers || [],
       chordOctaveShift: state.chordOctaveShift || 0,
-      defaultPattern: state.pattern || 'hold'
+      defaultPattern: state.pattern || 'hold',
+      chordGridSnap: state.chordGridSnap || '1',
+      chordTimelineViewport: state.chordTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 }
     },
     tracks: synchronizedTracks,
     activeTrackId: state.activeTrackId || synchronizedTracks[0]?.id || 'track_melody_1',
@@ -317,7 +348,8 @@ export function serializeSession(state: any, metadataUpdates?: Partial<SessionMe
       isPatternRepeatOn: Boolean(state.isPatternRepeatOn),
       activeDrumKitId: state.activeDrumKitId || 'kit_1',
       drumChannels: state.drumChannels || DEFAULT_DRUM_CHANNELS,
-      currentDrumPatternEdit: state.currentDrumPatternEdit
+      currentDrumPatternEdit: state.currentDrumPatternEdit,
+      drumTimelineViewport: state.drumTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 }
     },
     mixer: {
       channels: {
