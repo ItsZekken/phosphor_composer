@@ -32,6 +32,43 @@ export const StageVisualizerView: React.FC = () => {
     };
   }, []);
 
+  // Alternar pantalla completa real del navegador (F11) acoplada al modo Zen del Stage
+  const handleToggleZen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        if (document.documentElement.requestFullscreen) {
+          await document.documentElement.requestFullscreen();
+        }
+        setIsZenMode(true);
+      } else {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        }
+        setIsZenMode(false);
+      }
+    } catch (err) {
+      console.warn('Error al alternar pantalla completa:', err);
+      setIsZenMode((prev) => !prev);
+    }
+  };
+
+  // Sincronizar estado cuando el usuario presiona Escape o F11 en el navegador
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isNativeFs = Boolean(document.fullscreenElement);
+      setIsZenMode(isNativeFs);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      // Salir de pantalla completa si el usuario cambia de vista
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+    };
+  }, []);
+
   return (
     <div
       className={`stage-stage-wrapper ${isZenMode ? 'zen-mode' : ''}`}
@@ -47,7 +84,7 @@ export const StageVisualizerView: React.FC = () => {
           visualizerMode={visualizerMode}
           onSelectMode={setVisualizerMode}
           isZenMode={isZenMode}
-          onToggleZen={() => setIsZenMode(!isZenMode)}
+          onToggleZen={handleToggleZen}
           onOpenExportVideo={() => setIsExportModalOpen(true)}
         />
       </div>

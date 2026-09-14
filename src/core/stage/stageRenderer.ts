@@ -90,13 +90,16 @@ export function renderStageFrame(
     isFirstFrame
   } = params;
 
-  // 1. CAPA 0: Renderizado del fondo y osciloscopio con persistencia analógica de fósforo
+  // 1. CAPA 0: Renderizado del fondo y osciloscopio con persistencia analógica de fósforo (Al fondo)
   renderBackgroundVisualizer(bgCtx, width, height, waveform, visualizerMode, Boolean(isFirstFrame));
 
   // Volcar fondo con estela al lienzo principal
   ctx.drawImage(bgCanvas, 0, 0);
 
-  // 2. CAPA 1: Matriz de Luces de Percusión (1:1 con espaciado de compás y destello)
+  // 2. CAPA 1: Cascada MIDI + Mini Teclado en la base (por debajo del drum pattern)
+  renderMidiWaterfallAndKeyboard(ctx, width, height, notes, beat, isPlaying, particles, keyLuminanceMap);
+
+  // 3. CAPA 2: Matriz de Luces de Percusión (POR ENCIMA de las notas del piano)
   renderDrumSwitchesDeck(
     ctx,
     width,
@@ -108,10 +111,7 @@ export function renderStageFrame(
     isPlaying
   );
 
-  // 3. CAPA 2: Cascada MIDI + Mini Teclado en la base con luminancia reactiva
-  renderMidiWaterfallAndKeyboard(ctx, width, height, notes, beat, isPlaying, particles, keyLuminanceMap);
-
-  // 4. CAPA 3: Cinta de Progresión Armónica Flotante (con scroll y aguja láser)
+  // 4. CAPA 3: Cinta de Progresión Armónica Flotante (en la parte superior del Stage)
   renderFloatingChordStream(ctx, width, height, chordBlocks, beat);
 
   // 5. CAPA 4: Filtro CRT Analógico opcional
@@ -240,19 +240,20 @@ function renderDrumSwitchesDeck(
   if (!drumChannels || drumChannels.length === 0) return;
 
   let activePatternIdx = currentDrumPatternEdit;
-  const globalStepIndex = Math.floor(beat * 4);
-  let localStep = globalStepIndex % 16;
+  const globalStep = beat * 4;
+  let wrappedStep = globalStep % 16;
+  if (wrappedStep < 0) wrappedStep += 16;
 
   if (!isPatternRepeatOn && patternChain && patternChain.length > 0) {
     const flatChain = flattenPatternChain(patternChain);
     const totalChainSteps = flatChain.length * 16;
     if (totalChainSteps > 0) {
-      const wrappedStep = globalStepIndex % totalChainSteps;
-      const flatIdx = Math.floor(wrappedStep / 16);
+      const chainPos = ((globalStep % totalChainSteps) + totalChainSteps) % totalChainSteps;
+      const flatIdx = Math.floor(chainPos / 16);
       const step = flatChain[flatIdx];
       if (step) {
         activePatternIdx = step.patternIndex;
-        localStep = wrappedStep % 16;
+        wrappedStep = chainPos % 16;
       }
     }
   }
@@ -293,29 +294,54 @@ function renderDrumSwitchesDeck(
 
       const step = patternSteps[s];
       const isActive = Boolean(step?.isActive);
-      const isTriggered = isPlaying && isActive && localStep === s;
 
-      if (isTriggered) {
-        const scaledH = rowHeight * 1.22;
-        const offsetY = (scaledH - rowHeight) / 2;
-        ctx.save();
-        ctx.shadowColor = lightColor;
-        ctx.shadowBlur = 24;
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.roundRect(currentX, rowY - offsetY, pillWidth, scaledH, 3);
-        ctx.fill();
-        ctx.restore();
-      } else if (isActive) {
-        ctx.save();
-        ctx.shadowColor = lightColor;
-        ctx.shadowBlur = 10;
-        ctx.fillStyle = lightColor;
-        ctx.beginPath();
-        ctx.roundRect(currentX, rowY, pillWidth, rowHeight, 3);
-        ctx.fill();
-        ctx.restore();
+      // Distancia de reproducción desde que se disparó el paso s
+      let stepDist = wrappedStep - s;
+      if (stepDist < 0) {
+        stepDist += 16;
+      }
+
+      // Envolvente analógica: fade-in (~30ms) y fade-out exponencial (~120ms)
+      let env = 0;
+      if (isPlaying && isActive && stepDist < 1.35) {
+        if (stepDist < 0.18) {
+          env = Math.sin((stepDist / 0.18) * (Math.PI / 2));
+        } else {
+          const decayRatio = (stepDist - 0.18) / (1.35 - 0.18);
+          env = Math.pow(1 - decayRatio, 2.2);
+        }
+      }
+
+      if (isActive) {
+        if (env > 0.01) {
+          // Destello incandescente con expansión vertical suave y transición de color a blanco
+          const currentScaleY = 1.0 + (0.22 * env);
+          const scaledH = rowHeight * currentScaleY;
+          const offsetY = (scaledH - rowHeight) / 2;
+          const blendedColor = interpolateRgb(lightColor, '#ffffff', env * 0.95);
+          const blur = 10 + 16 * env;
+
+          ctx.save();
+          ctx.shadowColor = env > 0.5 ? '#ffffff' : lightColor;
+          ctx.shadowBlur = blur;
+          ctx.fillStyle = blendedColor;
+          ctx.beginPath();
+          ctx.roundRect(currentX, rowY - offsetY, pillWidth, scaledH, 3);
+          ctx.fill();
+          ctx.restore();
+        } else {
+          // Luz activa cálida en reposo
+          ctx.save();
+          ctx.shadowColor = lightColor;
+          ctx.shadowBlur = 10;
+          ctx.fillStyle = lightColor;
+          ctx.beginPath();
+          ctx.roundRect(currentX, rowY, pillWidth, rowHeight, 3);
+          ctx.fill();
+          ctx.restore();
+        }
       } else {
+        // Barra inactiva: casi imperceptible en reposo
         ctx.fillStyle = 'rgba(255, 255, 255, 0.025)';
         ctx.beginPath();
         ctx.roundRect(currentX, rowY, pillWidth, rowHeight, 3);
@@ -326,7 +352,7 @@ function renderDrumSwitchesDeck(
     }
   }
 
-  // Fila inferior de cursor de pasos
+  // Fila inferior de cursor de pasos (con desvanecimiento continuo)
   const cursorRowY = startY + activeChannels.length * (rowHeight + gapY) + 4;
   let cursorX = startX;
 
@@ -336,8 +362,13 @@ function renderDrumSwitchesDeck(
       if (s % 4 === 0) cursorX += quarterGap;
     }
 
-    if (isPlaying && localStep === s) {
+    let cursorDist = wrappedStep - s;
+    if (cursorDist < 0) cursorDist += 16;
+
+    if (isPlaying && cursorDist < 1.0) {
+      const cursorAlpha = Math.pow(1 - cursorDist, 1.8);
       ctx.save();
+      ctx.globalAlpha = cursorAlpha;
       ctx.shadowColor = '#ffffff';
       ctx.shadowBlur = 8;
       ctx.fillStyle = '#ffffff';
@@ -537,15 +568,14 @@ function renderMidiWaterfallAndKeyboard(
 function renderFloatingChordStream(
   ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   width: number,
-  height: number,
+  _height: number,
   chordBlocks: ChordBlock[],
   beat: number
 ) {
   if (!chordBlocks || chordBlocks.length === 0) return;
 
-  const kbHeight = 22;
   const ribbonHeight = 32;
-  const ribbonY = height - kbHeight - 24 - ribbonHeight;
+  const ribbonY = 14; // En la parte superior del stage
   const ribbonMarginX = 12;
   const ribbonWidth = width - ribbonMarginX * 2;
   const ribbonX = ribbonMarginX;
@@ -694,3 +724,33 @@ function renderCRTOverlay(
 
   ctx.restore();
 }
+
+/**
+ * Helpers de interpolación de color para transiciones analógicas en lienzo
+ */
+function hexToRgb(hex: string): [number, number, number] {
+  const clean = hex.replace('#', '');
+  if (clean.length === 3) {
+    return [
+      parseInt(clean[0] + clean[0], 16),
+      parseInt(clean[1] + clean[1], 16),
+      parseInt(clean[2] + clean[2], 16)
+    ];
+  }
+  return [
+    parseInt(clean.slice(0, 2), 16),
+    parseInt(clean.slice(2, 4), 16),
+    parseInt(clean.slice(4, 6), 16)
+  ];
+}
+
+function interpolateRgb(hexColor: string, targetHex: string, factor: number): string {
+  const [r1, g1, b1] = hexToRgb(hexColor);
+  const [r2, g2, b2] = hexToRgb(targetHex);
+  const clampedFactor = Math.max(0, Math.min(1, factor));
+  const r = Math.round(r1 + (r2 - r1) * clampedFactor);
+  const g = Math.round(g1 + (g2 - g1) * clampedFactor);
+  const b = Math.round(b1 + (b2 - b1) * clampedFactor);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+

@@ -202,7 +202,7 @@ export const StageTelemetryHUD: React.FC<StageTelemetryHUDProps> = React.memo(({
         <button
           className={`stage-hud-btn ${isZenMode ? 'active' : ''}`}
           onClick={onToggleZen}
-          title={isZenMode ? 'Restore View' : 'Zen Stage'}
+          title={isZenMode ? 'Salir de Pantalla Completa (F11)' : 'Pantalla Completa (F11)'}
         >
           {isZenMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>

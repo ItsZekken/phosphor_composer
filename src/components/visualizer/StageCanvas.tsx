@@ -118,11 +118,10 @@ export const StageCanvas: React.FC<StageCanvasProps> = React.memo(({ mode }) => 
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
 
-    const kbHeight = 22;
     const ribbonHeight = 32;
-    const ribbonY = rect.height - kbHeight - 24 - ribbonHeight;
+    const ribbonY = 14;
 
-    // Detectar si el clic ocurrió dentro de la zona de la cinta de acordes
+    // Detectar si el clic ocurrió dentro de la zona de la cinta de acordes en la parte superior
     if (clickY >= ribbonY && clickY <= ribbonY + ribbonHeight) {
       const store = useSongStore.getState();
       const chordBlocks = store.chordBlocks;
