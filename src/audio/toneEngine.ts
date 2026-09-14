@@ -19,6 +19,7 @@ import { LookaheadScheduler } from '../core/audio/lookaheadScheduler';
 import { flattenPatternChain, type ChannelConfig, type SynthSettings } from '../utils/typeDefinitions';
 import type { PatternDef } from '../patterns/patternTypes';
 import { exportStageToMp4 } from '../core/video/stageVideoExporter';
+import { ensurePhosphorWorkletRegistered } from '../core/audio/worklet/PhosphorWorkletNode';
 
 // Helper debounce simple
 function debounce<T extends (...args: unknown[]) => void>(fn: T, delay: number): T {
@@ -226,17 +227,42 @@ class ToneEngine {
   }
 
   public async init() {
-    if (this.isInitialized) return;
-    if (this.initPromise) return this.initPromise;
+    const rawCtx = Tone.getContext().rawContext as AudioContext;
+    if (this.isInitialized && rawCtx && rawCtx.state === 'running') return;
+    if (this.initPromise) {
+      try {
+        await this.initPromise;
+        const currentCtx = Tone.getContext().rawContext as AudioContext;
+        if (this.isInitialized && currentCtx && currentCtx.state === 'running') return;
+      } catch (_) {}
+    }
 
     this.initPromise = (async () => {
       try {
-        const timeoutPromise = new Promise((resolve) => setTimeout(resolve, 3000));
-        await Promise.race([Tone.start(), timeoutPromise]);
+        await Tone.start();
       } catch (e) {
         console.warn('Advertencia al iniciar Tone.start():', e);
       }
-      this.isInitialized = true;
+
+      const activeCtx = Tone.getContext().rawContext as AudioContext;
+      if (activeCtx && activeCtx.state === 'suspended') {
+        try {
+          await activeCtx.resume();
+        } catch (_) {}
+      }
+
+      // Pre-registrar módulo AudioWorklet DSP en el contexto de audio
+      try {
+        if (activeCtx && typeof activeCtx.audioWorklet?.addModule === 'function') {
+          await ensurePhosphorWorkletRegistered(activeCtx);
+        }
+      } catch (e) {
+        console.warn('Advertencia al precargar PhosphorWorklet:', e);
+      }
+
+      if (activeCtx && activeCtx.state === 'running') {
+        this.isInitialized = true;
+      }
     })();
     await this.initPromise;
 
@@ -882,6 +908,10 @@ class ToneEngine {
 }
 
 export const toneEngine = new ToneEngine();
+if (typeof window !== 'undefined') {
+  (window as any).__toneEngine = toneEngine;
+  (window as any).Tone = Tone;
+}
 
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {

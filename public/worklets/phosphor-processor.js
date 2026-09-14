@@ -1,90 +1,10 @@
 /**
- * PhosphorWorkletProcessor.ts
- * Procesador de síntesis analógica en tiempo real ejecutado en el AudioWorklet (hilo de audio del SO).
- * Latencia ultra-baja (128 samples / ~2.9ms), cero interferencia de la UI y memoria 100% pre-asignada.
- *
- * Características:
- * - Osciladores con Anti-Aliasing PolyBLEP (Saw, Square, Triangle, Sine, Noise).
- * - Filtro State Variable Filter (SVF) de 2 polos lineal y estable (Lowpass, Highpass, Bandpass).
- * - Envolventes ADSR calculadas por muestra.
- * - Pool de 32 voces polifónicas con voice-stealing inteligente (LRU).
+ * phosphor-processor.js
+ * Pure JavaScript AudioWorkletProcessor for Phosphor DAW.
+ * Served directly from public/ to avoid any Vite HMR client injection or bundler transformation.
  */
 
-declare class AudioWorkletProcessor {
-  readonly port: MessagePort;
-  process(
-    inputs: Float32Array[][],
-    outputs: Float32Array[][],
-    parameters: Record<string, Float32Array>
-  ): boolean;
-}
-
-declare function registerProcessor(
-  name: string,
-  processorCtor: new () => AudioWorkletProcessor
-): void;
-
-declare const sampleRate: number;
-
-interface Voice {
-  active: boolean;
-  midi: number;
-  frequency: number;
-  targetFrequency: number;
-  velocity: number;
-  phase1: number;
-  phase2: number;
-  phaseSub: number;
-  envStage: 'idle' | 'pending' | 'attack' | 'decay' | 'sustain' | 'release';
-  envLevel: number;
-  startSample: number;
-  targetReleaseSample: number;
-  // SVF filter state variables
-  ic1eq: number;
-  ic2eq: number;
-  age: number;
-}
-
-interface SynthParams {
-  // OSC 1
-  osc1Wave: 'sine' | 'square' | 'triangle' | 'sawtooth';
-  osc1Vol: number;
-  osc1Octave: number;
-  osc1Semi: number;
-  osc1Detune: number;
-  // OSC 2
-  osc2Enabled: boolean;
-  osc2Wave: 'sine' | 'square' | 'triangle' | 'sawtooth';
-  osc2Vol: number;
-  osc2Octave: number;
-  osc2Semi: number;
-  osc2Detune: number;
-  // SUB & NOISE
-  subEnabled: boolean;
-  subVol: number;
-  subOctave: number;
-  noiseEnabled: boolean;
-  noiseVol: number;
-  // VCF FILTER
-  filterEnabled: boolean;
-  filterType: 'lowpass' | 'highpass' | 'bandpass';
-  filterFreq: number;
-  filterQ: number;
-  filterDrive: number;
-  // ADSR
-  attack: number;
-  decay: number;
-  sustain: number;
-  release: number;
-  // Glide / Portamento
-  glide: number;
-  // Master
-  gain: number;
-  pan: number;
-}
-
-// PolyBLEP anti-aliasing residual helper
-function polyBlep(t: number, dt: number): number {
+function polyBlep(t, dt) {
   if (t < dt) {
     const v = t / dt;
     return v + v - v * v - 1.0;
@@ -95,47 +15,52 @@ function polyBlep(t: number, dt: number): number {
   return 0.0;
 }
 
-export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
-  private voices: Voice[] = [];
-  private maxVoices = 32;
-  private ageCounter = 0;
-  private currentSample = 0;
-
-  private params: SynthParams = {
-    osc1Wave: 'sawtooth',
-    osc1Vol: 0.8,
-    osc1Octave: 0,
-    osc1Semi: 0,
-    osc1Detune: 0,
-    osc2Enabled: false,
-    osc2Wave: 'square',
-    osc2Vol: 0.5,
-    osc2Octave: 0,
-    osc2Semi: 0,
-    osc2Detune: 5,
-    subEnabled: false,
-    subVol: 0.4,
-    subOctave: -1,
-    noiseEnabled: false,
-    noiseVol: 0.2,
-    filterEnabled: true,
-    filterType: 'lowpass',
-    filterFreq: 2500,
-    filterQ: 1.5,
-    filterDrive: 0.0,
-    attack: 0.01,
-    decay: 0.2,
-    sustain: 0.7,
-    release: 0.3,
-    glide: 0.0,
-    gain: 0.7,
-    pan: 0.0
-  };
-
+class PhosphorWorkletProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
+    this.voices = [];
+    this.maxVoices = 16;
+    this.ageCounter = 0;
+    this.currentSample = 0;
 
-    // Pre-asignar todas las voces para evitar recolección de basura en process()
+    this.params = {
+      osc1Wave: 'sawtooth',
+      osc1Vol: 0.8,
+      osc1Octave: 0,
+      osc1Semi: 0,
+      osc1Detune: 0,
+
+      osc2Enabled: false,
+      osc2Wave: 'square',
+      osc2Vol: 0.5,
+      osc2Octave: 0,
+      osc2Semi: 0,
+      osc2Detune: 5,
+
+      subEnabled: false,
+      subVol: 0.4,
+      subOctave: -1,
+
+      noiseEnabled: false,
+      noiseVol: 0.2,
+
+      filterEnabled: true,
+      filterType: 'lowpass',
+      filterFreq: 2500,
+      filterQ: 1.5,
+      filterDrive: 0.0,
+
+      attack: 0.01,
+      decay: 0.2,
+      sustain: 0.7,
+      release: 0.3,
+
+      glide: 0.0,
+      gain: 0.7,
+      pan: 0.0
+    };
+
+    // Pre-asignar todas las voces
     for (let i = 0; i < this.maxVoices; i++) {
       this.voices.push({
         active: false,
@@ -156,7 +81,7 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
       });
     }
 
-    this.port.onmessage = (e: MessageEvent) => {
+    this.port.onmessage = (e) => {
       const data = e.data;
       if (!data) return;
 
@@ -179,8 +104,8 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     };
   }
 
-  private noteOn(midi: number, velocity: number, durationSeconds?: number, delaySamples?: number) {
-    let targetVoice: Voice | null = null;
+  noteOn(midi, velocity, durationSeconds, delaySamples) {
+    let targetVoice = null;
 
     // 1. Buscar voz libre
     for (let i = 0; i < this.maxVoices; i++) {
@@ -190,7 +115,7 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
       }
     }
 
-    // 2. Voice-Stealing (Voz más antigua / menor nivel de envolvente)
+    // 2. Voice-Stealing
     if (!targetVoice) {
       let oldestAge = Infinity;
       for (let i = 0; i < this.maxVoices; i++) {
@@ -230,7 +155,7 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
         : -1;
   }
 
-  private noteOff(midi: number, delaySamples?: number) {
+  noteOff(midi, delaySamples) {
     const releaseSample = delaySamples && delaySamples > 0 ? this.currentSample + Math.floor(delaySamples) : this.currentSample;
     for (let i = 0; i < this.maxVoices; i++) {
       if (this.voices[i].active && this.voices[i].midi === midi && this.voices[i].envStage !== 'release' && this.voices[i].envStage !== 'idle') {
@@ -244,7 +169,7 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     }
   }
 
-  private allNotesOff(delaySamples?: number) {
+  allNotesOff(delaySamples) {
     const releaseSample = delaySamples && delaySamples > 0 ? this.currentSample + Math.floor(delaySamples) : this.currentSample;
     for (let i = 0; i < this.maxVoices; i++) {
       if (this.voices[i].active && this.voices[i].envStage !== 'idle') {
@@ -258,8 +183,7 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     }
   }
 
-  // Generador de oscilador individual por muestra con PolyBLEP
-  private sampleOsc(wave: string, phase: number, dt: number): number {
+  sampleOsc(wave, phase, dt) {
     switch (wave) {
       case 'sine':
         return Math.sin(phase * 2 * Math.PI);
@@ -276,7 +200,6 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
       case 'triangle':
       case 'tri': {
         const saw = 2.0 * phase - 1.0 - polyBlep(phase, dt);
-        // Integración aproximada para triángulo suave
         return 2.0 * Math.abs(saw) - 1.0;
       }
       default:
@@ -284,11 +207,7 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     }
   }
 
-  public process(
-    _inputs: Float32Array[][],
-    outputs: Float32Array[][],
-    _parameters: Record<string, Float32Array>
-  ): boolean {
+  process(_inputs, outputs, _parameters) {
     const output = outputs[0];
     if (!output || output.length === 0) return true;
 
@@ -296,7 +215,6 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     const outR = output.length > 1 ? output[1] : outL;
     const blockSize = outL.length;
 
-    // Limpiar buffers de salida
     outL.fill(0);
     if (outR !== outL) outR.fill(0);
 
@@ -315,15 +233,14 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     const osc2PitchFactor = this.params.osc2Enabled ? Math.pow(2, (this.params.osc2Octave * 12 + this.params.osc2Semi + this.params.osc2Detune / 100) / 12) : 1;
     const subPitchFactor = this.params.subEnabled ? Math.pow(2, (this.params.subOctave * 12) / 12) : 0.5;
 
-    // Verificar si hay voces activas o pendientes en el bloque
-    let hasActiveVoices = false;
+    // Pre-filtrar índices de voces activas o pendientes para este bloque
+    const activeIndices = [];
     for (let v = 0; v < this.maxVoices; v++) {
       if (this.voices[v].active && this.voices[v].envStage !== 'idle') {
-        hasActiveVoices = true;
-        break;
+        activeIndices.push(v);
       }
     }
-    if (!hasActiveVoices) {
+    if (activeIndices.length === 0) {
       this.currentSample += blockSize;
       return true;
     }
@@ -339,14 +256,15 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     const pan = Math.max(-1, Math.min(1, this.params.pan));
     const gainL = this.params.gain * (pan <= 0 ? 1 : 1 - pan);
     const gainR = this.params.gain * (pan >= 0 ? 1 : 1 + pan);
+    const activeCount = activeIndices.length;
 
     for (let s = 0; s < blockSize; s++) {
       this.currentSample++;
       let sampleSumL = 0;
       let sampleSumR = 0;
 
-      for (let v = 0; v < this.maxVoices; v++) {
-        const voice = this.voices[v];
+      for (let i = 0; i < activeCount; i++) {
+        const voice = this.voices[activeIndices[i]];
         if (!voice.active || voice.envStage === 'idle') {
           continue;
         }

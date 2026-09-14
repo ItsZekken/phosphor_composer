@@ -10,6 +10,7 @@ import { parseChord, getChordNotes } from './chordParser';
 import type { VoicingType } from './voicingEngine';
 import { getBlockNotes } from './voicingEngine';
 import type { PatternDef, PatternNote } from '../../patterns/patternTypes';
+import type { StyleMarker } from '../../utils/typeDefinitions';
 
 export interface RenderedNote {
   name: string;
@@ -262,3 +263,84 @@ export function renderChordPattern(
 
   return list;
 }
+
+export interface ChordBlockInput {
+  chord: string;
+  startBeat: number;
+  durationBeats: number;
+  voicing?: VoicingType | string;
+  inversion?: number;
+  type?: 'play' | 'silence' | 'break' | 'bass-only' | 'chord-only';
+  bassNote?: string;
+  id?: string;
+}
+
+export interface BlockPatternSegment<T extends ChordBlockInput = ChordBlockInput> {
+  block: T;
+  pattern: string;
+}
+
+/**
+ * Segmenta un bloque de acordes si uno o más marcadores de estilo caen dentro de su duración,
+ * asegurando que cada segmento adopte el patrón rítmico que le corresponde en la línea de tiempo.
+ */
+export function segmentChordBlockByStyleMarkers<T extends ChordBlockInput>(
+  block: T,
+  styleMarkers: StyleMarker[] = [],
+  defaultPattern: string = 'hold'
+): BlockPatternSegment<T>[] {
+  const blockStart = block.startBeat;
+  const blockEnd = block.startBeat + block.durationBeats;
+
+  // Filtrar marcadores que caen estrictamente dentro del bloque
+  const internalMarkers = (styleMarkers || [])
+    .filter(m => m.beat > blockStart + 0.001 && m.beat < blockEnd - 0.001)
+    .sort((a, b) => a.beat - b.beat);
+
+  if (internalMarkers.length === 0) {
+    // Si no hay marcadores internos, resolver el patrón activo en blockStart
+    let activePattern = defaultPattern;
+    const sortedMarkers = [...(styleMarkers || [])].sort((a, b) => a.beat - b.beat);
+    for (const marker of sortedMarkers) {
+      if (marker.beat <= blockStart + 0.001) {
+        activePattern = marker.pattern;
+      } else {
+        break;
+      }
+    }
+    return [{ block, pattern: activePattern }];
+  }
+
+  // Si hay cortes internos, crear los límites
+  const cutBeats = [blockStart, ...internalMarkers.map(m => m.beat), blockEnd];
+  const sortedMarkers = [...(styleMarkers || [])].sort((a, b) => a.beat - b.beat);
+  const segments: BlockPatternSegment<T>[] = [];
+
+  for (let i = 0; i < cutBeats.length - 1; i++) {
+    const segStart = cutBeats[i];
+    const segEnd = cutBeats[i + 1];
+    const segDuration = segEnd - segStart;
+    if (segDuration <= 0.001) continue;
+
+    let activePattern = defaultPattern;
+    for (const marker of sortedMarkers) {
+      if (marker.beat <= segStart + 0.001) {
+        activePattern = marker.pattern;
+      } else {
+        break;
+      }
+    }
+
+    segments.push({
+      block: {
+        ...block,
+        startBeat: segStart,
+        durationBeats: segDuration
+      },
+      pattern: activePattern
+    });
+  }
+
+  return segments;
+}
+

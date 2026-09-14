@@ -1,6 +1,7 @@
 import type { SliceCreator, TrackState, TrackActions } from '../types';
 import type { MelodyNote, PianoRollTrack, ChannelConfig } from '../../utils/typeDefinitions';
 import { generateId } from '../../utils/idGenerator';
+import { PIANO_ROLL_COLOR_PALETTE } from '../../components/visualizer/hooks/useStageTimelineNotes';
 
 const DEFAULT_TRACK_ID = 'track_melody_1';
 const DEFAULT_CHANNEL_ID = 'melody';
@@ -11,7 +12,7 @@ export const initialTrackState: TrackState = {
       id: DEFAULT_TRACK_ID,
       name: 'Melodía 1',
       channelId: DEFAULT_CHANNEL_ID,
-      color: '#ff00aa',
+      color: PIANO_ROLL_COLOR_PALETTE[0] || '#6880ad',
       notes: [],
       viewport: { scrollLeft: 0, scrollTop: 600, beatWidth: 40, rowHeight: 20 }
     }
@@ -29,7 +30,7 @@ export const createTrackSlice: SliceCreator<TrackState & TrackActions> = (set, g
     const trackId = generateId('track');
     const channelId = `ch_${trackId}`;
     const trackName = name || `Melodía ${trackNum}`;
-    const trackColor = ['#00e5ff', '#ff00aa', '#a855f7', '#ffaa00', '#00ffcc', '#ff3366'][state.tracks.length % 6];
+    const trackColor = PIANO_ROLL_COLOR_PALETTE[state.tracks.length % PIANO_ROLL_COLOR_PALETTE.length];
 
     const newChannel: ChannelConfig = {
       id: channelId,
@@ -90,6 +91,17 @@ export const createTrackSlice: SliceCreator<TrackState & TrackActions> = (set, g
     const nextChannels = { ...state.channels };
     if (nextChannels[track.channelId]) {
       nextChannels[track.channelId] = { ...nextChannels[track.channelId], name };
+    }
+    return { tracks: nextTracks, channels: nextChannels };
+  }),
+
+  setTrackColor: (id, color) => set((state) => {
+    const track = state.tracks.find(t => t.id === id);
+    if (!track) return state;
+    const nextTracks = state.tracks.map(t => t.id === id ? { ...t, color } : t);
+    const nextChannels = { ...state.channels };
+    if (nextChannels[track.channelId]) {
+      nextChannels[track.channelId] = { ...nextChannels[track.channelId], color };
     }
     return { tracks: nextTracks, channels: nextChannels };
   }),

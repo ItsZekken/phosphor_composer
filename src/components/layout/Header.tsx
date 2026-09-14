@@ -75,9 +75,6 @@ export const Header = () => {
     setMixerOpen,
     isExporting,
     exportProgress,
-    timeSignature,
-    pattern,
-    instrumentType,
     customPatterns
   } = useSongStore(useShallow(state => ({
     bpm: state.bpm,
@@ -106,9 +103,6 @@ export const Header = () => {
     setMixerOpen: state.setMixerOpen,
     isExporting: state.isExporting,
     exportProgress: state.exportProgress,
-    timeSignature: state.timeSignature,
-    pattern: state.pattern,
-    instrumentType: state.instrumentType,
     customPatterns: state.customPatterns
   })));
 
@@ -181,23 +175,38 @@ export const Header = () => {
   }, [exportDropdownOpen]);
 
   const handleExportNormal = () => {
-    if (chordBlocks.length === 0 && melodyNotes.length === 0) {
-      alert('La canción está vacía. Agrega notas o acordes primero.');
+    const state = useSongStore.getState();
+    const hasChords = Boolean(state.chordBlocks && state.chordBlocks.length > 0);
+    const hasTracks = Boolean(state.tracks && state.tracks.some(t => t.notes && t.notes.length > 0));
+    const hasMelody = Boolean(state.melodyNotes && state.melodyNotes.length > 0);
+    const hasDrums = Boolean(state.drumChannels && state.drumChannels.some(ch => ch.patterns && ch.patterns.some(p => p.some(s => s?.isActive))));
+    const hasPatternChain = Boolean(state.patternChain && state.patternChain.length > 0);
+
+    if (!hasChords && !hasTracks && !hasMelody && !hasDrums && !hasPatternChain) {
+      alert('La canción está vacía. Agrega notas, acordes o patrones de batería primero.');
       return;
     }
     const midiArray = exportSessionToMidi({
-      bpm,
-      key,
-      scale,
-      timeSignature,
-      pattern,
-      instrumentType,
-      chordBlocks,
-      melodyNotes,
-      customPatterns
+      bpm: state.bpm,
+      key: state.key,
+      scale: state.scale,
+      timeSignature: state.timeSignature,
+      pattern: state.pattern,
+      instrumentType: state.instrumentType,
+      chordBlocks: state.chordBlocks,
+      melodyNotes: state.melodyNotes,
+      tracks: state.tracks,
+      drumChannels: state.drumChannels,
+      patternChain: state.patternChain,
+      currentDrumPatternEdit: state.currentDrumPatternEdit,
+      styleMarkers: state.styleMarkers,
+      chordOctaveShift: state.chordOctaveShift,
+      customPatterns: state.customPatterns,
+      tempoMarkers: state.tempoMarkers,
+      activeDrumKitId: state.activeDrumKitId
     }, 'normal');
 
-    downloadMidiFile(midiArray, `phosphor_${key}_${scale}_${bpm}bpm_render.mid`);
+    downloadMidiFile(midiArray, `phosphor_${state.key}_${state.scale}_${state.bpm}bpm_multitrack.mid`);
   };
 
   const handleExportProject = () => {
@@ -556,7 +565,7 @@ export const Header = () => {
           {exportDropdownOpen && (
             <div className="export-dropdown-menu">
               <button className="export-dropdown-item" onClick={handleExportNormal}>
-                Exportar Render (.mid)
+                Exportar MIDI Multicanal (.mid)
               </button>
               <button className="export-dropdown-item" onClick={handleExportProject}>
                 Guardar Proyecto (.json)

@@ -14,6 +14,18 @@ function midiToNoteName(midi: number): string {
   return `${NOTE_CLASSES[noteIndex]}${octave}`;
 }
 
+function hexToRgba(hex: string, alpha: number): string {
+  if (!hex || !hex.startsWith('#')) return `rgba(104, 128, 173, ${alpha})`;
+  let h = hex.slice(1);
+  if (h.length === 3) h = h.split('').map(c => c + c).join('');
+  const num = parseInt(h, 16);
+  if (isNaN(num)) return `rgba(104, 128, 173, ${alpha})`;
+  const r = (num >> 16) & 255;
+  const g = (num >> 8) & 255;
+  const b = num & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 export interface LassoRect {
   x1: number;
   y1: number;
@@ -144,6 +156,10 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
 }) => {
   const melodyNotes = useSongStore(state => state.melodyNotes || []);
   const ghostNotes = useSongStore(state => state.ghostNotes || []);
+  const tracks = useSongStore(state => state.tracks || []);
+  const activeTrackId = useSongStore(state => state.activeTrackId);
+  const activeTrack = tracks.find(t => t.id === activeTrackId);
+  const activeColor = activeTrack?.color || '#6880ad';
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -264,14 +280,14 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
           gradient.addColorStop(1, '#e5be52');
         } else {
           const alpha = 0.55 + vel * 0.45;
-          gradient.addColorStop(0, `rgba(168, 85, 247, ${alpha})`);
-          gradient.addColorStop(1, `rgba(236, 72, 153, ${alpha})`);
+          gradient.addColorStop(0, hexToRgba(activeColor, alpha));
+          gradient.addColorStop(1, hexToRgba(activeColor, Math.max(0.2, alpha * 0.85)));
         }
         ctx.fillStyle = gradient;
         ctx.fillRect(x + 1, y + 1, width - 2, rowHeight - 2);
 
         // Borde y tiradores visuales
-        ctx.strokeStyle = isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.25)';
+        ctx.strokeStyle = isSelected ? '#ffffff' : hexToRgba(activeColor, 0.7);
         ctx.lineWidth = isSelected ? 1.5 : 1;
         ctx.strokeRect(x + 1, y + 1, width - 2, rowHeight - 2);
 
@@ -341,6 +357,7 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
     scalePitchClasses,
     rootMidiMod,
     isScaleHighlightActive,
+    activeColor,
     TOTAL_BEATS
   ]);
 

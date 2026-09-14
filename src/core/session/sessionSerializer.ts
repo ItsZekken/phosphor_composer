@@ -34,8 +34,8 @@ export const DEFAULT_DRUM_CHANNELS: DrumChannel[] = [
 
 export const DEFAULT_CHANNELS: Record<string, ChannelConfig> = {
   master: { id: 'master', name: 'Master', type: 'master', volume: 80, pan: 0, muted: false, solo: false, color: '#ffffff', instrument: 'synth' },
-  chords: { id: 'chords', name: 'Acordes', type: 'chords', volume: 80, pan: 0, muted: false, solo: false, color: '#00e5ff', instrument: 'synth' },
-  melody: { id: 'melody', name: 'Melodía', type: 'melody', volume: 85, pan: 0, muted: false, solo: false, color: '#ff00aa', instrument: 'synth' },
+  chords: { id: 'chords', name: 'Acordes', type: 'chords', volume: 80, pan: 0, muted: false, solo: false, color: '#4d627d', instrument: 'synth' },
+  melody: { id: 'melody', name: 'Melodía', type: 'melody', volume: 85, pan: 0, muted: false, solo: false, color: '#6880ad', instrument: 'synth' },
   drums: { id: 'drums', name: 'Batería', type: 'drums', volume: 80, pan: 0, muted: false, solo: false, color: '#ffaa00', instrument: 'sampler' }
 };
 
@@ -188,7 +188,9 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
           pan: typeof ch.pan === 'number' ? ch.pan : 0,
           muted: Boolean(ch.muted || ch.mute),
           solo: Boolean(ch.solo),
-          color: ch.color || '#00e5ff',
+          color: (chId === 'chords' && (!ch.color || ch.color === '#00ffcc' || ch.color === '#00e5ff'))
+            ? '#4d627d'
+            : (ch.color || '#6880ad'),
           instrument: ch.instrument || 'synth',
           synthSettings: rawSynth ? normalizeSynthSettings(rawSynth) : undefined
         };

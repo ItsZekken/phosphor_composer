@@ -1,12 +1,22 @@
-import pkg from '@tonejs/midi';
-const { Midi } = pkg;
+import pkg, { Midi as NamedMidi } from '@tonejs/midi';
+const Midi = NamedMidi || (pkg as any)?.Midi || (pkg as any);
 import {
   midiToNote,
   renderChordPattern,
+  segmentChordBlockByStyleMarkers,
   getBlockNotes,
   createTempoMap
 } from '../core/music';
-import type { ChordBlock, MelodyNote, TempoMarker } from './typeDefinitions';
+import {
+  flattenPatternChain,
+  type ChordBlock,
+  type MelodyNote,
+  type TempoMarker,
+  type PianoRollTrack,
+  type DrumChannel,
+  type PatternChainItem,
+  type StyleMarker
+} from './typeDefinitions';
 import type { PatternDef } from '../patterns/patternTypes';
 
 export const midiToNoteName = midiToNote;
@@ -189,13 +199,62 @@ export function identifyPattern(
 }
 
 /**
- * Exporta el estado de la sesión a un ArrayBuffer de MIDI serializado
+ * Mapea un canal de batería o su nombre a la nota MIDI estándar de General MIDI Percussion (Canal 10).
  */
-export function exportSessionToMidi(session: any, type: 'normal' | 'project'): Uint8Array {
-  const midi = new Midi();
-  const tempoMap = createTempoMap(session.bpm || 120, session.tempoMarkers || []);
-  midi.header.setTempo(session.bpm || 120);
+export function getDrumGMNote(channelId: string, channelName?: string): number {
+  const str = `${channelId} ${channelName || ''}`.toLowerCase();
+  if (str.includes('kick') || str.includes('bombo') || str.includes('bd') || str.includes('bassdrum')) return 36; // Bass Drum 1
+  if (str.includes('snare') || str.includes('tarola') || str.includes('caja') || str.includes('sd')) return 38; // Acoustic Snare
+  if (str.includes('clap') || str.includes('aplauso') || str.includes('handclap')) return 39; // Hand Clap
+  if (str.includes('rim') || str.includes('sidestick')) return 37; // Side Stick
+  if (str.includes('closed') || str.includes('hihat (c)') || str.includes('hh_c') || str.includes('ch') || str.includes('hihat_closed')) return 42; // Closed Hi-Hat
+  if (str.includes('pedal') || str.includes('foot')) return 44; // Pedal Hi-Hat
+  if (str.includes('open') || str.includes('hihat (o)') || str.includes('hh_o') || str.includes('oh') || str.includes('hihat_open')) return 46; // Open Hi-Hat
+  if (str.includes('crash') || str.includes('platillo')) return 49; // Crash Cymbal 1
+  if (str.includes('splash')) return 55; // Splash Cymbal
+  if (str.includes('ride')) return 51; // Ride Cymbal 1
+  if (str.includes('tom_low') || str.includes('low tom')) return 41; // Low Floor Tom
+  if (str.includes('tom_mid') || str.includes('mid tom')) return 45; // Low Tom
+  if (str.includes('tom_hi') || str.includes('high tom')) return 48; // Hi-Mid Tom
+  if (str.includes('tambourine') || str.includes('pandereta')) return 54; // Tambourine
+  if (str.includes('cowbell') || str.includes('cencerro')) return 56; // Cowbell
+  if (str.includes('shaker') || str.includes('maraca')) return 70; // Maracas
+  return 36;
+}
 
+export interface ExportSessionMidiParams {
+  bpm?: number;
+  tempoMarkers?: TempoMarker[];
+  key?: string;
+  scale?: string;
+  timeSignature?: string;
+  pattern?: string;
+  styleMarkers?: StyleMarker[];
+  chordOctaveShift?: number;
+  chordBlocks?: ChordBlock[];
+  tracks?: PianoRollTrack[];
+  melodyNotes?: MelodyNote[];
+  drumChannels?: DrumChannel[];
+  patternChain?: PatternChainItem[];
+  isPatternRepeatOn?: boolean;
+  currentDrumPatternEdit?: number;
+  customPatterns?: PatternDef[];
+  channels?: Record<string, any>;
+  instrumentType?: string;
+  activeDrumKitId?: string;
+}
+
+/**
+ * Exporta el estado de la sesión a un archivo MIDI multicanal estándar (SMF Tipo 1)
+ * con canales dedicados por pista, patrones rítmicos procesados y percusión GM en el canal 10.
+ */
+export function exportSessionToMidi(session: ExportSessionMidiParams, type: 'normal' | 'project' = 'normal'): Uint8Array {
+  const midi = new Midi();
+  const bpm = session.bpm || 120;
+  const tempoMap = createTempoMap(bpm, session.tempoMarkers || []);
+  midi.header.setTempo(bpm);
+
+  // 1. Meta-eventos de Tempo Changes progresivos
   if (tempoMap.segments.length > 1) {
     tempoMap.segments.forEach(seg => {
       if (seg.startBeat > 0) {
@@ -207,9 +266,23 @@ export function exportSessionToMidi(session: any, type: 'normal' | 'project'): U
     });
   }
 
+  // 2. Meta-eventos de Compás (Time Signature) y Tonalidad (Key Signature)
+  if (session.timeSignature) {
+    const parts = session.timeSignature.split('/').map(Number);
+    if (parts.length === 2 && parts[0] > 0 && parts[1] > 0) {
+      midi.header.timeSignatures = [{
+        ticks: 0,
+        timeSignature: [parts[0], parts[1]]
+      }];
+    }
+  }
+
+  midi.header.update();
+
+  // 3. Metadatos de Proyecto (para serialización completa)
   if (type === 'project') {
     const metadata = {
-      version: '1.0',
+      version: '2.0',
       bpm: session.bpm,
       tempoMarkers: session.tempoMarkers || [],
       key: session.key,
@@ -218,6 +291,7 @@ export function exportSessionToMidi(session: any, type: 'normal' | 'project'): U
       pattern: session.pattern,
       instrumentType: session.instrumentType,
       chordBlocks: session.chordBlocks,
+      tracks: session.tracks,
       melodyNotes: session.melodyNotes,
       channels: session.channels,
       drumChannels: session.drumChannels,
@@ -225,9 +299,10 @@ export function exportSessionToMidi(session: any, type: 'normal' | 'project'): U
       isPatternRepeatOn: session.isPatternRepeatOn,
       activeDrumKitId: session.activeDrumKitId,
       chordOctaveShift: session.chordOctaveShift,
-      currentDrumPatternEdit: session.currentDrumPatternEdit
+      currentDrumPatternEdit: session.currentDrumPatternEdit,
+      styleMarkers: session.styleMarkers
     };
-    
+
     midi.header.meta.push({
       text: `ComposerSessionMetadata:${JSON.stringify(metadata)}`,
       type: 'text',
@@ -235,44 +310,184 @@ export function exportSessionToMidi(session: any, type: 'normal' | 'project'): U
     });
   }
 
-  const melodyTrack = midi.addTrack();
-  melodyTrack.name = 'Melody';
+  // 4. Calcular maxBeat de la composición
+  let maxBeat = 16;
+  (session.chordBlocks || []).forEach(b => {
+    maxBeat = Math.max(maxBeat, (b.startBeat || 0) + (b.durationBeats || 4));
+  });
+  (session.tracks || []).forEach(t => {
+    (t.notes || []).forEach(n => {
+      maxBeat = Math.max(maxBeat, (n.startBeat || 0) + (n.durationBeats || 1));
+    });
+  });
+  (session.melodyNotes || []).forEach(n => {
+    maxBeat = Math.max(maxBeat, (n.startBeat || 0) + (n.durationBeats || 1));
+  });
 
-  const chordsTrack = midi.addTrack();
-  chordsTrack.name = 'Chords';
+  // 5. Pista 1: Armonía / Acordes (Canal MIDI 1 / index 0)
+  if (session.chordBlocks && session.chordBlocks.length > 0) {
+    const chordsTrack = midi.addTrack();
+    chordsTrack.name = 'Chords';
+    chordsTrack.channel = 0; // Canal MIDI 1
 
-  session.melodyNotes.forEach((note: MelodyNote) => {
-    melodyTrack.addNote({
-      name: note.note,
-      time: tempoMap.beatToSeconds(note.startBeat),
-      duration: tempoMap.getDurationSeconds(note.startBeat, note.durationBeats),
-      velocity: note.velocity
+    session.chordBlocks.forEach((block: ChordBlock) => {
+      if (type === 'project') {
+        const notes = getBlockNotes(block);
+        notes.forEach(note => {
+          chordsTrack.addNote({
+            name: note,
+            time: tempoMap.beatToSeconds(block.startBeat),
+            duration: Math.max(0.05, tempoMap.getDurationSeconds(block.startBeat, block.durationBeats)),
+            velocity: 0.7
+          });
+        });
+      } else {
+        const segments = segmentChordBlockByStyleMarkers(
+          block,
+          session.styleMarkers || [],
+          session.pattern || 'hold'
+        );
+
+        segments.forEach((seg) => {
+          const rendered = renderChordPattern(
+            seg.block,
+            seg.pattern,
+            session.customPatterns || [],
+            session.chordOctaveShift || 0
+          );
+
+          rendered.forEach((rn) => {
+            chordsTrack.addNote({
+              name: rn.name,
+              time: tempoMap.beatToSeconds(rn.timeBeats),
+              duration: Math.max(0.05, tempoMap.getDurationSeconds(rn.timeBeats, rn.durationBeats)),
+              velocity: typeof rn.velocity === 'number' ? Math.max(0.1, Math.min(1.0, rn.velocity)) : 0.75
+            });
+          });
+        });
+      }
+    });
+  }
+
+  // 6. Pistas 2..N: Pistas de Piano Roll / Melodías (Canales MIDI 2..9, 11..16)
+  const tracksToExport = (session.tracks && session.tracks.length > 0)
+    ? session.tracks
+    : (session.melodyNotes && session.melodyNotes.length > 0
+        ? [{ id: 'melody_default', name: 'Melody', channelId: 'melody', color: '#6880ad', notes: session.melodyNotes }]
+        : []);
+
+  tracksToExport.forEach((track, trackIdx) => {
+    const notes = track.notes || [];
+    if (notes.length === 0 && tracksToExport.length > 1) return;
+
+    const midiTrack = midi.addTrack();
+    midiTrack.name = track.name || `Melody ${trackIdx + 1}`;
+
+    // Asignar canal MIDI dedicado evitando el 9 (Canal 10 de percusión)
+    let assignedChannel = 1 + trackIdx;
+    if (assignedChannel >= 9) assignedChannel += 1;
+    if (assignedChannel > 15) assignedChannel = (assignedChannel % 16);
+    if (assignedChannel === 9) assignedChannel = 10;
+    midiTrack.channel = assignedChannel;
+
+    notes.forEach((note: MelodyNote) => {
+      midiTrack.addNote({
+        name: note.note,
+        time: tempoMap.beatToSeconds(note.startBeat),
+        duration: Math.max(0.05, tempoMap.getDurationSeconds(note.startBeat, note.durationBeats)),
+        velocity: typeof note.velocity === 'number' ? Math.max(0.1, Math.min(1.0, note.velocity)) : 0.8
+      });
     });
   });
 
-  session.chordBlocks.forEach((block: ChordBlock) => {
-    if (type === 'project') {
-      const notes = getBlockNotes(block);
-      notes.forEach(note => {
-        chordsTrack.addNote({
-          name: note,
-          time: tempoMap.beatToSeconds(block.startBeat),
-          duration: tempoMap.getDurationSeconds(block.startBeat, block.durationBeats),
-          velocity: 0.6
-        });
+  // 7. Pista N+1: Percusión / Batería (Canal MIDI 10 / index 9)
+  const drumChannels = session.drumChannels || [];
+  if (drumChannels.length > 0) {
+    const drumsTrack = midi.addTrack();
+    drumsTrack.name = 'Drums';
+    drumsTrack.channel = 9; // Canal MIDI 10 estándar GM Percussion
+
+    const patternChain = session.patternChain || [];
+    const isPatternRepeatOn = session.isPatternRepeatOn;
+
+    if (!isPatternRepeatOn && patternChain.length > 0) {
+      const flatChain = flattenPatternChain(patternChain);
+      const totalMeasures = flatChain.length;
+      maxBeat = Math.max(maxBeat, totalMeasures * 4);
+
+      flatChain.forEach((step, measureIdx) => {
+        const patternIdx = step.patternIndex;
+        if (patternIdx < 0) return;
+        const measureStartBeat = measureIdx * 4;
+
+        for (let stepIdx = 0; stepIdx < 16; stepIdx++) {
+          const stepBeat = measureStartBeat + (stepIdx * 0.25);
+          const time = tempoMap.beatToSeconds(stepBeat);
+          const duration = Math.max(0.05, Math.min(0.2, tempoMap.getDurationSeconds(stepBeat, 0.25)));
+
+          drumChannels.forEach(ch => {
+            if (ch.muted) return;
+            const dStep = ch.patterns?.[patternIdx]?.[stepIdx];
+            if (dStep && dStep.isActive) {
+              const gmNote = getDrumGMNote(ch.id, ch.name);
+              const vel = typeof dStep.velocity === 'number' ? dStep.velocity : 0.8;
+              const volFactor = typeof ch.volume === 'number' ? ch.volume / 100 : 0.8;
+              drumsTrack.addNote({
+                midi: gmNote,
+                time,
+                duration,
+                velocity: Math.max(0.1, Math.min(1.0, vel * volFactor))
+              });
+            }
+          });
+        }
       });
     } else {
-      const rendered = renderChordPattern(block, session.pattern, session.customPatterns || []);
-      rendered.forEach(n => {
-        chordsTrack.addNote({
-          name: n.name,
-          time: tempoMap.beatToSeconds(n.timeBeats),
-          duration: tempoMap.getDurationSeconds(n.timeBeats, n.durationBeats),
-          velocity: n.velocity
-        });
-      });
+      // Repetición del patrón actual a lo largo de maxBeat
+      const patternIdx = session.currentDrumPatternEdit || 0;
+      const totalMeasures = Math.max(1, Math.ceil(maxBeat / 4));
+      let hasActiveSteps = false;
+
+      for (const ch of drumChannels) {
+        if (!ch.muted && ch.patterns?.[patternIdx]?.some(s => s?.isActive)) {
+          hasActiveSteps = true;
+          break;
+        }
+      }
+
+      if (hasActiveSteps) {
+        for (let m = 0; m < totalMeasures; m++) {
+          const measureStartBeat = m * 4;
+          for (let stepIdx = 0; stepIdx < 16; stepIdx++) {
+            const stepBeat = measureStartBeat + (stepIdx * 0.25);
+            if (stepBeat >= maxBeat) break;
+            const time = tempoMap.beatToSeconds(stepBeat);
+            const duration = Math.max(0.05, Math.min(0.2, tempoMap.getDurationSeconds(stepBeat, 0.25)));
+
+            drumChannels.forEach(ch => {
+              if (ch.muted) return;
+              const dStep = ch.patterns?.[patternIdx]?.[stepIdx];
+              if (dStep && dStep.isActive) {
+                const gmNote = getDrumGMNote(ch.id, ch.name);
+                const vel = typeof dStep.velocity === 'number' ? dStep.velocity : 0.8;
+                const volFactor = typeof ch.volume === 'number' ? ch.volume / 100 : 0.8;
+                drumsTrack.addNote({
+                  midi: gmNote,
+                  time,
+                  duration,
+                  velocity: Math.max(0.1, Math.min(1.0, vel * volFactor))
+                });
+              }
+            });
+          }
+        }
+      }
     }
-  });
+
+    if (drumsTrack.notes.length === 0) {
+      midi.tracks = midi.tracks.filter(t => t !== drumsTrack);
+    }
+  }
 
   return midi.toArray();
 }

@@ -14,6 +14,7 @@ import * as Tone from 'tone';
 import type { SynthSettings } from '../../../utils/typeDefinitions';
 import { normalizeSynthSettings } from './synthPresets';
 import { noteToMidi, midiToNote } from '../../music/pitchClass';
+import { PhosphorWorkletNode } from '../worklet/PhosphorWorkletNode';
 
 /**
  * Transpone una nota musical (ej: "C4") por octavas y semitonos mediante aritmética entera pura (0 GC).
@@ -29,18 +30,22 @@ export class PhosphorAnalogSynth {
   public id: string;
   private settings: SynthSettings;
 
-  // Oscilador Principal 1
-  private osc1Synth: Tone.PolySynth;
-  private osc1Gain: Tone.Gain;
+  // Nodo AudioWorklet (Motor de síntesis DSP en el hilo de audio nativo del SO)
+  private workletNode: PhosphorWorkletNode | null = null;
+  private isWorkletSupported = false;
 
-  // Osciladores Secundarios (bajo demanda)
+  // Oscilador Principal 1 (Fallback Tone.PolySynth)
+  private osc1Synth: Tone.PolySynth | null = null;
+  private osc1Gain: Tone.Gain | null = null;
+
+  // Osciladores Secundarios (Fallback bajo demanda)
   private osc2Synth: Tone.PolySynth | null = null;
   private osc2Gain: Tone.Gain | null = null;
 
   private subSynth: Tone.PolySynth | null = null;
   private subGain: Tone.Gain | null = null;
 
-  // Generador de Ruido Real (bajo demanda)
+  // Generador de Ruido Real (Fallback bajo demanda)
   private noiseSynth: Tone.NoiseSynth | null = null;
   private noiseGain: Tone.Gain | null = null;
 
@@ -94,7 +99,29 @@ export class PhosphorAnalogSynth {
     // 4. Construir el grafo de audio conectando únicamente los nodos activos
     this.rebuildAudioGraph();
 
-    // 5. Oscilador 1 Principal
+    // 5. Inicializar AudioWorklet DSP (Motor nativo en el hilo de audio del SO)
+    const rawContext = Tone.getContext().rawContext as AudioContext;
+    const isOffline = typeof OfflineAudioContext !== 'undefined' && rawContext instanceof OfflineAudioContext;
+    this.isWorkletSupported = !isOffline && typeof AudioWorkletNode !== 'undefined' && !!rawContext?.audioWorklet;
+
+    if (this.isWorkletSupported) {
+      try {
+        this.workletNode = new PhosphorWorkletNode(this.id, rawContext);
+        this.workletNode.connect(this.outputNode);
+        this.workletNode.setSettings(this.settings);
+      } catch (err) {
+        console.warn(`[PhosphorAnalogSynth] Falló AudioWorklet para ${this.id}, operando en fallback PolySynth:`, err);
+        this.workletNode = null;
+        this.isWorkletSupported = false;
+      }
+    }
+
+    // 6. Sincronizar LFO
+    this.applyLFO();
+  }
+
+  private initFallbackSynths() {
+    if (this.osc1Synth) return;
     this.osc1Gain = new Tone.Gain(this.settings.osc1?.volume ?? 0.8);
     this.osc1Gain.connect(this.mixerSumNode);
 
@@ -106,9 +133,7 @@ export class PhosphorAnalogSynth {
     this.osc1Synth.maxPolyphony = 6;
     this.osc1Synth.connect(this.osc1Gain);
 
-    // 6. Fuentes secundarias y LFO
     this.syncSecondarySources();
-    this.applyLFO();
   }
 
   private mapWaveType(wave?: string): any {
@@ -328,27 +353,33 @@ export class PhosphorAnalogSynth {
     this.settings = next;
 
     try {
-      // 1. Oscilador 1
+      // 0. Actualizar AudioWorklet DSP si está activo
+      if (this.workletNode) {
+        this.workletNode.setSettings(next);
+      }
+
+      // 1. Oscilador 1 (Fallback Tone.PolySynth)
       const osc1Next = next.osc1!;
       const osc1Prev = prev.osc1;
-      if (osc1Prev?.volume !== osc1Next.volume || osc1Prev?.enabled !== osc1Next.enabled) {
+      if (this.osc1Gain && (osc1Prev?.volume !== osc1Next.volume || osc1Prev?.enabled !== osc1Next.enabled)) {
         this.osc1Gain.gain.rampTo(osc1Next.enabled ? osc1Next.volume : 0, 0.02);
       }
-      if (osc1Prev?.waveType !== osc1Next.waveType) {
+      if (this.osc1Synth && osc1Prev?.waveType !== osc1Next.waveType) {
         this.osc1Synth.set({ oscillator: { type: this.mapWaveType(osc1Next.waveType) } });
       }
-      if (osc1Prev?.detune !== osc1Next.detune) {
+      if (this.osc1Synth && osc1Prev?.detune !== osc1Next.detune) {
         this.osc1Synth.set({ detune: osc1Next.detune });
       }
 
-      // Envolvente de Amplitud
+      // Envolvente de Amplitud (Fallback)
       const envPrev = prev.envelope;
       const envNext = next.envelope;
       if (
-        envPrev.attack !== envNext.attack ||
+        this.osc1Synth &&
+        (envPrev.attack !== envNext.attack ||
         envPrev.decay !== envNext.decay ||
         envPrev.sustain !== envNext.sustain ||
-        envPrev.release !== envNext.release
+        envPrev.release !== envNext.release)
       ) {
         const cleanEnv = {
           attack: Math.max(0.001, envNext.attack),
@@ -369,8 +400,8 @@ export class PhosphorAnalogSynth {
         }
       }
 
-      // Glide / Portamento
-      if (prev.glide !== next.glide) {
+      // Glide / Portamento (Fallback)
+      if (this.osc1Synth && prev.glide !== next.glide) {
         const portamento = next.glide || 0;
         this.osc1Synth.set({ portamento });
         if (this.osc2Synth) this.osc2Synth.set({ portamento });
@@ -426,21 +457,23 @@ export class PhosphorAnalogSynth {
         }
       }
 
-      // 4. Sincronizar fuentes secundarias
-      this.syncSecondarySources();
+      // 4. Sincronizar fuentes secundarias de fallback si están instanciadas
+      if (this.osc1Synth) {
+        this.syncSecondarySources();
 
-      if (this.osc2Synth && next.osc2) {
-        if (prev.osc2?.waveType !== next.osc2.waveType) {
-          this.osc2Synth.set({ oscillator: { type: this.mapWaveType(next.osc2.waveType) } });
+        if (this.osc2Synth && next.osc2) {
+          if (prev.osc2?.waveType !== next.osc2.waveType) {
+            this.osc2Synth.set({ oscillator: { type: this.mapWaveType(next.osc2.waveType) } });
+          }
+          if (prev.osc2?.detune !== next.osc2.detune) {
+            this.osc2Synth.set({ detune: next.osc2.detune });
+          }
         }
-        if (prev.osc2?.detune !== next.osc2.detune) {
-          this.osc2Synth.set({ detune: next.osc2.detune });
-        }
-      }
 
-      if (this.subSynth && next.subOsc) {
-        if (prev.subOsc?.waveType !== next.subOsc.waveType) {
-          this.subSynth.set({ oscillator: { type: this.mapWaveType(next.subOsc.waveType) } });
+        if (this.subSynth && next.subOsc) {
+          if (prev.subOsc?.waveType !== next.subOsc.waveType) {
+            this.subSynth.set({ oscillator: { type: this.mapWaveType(next.subOsc.waveType) } });
+          }
         }
       }
 
@@ -580,8 +613,16 @@ export class PhosphorAnalogSynth {
     const triggerTime = time !== undefined ? time : Tone.now();
     const durSec = typeof duration === 'number' ? duration : Tone.Time(duration).toSeconds();
 
-    // 1. OSC 1
-    if (this.settings.osc1?.enabled && (this.settings.osc1.volume ?? 0) > 0) {
+    // 0. Si el AudioWorklet está soportado, delegar directamente al motor DSP del SO (Zero CPU en JS thread)
+    if (this.workletNode && this.isWorkletSupported) {
+      this.workletNode.triggerAttackRelease(noteArray, durSec, triggerTime, velocity);
+      return;
+    }
+
+    this.initFallbackSynths();
+
+    // 1. OSC 1 (Fallback Tone.PolySynth)
+    if (this.settings.osc1?.enabled && (this.settings.osc1.volume ?? 0) > 0 && this.osc1Synth) {
       const osc1Notes = noteArray.map((n) =>
         transposeNoteFast(n, this.settings.osc1?.octave ?? 0, this.settings.osc1?.semi ?? 0)
       );
@@ -590,7 +631,7 @@ export class PhosphorAnalogSynth {
       } catch (_) {}
     }
 
-    // 2. OSC 2
+    // 2. OSC 2 (Fallback)
     if (this.osc2Synth && this.settings.osc2?.enabled && (this.settings.osc2.volume ?? 0) > 0) {
       const osc2Notes = noteArray.map((n) =>
         transposeNoteFast(n, this.settings.osc2?.octave ?? 0, this.settings.osc2?.semi ?? 0)
@@ -600,7 +641,7 @@ export class PhosphorAnalogSynth {
       } catch (_) {}
     }
 
-    // 3. Sub-oscilador
+    // 3. Sub-oscilador (Fallback)
     if (this.subSynth && this.settings.subOsc?.enabled && (this.settings.subOsc.volume ?? 0) > 0) {
       const subNotes = noteArray.map((n) =>
         transposeNoteFast(n, this.settings.subOsc?.octave ?? -1, 0)
@@ -610,7 +651,7 @@ export class PhosphorAnalogSynth {
       } catch (_) {}
     }
 
-    // 4. Ruido Real
+    // 4. Ruido Real (Fallback)
     if (this.noiseSynth && this.settings.noise?.enabled && (this.settings.noise.volume ?? 0) > 0) {
       try {
         this.noiseSynth.triggerAttackRelease(durSec, triggerTime, velocity * 0.4);
@@ -623,7 +664,14 @@ export class PhosphorAnalogSynth {
     const noteArray = Array.isArray(notes) ? notes : [notes];
     const triggerTime = time !== undefined ? time : Tone.now();
 
-    if (this.settings.osc1?.enabled) {
+    if (this.workletNode && this.isWorkletSupported) {
+      this.workletNode.triggerAttack(noteArray, triggerTime, velocity);
+      return;
+    }
+
+    this.initFallbackSynths();
+
+    if (this.settings.osc1?.enabled && this.osc1Synth) {
       const osc1Notes = noteArray.map((n) =>
         transposeNoteFast(n, this.settings.osc1?.octave ?? 0, this.settings.osc1?.semi ?? 0)
       );
@@ -653,9 +701,14 @@ export class PhosphorAnalogSynth {
     if (this.isDisposed) return;
     const triggerTime = time !== undefined ? time : Tone.now();
 
+    if (this.workletNode && this.isWorkletSupported) {
+      this.workletNode.triggerRelease(notes, triggerTime);
+      return;
+    }
+
     if (notes) {
       const noteArray = Array.isArray(notes) ? notes : [notes];
-      if (this.settings.osc1?.enabled) {
+      if (this.settings.osc1?.enabled && this.osc1Synth) {
         const osc1Notes = noteArray.map((n) =>
           transposeNoteFast(n, this.settings.osc1?.octave ?? 0, this.settings.osc1?.semi ?? 0)
         );
@@ -688,7 +741,11 @@ export class PhosphorAnalogSynth {
     if (this.isDisposed) return;
     const triggerTime = time !== undefined ? time : Tone.now();
 
-    try { this.osc1Synth.releaseAll(triggerTime); } catch (_) {}
+    if (this.workletNode && this.isWorkletSupported) {
+      this.workletNode.allNotesOff(triggerTime);
+    }
+
+    if (this.osc1Synth) try { this.osc1Synth.releaseAll(triggerTime); } catch (_) {}
     if (this.osc2Synth) try { this.osc2Synth.releaseAll(triggerTime); } catch (_) {}
     if (this.subSynth) try { this.subSynth.releaseAll(triggerTime); } catch (_) {}
     if (this.noiseSynth) try { this.noiseSynth.triggerRelease(triggerTime); } catch (_) {}
@@ -775,13 +832,24 @@ export class PhosphorAnalogSynth {
     this.disconnectAnalysers();
     this.cleanupLfoConnections();
 
+    if (this.workletNode) {
+      try { this.workletNode.dispose(); } catch (_) {}
+      this.workletNode = null;
+    }
+
     if (this.vibratoNode) {
       try { this.vibratoNode.dispose(); } catch (_) {}
       this.vibratoNode = null;
     }
 
-    try { this.osc1Synth.dispose(); } catch (_) {}
-    try { this.osc1Gain.dispose(); } catch (_) {}
+    if (this.osc1Synth) {
+      try { this.osc1Synth.dispose(); } catch (_) {}
+      this.osc1Synth = null;
+    }
+    if (this.osc1Gain) {
+      try { this.osc1Gain.dispose(); } catch (_) {}
+      this.osc1Gain = null;
+    }
 
     if (this.osc2Synth) {
       try { this.osc2Synth.dispose(); } catch (_) {}

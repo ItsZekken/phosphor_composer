@@ -138,6 +138,7 @@ export interface TrackActions {
   addPianoRollTrack: (name?: string) => void;
   removePianoRollTrack: (id: string) => void;
   renamePianoRollTrack: (id: string, name: string) => void;
+  setTrackColor: (id: string, color: string) => void;
   setActiveTrackId: (id: string) => void;
   updateTrackViewport: (id: string, viewport: Partial<PianoRollTrack['viewport']>) => void;
   resetActiveTrackScroll: () => void;

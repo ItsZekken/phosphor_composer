@@ -56,6 +56,7 @@ export const PianoRollView: React.FC = () => {
     addPianoRollTrack,
     removePianoRollTrack,
     renamePianoRollTrack,
+    setTrackColor,
     setActiveTrackId,
     updateTrackViewport,
     clipboardNotes,
@@ -82,6 +83,7 @@ export const PianoRollView: React.FC = () => {
     addPianoRollTrack: state.addPianoRollTrack,
     removePianoRollTrack: state.removePianoRollTrack,
     renamePianoRollTrack: state.renamePianoRollTrack,
+    setTrackColor: state.setTrackColor,
     setActiveTrackId: state.setActiveTrackId,
     updateTrackViewport: state.updateTrackViewport,
     clipboardNotes: state.clipboardNotes || [],
@@ -614,6 +616,7 @@ export const PianoRollView: React.FC = () => {
         addPianoRollTrack={addPianoRollTrack}
         removePianoRollTrack={removePianoRollTrack}
         renamePianoRollTrack={renamePianoRollTrack}
+        setTrackColor={setTrackColor}
         onRequestDeleteTrack={(trackId, trackName) => {
           setConfirmModalConfig({ isOpen: true, trackId, trackName, type: 'track' });
         }}

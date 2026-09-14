@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { useSongStore } from '../../../store/songStore';
-import { getBlockNotes, noteToMidi } from '../../../core/music';
+import { noteToMidi, renderChordPattern, segmentChordBlockByStyleMarkers } from '../../../core/music';
+import type { StyleMarker } from '../../../utils/typeDefinitions';
+import type { PatternDef } from '../../../patterns/patternTypes';
 
 export interface StageRenderNote {
   id: string;
@@ -15,8 +17,8 @@ export interface StageRenderNote {
   type: 'harmony' | 'melody' | 'drum';
 }
 
-// Paleta de colores diferenciados de baja saturación para las pistas de Piano Roll
-const LOW_SAT_TRACK_PALETTE = [
+// Paleta de colores diferenciados y estéticos para las pistas de Piano Roll
+export const PIANO_ROLL_COLOR_PALETTE = [
   '#6880ad', // Slate Blue
   '#a36d83', // Dusty Rose
   '#b09058', // Warm Ochre
@@ -25,22 +27,39 @@ const LOW_SAT_TRACK_PALETTE = [
   '#a87060', // Soft Terracotta
   '#607890', // Steel Blue
   '#928458', // Olive Khaki
-  '#846e91'  // Heather Violet
+  '#846e91', // Heather Violet
+  '#5a9e7a', // Sage Green
+  '#d97762', // Warm Coral
+  '#6b7280'  // Neutral Slate
 ];
 
-export const HARMONY_NOTE_COLOR = '#446454';
+export const HARMONY_NOTE_COLOR = '#4d627d';
 
-/**
- * Función pura que compila y normaliza las notas de armonía y melodía
- * para su visualización en el Waterfall (tanto en vivo como en renderizado de video).
- */
-export function extractStageTimelineNotes(params: {
+export interface ExtractStageTimelineNotesParams {
   chordBlocks: any[];
   chordOctaveShift?: number;
   tracks: any[];
   channels: Record<string, any>;
-}): StageRenderNote[] {
-  const { chordBlocks, chordOctaveShift = 0, tracks, channels } = params;
+  pattern?: string;
+  styleMarkers?: StyleMarker[];
+  customPatterns?: PatternDef[];
+}
+
+/**
+ * Función pura que compila y normaliza las notas de armonía y melodía
+ * para su visualización en el Waterfall (tanto en vivo como en renderizado de video),
+ * resolviendo con precisión los patrones rítmicos y marcadores de estilo en la línea de tiempo.
+ */
+export function extractStageTimelineNotes(params: ExtractStageTimelineNotesParams): StageRenderNote[] {
+  const {
+    chordBlocks,
+    chordOctaveShift = 0,
+    tracks,
+    channels,
+    pattern = 'hold',
+    styleMarkers = [],
+    customPatterns = []
+  } = params;
   const list: StageRenderNote[] = [];
 
   const chordChannel = channels.chords || {
@@ -49,36 +68,43 @@ export function extractStageTimelineNotes(params: {
     color: HARMONY_NOTE_COLOR
   };
 
-  (chordBlocks || []).forEach((block) => {
-    const notes = getBlockNotes({
-      chord: block.chord,
-      voicing: block.voicing,
-      inversion: block.inversion,
-      octaveShift: chordOctaveShift || 0,
-      type: block.type,
-      bassNote: block.bassNote
-    });
+  // Reemplazar azul chillón (#00ffcc o #00e5ff) por color suave si viene de sesiones previas
+  const chordColor = (chordChannel.color === '#00ffcc' || chordChannel.color === '#00e5ff')
+    ? HARMONY_NOTE_COLOR
+    : (chordChannel.color || HARMONY_NOTE_COLOR);
 
-    notes.forEach((pitch, i) => {
-      const midi = noteToMidi(pitch);
-      list.push({
-        id: `chord-${block.id}-${i}-${pitch}`,
-        midi,
-        pitchName: pitch,
-        startBeat: block.startBeat,
-        durationBeats: block.durationBeats,
-        velocity: 0.7,
-        channelId: 'chords',
-        trackName: chordChannel.name || 'Harmony',
-        color: HARMONY_NOTE_COLOR,
-        type: 'harmony'
+  (chordBlocks || []).forEach((block) => {
+    const segments = segmentChordBlockByStyleMarkers(block, styleMarkers, pattern);
+
+    segments.forEach((seg, segIdx) => {
+      const rendered = renderChordPattern(
+        seg.block,
+        seg.pattern,
+        customPatterns,
+        chordOctaveShift
+      );
+
+      rendered.forEach((rn, rnIdx) => {
+        const midi = noteToMidi(rn.name);
+        list.push({
+          id: `chord-${block.id}-${segIdx}-${rnIdx}-${rn.name}-${rn.timeBeats}`,
+          midi,
+          pitchName: rn.name,
+          startBeat: rn.timeBeats,
+          durationBeats: rn.durationBeats,
+          velocity: rn.velocity,
+          channelId: 'chords',
+          trackName: chordChannel.name || 'Harmony',
+          color: chordColor,
+          type: 'harmony'
+        });
       });
     });
   });
 
   (tracks || []).forEach((track, trackIdx) => {
     const channel = channels[track.channelId];
-    const trackColor = LOW_SAT_TRACK_PALETTE[trackIdx % LOW_SAT_TRACK_PALETTE.length];
+    const trackColor = track.color || channel?.color || PIANO_ROLL_COLOR_PALETTE[trackIdx % PIANO_ROLL_COLOR_PALETTE.length];
 
     (track.notes || []).forEach((n: any) => {
       list.push({
@@ -107,6 +133,9 @@ export function extractStageTimelineNotes(params: {
 export function useStageTimelineNotes() {
   const chordBlocks = useSongStore((state) => state.chordBlocks);
   const chordOctaveShift = useSongStore((state) => state.chordOctaveShift);
+  const pattern = useSongStore((state) => state.pattern);
+  const styleMarkers = useSongStore((state) => state.styleMarkers);
+  const customPatterns = useSongStore((state) => state.customPatterns);
   const tracks = useSongStore((state) => state.tracks);
   const channels = useSongStore((state) => state.channels);
 
@@ -115,9 +144,12 @@ export function useStageTimelineNotes() {
       chordBlocks,
       chordOctaveShift,
       tracks,
-      channels
+      channels,
+      pattern,
+      styleMarkers,
+      customPatterns
     });
-  }, [chordBlocks, chordOctaveShift, tracks, channels]);
+  }, [chordBlocks, chordOctaveShift, tracks, channels, pattern, styleMarkers, customPatterns]);
 
   // Calcular longitud máxima de la canción en compases/beats
   const maxBeat = useMemo(() => {
@@ -134,3 +166,4 @@ export function useStageTimelineNotes() {
     maxBeat
   };
 }
+

@@ -10,7 +10,7 @@ import type {
   ScheduledDrumEvent, 
   ScheduledSessionEvents 
 } from './audioTypes';
-import { renderChordPattern, createTempoMap } from '../music';
+import { renderChordPattern, createTempoMap, segmentChordBlockByStyleMarkers } from '../music';
 import { flattenPatternChain } from '../../utils/typeDefinitions';
 import type { PatternDef } from '../../patterns/patternTypes';
 
@@ -54,23 +54,16 @@ export function scheduleSessionTimeline(
     maxBeat = Math.max(maxBeat, block.startBeat + block.durationBeats);
     if (!isChordsAudible) return;
 
-    // Encontrar el patrón aplicable según los styleMarkers
-    let activePattern = defaultPattern;
-    for (const marker of styleMarkers) {
-      if (marker.beat <= block.startBeat) {
-        activePattern = marker.pattern;
-      } else {
-        break;
-      }
-    }
-
-    const rendered = renderChordPattern(block, activePattern, customPatterns, chordOctaveShift);
-    rendered.forEach(rn => {
-      chordEvents.push({
-        note: rn.name,
-        timeSeconds: tempoMap.beatToSeconds(rn.timeBeats),
-        durationSeconds: tempoMap.getDurationSeconds(rn.timeBeats, rn.durationBeats),
-        velocity: rn.velocity
+    const segments = segmentChordBlockByStyleMarkers(block, styleMarkers, defaultPattern);
+    segments.forEach(seg => {
+      const rendered = renderChordPattern(seg.block, seg.pattern, customPatterns, chordOctaveShift);
+      rendered.forEach(rn => {
+        chordEvents.push({
+          note: rn.name,
+          timeSeconds: tempoMap.beatToSeconds(rn.timeBeats),
+          durationSeconds: tempoMap.getDurationSeconds(rn.timeBeats, rn.durationBeats),
+          velocity: rn.velocity
+        });
       });
     });
   });

@@ -22,7 +22,7 @@ export const DEFAULT_CHANNELS: Record<string, ChannelConfig> = {
     pan: 0,
     muted: false,
     solo: false,
-    color: '#00ffcc'
+    color: '#4d627d'
   },
   melody: {
     id: 'melody',
@@ -33,7 +33,7 @@ export const DEFAULT_CHANNELS: Record<string, ChannelConfig> = {
     pan: 0,
     muted: false,
     solo: false,
-    color: '#ff00aa'
+    color: '#6880ad'
   },
   drums: {
     id: 'drums',

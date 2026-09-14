@@ -175,7 +175,10 @@ export async function exportStageToMp4(
     chordBlocks: session.harmony.chordBlocks,
     chordOctaveShift: session.harmony.chordOctaveShift,
     tracks: session.tracks,
-    channels: session.mixer.channels
+    channels: session.mixer.channels,
+    pattern: session.harmony.defaultPattern,
+    styleMarkers: session.harmony.styleMarkers,
+    customPatterns
   });
 
   const particles: StageParticle[] = [];

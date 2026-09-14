@@ -25,7 +25,8 @@ const PianoKey = React.memo(({
   isCenterNote,
   style,
   onSetCenterNote,
-  activeChannelId
+  activeChannelId,
+  melodyColor
 }: { 
   keyDef: KeyDef, 
   isMelody: boolean, 
@@ -33,16 +34,25 @@ const PianoKey = React.memo(({
   isCenterNote: boolean,
   style?: React.CSSProperties,
   onSetCenterNote: (noteName: string) => void,
-  activeChannelId: string
+  activeChannelId: string,
+  melodyColor?: string
 }) => {
   const activeClass = isMelody ? 'active-melody' : isHarmony ? 'active' : '';
   const isBlack = keyDef.isBlack;
   const className = `top-piano-key ${isBlack ? 'black' : 'white'} ${activeClass}`;
   
+  const melodyStyle: React.CSSProperties = isMelody && melodyColor ? {
+    background: isBlack
+      ? `linear-gradient(to bottom, ${melodyColor} 0%, #15101c 100%)`
+      : `linear-gradient(to bottom, ${melodyColor} 0%, #201a2c 100%)`,
+    boxShadow: `inset 0 0 5px ${melodyColor}, 0 0 10px ${melodyColor}`,
+    borderRightColor: '#14111a'
+  } : {};
+
   return (
     <div
       className={className}
-      style={style}
+      style={{ ...style, ...melodyStyle }}
       title={`${keyDef.noteName} (Click izq: probar | Click dcho: definir como nota central)`}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -131,6 +141,7 @@ export const PianoVisualizer: React.FC = () => {
                 isCenterNote={isCenterNote}
                 onSetCenterNote={setKeyboardCenterNote}
                 activeChannelId={activeChannelId}
+                melodyColor={activeTrack?.color}
               />
             );
           })}
@@ -170,6 +181,7 @@ export const PianoVisualizer: React.FC = () => {
                 style={style}
                 onSetCenterNote={setKeyboardCenterNote}
                 activeChannelId={activeChannelId}
+                melodyColor={activeTrack?.color}
               />
             );
           })}

@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus } from 'lucide-react';
 import type { PianoRollTrack } from '../../../utils/typeDefinitions';
+import { ContextMenuContainer } from '../../ui/ContextMenuContainer';
+import { PIANO_ROLL_COLOR_PALETTE } from '../../visualizer/hooks/useStageTimelineNotes';
 
 interface PianoRollTrackHeaderProps {
   tracks: PianoRollTrack[];
@@ -9,6 +11,7 @@ interface PianoRollTrackHeaderProps {
   addPianoRollTrack: () => void;
   removePianoRollTrack: (id: string) => void;
   renamePianoRollTrack: (id: string, name: string) => void;
+  setTrackColor: (id: string, color: string) => void;
   onRequestDeleteTrack: (trackId: string, trackName: string) => void;
 }
 
@@ -19,10 +22,31 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
   addPianoRollTrack,
   removePianoRollTrack,
   renamePianoRollTrack,
+  setTrackColor,
   onRequestDeleteTrack
 }) => {
   const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
   const [editingTrackName, setEditingTrackName] = useState<string>('');
+  const [colorPickerTarget, setColorPickerTarget] = useState<{ trackId: string; x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!colorPickerTarget) return;
+    const handleDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.track-color-picker-popover')) {
+        setColorPickerTarget(null);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setColorPickerTarget(null);
+    };
+    window.addEventListener('mousedown', handleDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', handleDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [colorPickerTarget]);
 
   return (
     <div className="piano-track-strip">
@@ -30,16 +54,29 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
         {tracks.map((track) => {
           const isActive = track.id === activeTrackId;
           const isEditing = editingTrackId === track.id;
+          const dotColor = track.color || '#6880ad';
           return (
             <div
               key={track.id}
               className={`piano-track-tab-chip ${isActive ? 'active' : ''}`}
               onClick={() => setActiveTrackId(track.id)}
-              title="Doble click para renombrar pista"
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setColorPickerTarget({
+                  trackId: track.id,
+                  x: e.clientX,
+                  y: e.clientY
+                });
+              }}
+              style={{
+                borderBottom: isActive ? `2px solid ${dotColor}` : undefined
+              }}
+              title="Click para seleccionar | Doble click para renombrar | Click derecho para cambiar color"
             >
               <span 
                 className="track-dot" 
-                style={{ backgroundColor: track.color || '#ff00aa', color: track.color || '#ff00aa' }} 
+                style={{ backgroundColor: dotColor, color: dotColor }} 
               />
               {isEditing ? (
                 <input
@@ -109,6 +146,60 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
           <Plus size={13} />
         </button>
       </div>
+
+      {colorPickerTarget && (
+        <ContextMenuContainer
+          x={colorPickerTarget.x}
+          y={colorPickerTarget.y}
+          className="track-color-picker-popover"
+        >
+          <div className="track-color-picker-header">
+            <span>Color de Pista</span>
+            <button
+              type="button"
+              className="track-color-picker-close"
+              onClick={() => setColorPickerTarget(null)}
+              title="Cerrar"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="track-color-picker-grid">
+            {PIANO_ROLL_COLOR_PALETTE.map((c) => {
+              const currentTrack = tracks.find(t => t.id === colorPickerTarget.trackId);
+              const isSelected = currentTrack?.color?.toLowerCase() === c.toLowerCase();
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  className={`track-color-swatch ${isSelected ? 'selected' : ''}`}
+                  style={{ backgroundColor: c }}
+                  onClick={() => {
+                    setTrackColor(colorPickerTarget.trackId, c);
+                    setColorPickerTarget(null);
+                  }}
+                  title={c}
+                >
+                  {isSelected && <span className="swatch-check">✓</span>}
+                </button>
+              );
+            })}
+          </div>
+          <div className="track-color-picker-custom">
+            <label className="track-color-picker-custom-label">
+              <input
+                type="color"
+                value={tracks.find(t => t.id === colorPickerTarget.trackId)?.color || '#6880ad'}
+                onChange={(e) => {
+                  setTrackColor(colorPickerTarget.trackId, e.target.value);
+                }}
+                className="track-color-picker-input"
+              />
+              <span>Personalizado</span>
+            </label>
+          </div>
+        </ContextMenuContainer>
+      )}
     </div>
   );
 });
