@@ -24,43 +24,45 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     this.currentSample = 0;
 
     this.params = {
-      osc1Wave: 'sawtooth',
+      osc1Wave: 'triangle',
       osc1Vol: 0.8,
       osc1Octave: 0,
       osc1Semi: 0,
       osc1Detune: 0,
 
-      osc2Enabled: false,
-      osc2Wave: 'square',
-      osc2Vol: 0.5,
+      osc2Enabled: true,
+      osc2Wave: 'sawtooth',
+      osc2Vol: 0.4,
       osc2Octave: 0,
       osc2Semi: 0,
-      osc2Detune: 5,
+      osc2Detune: 6,
 
       subEnabled: false,
-      subVol: 0.4,
+      subWave: 'sine',
+      subVol: 0.0,
       subOctave: -1,
 
       noiseEnabled: false,
-      noiseVol: 0.2,
+      noiseType: 'white',
+      noiseVol: 0.0,
 
       filterEnabled: true,
       filterType: 'lowpass',
-      filterFreq: 2500,
+      filterFreq: 6500,
       filterQ: 1.5,
-      filterDrive: 0.0,
+      filterDrive: 0.1,
 
-      attack: 0.01,
-      decay: 0.2,
-      sustain: 0.7,
-      release: 0.3,
+      attack: 0.04,
+      decay: 0.25,
+      sustain: 0.65,
+      release: 0.6,
 
       glide: 0.0,
       gain: 0.7,
       pan: 0.0
     };
 
-    // Pre-asignar todas las voces
+    // Pre-asignar todas las voces con estados limpios y filtros de ruido rosa
     for (let i = 0; i < this.maxVoices; i++) {
       this.voices.push({
         active: false,
@@ -77,6 +79,9 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
         targetReleaseSample: -1,
         ic1eq: 0,
         ic2eq: 0,
+        b0: 0,
+        b1: 0,
+        b2: 0,
         age: 0
       });
     }
@@ -98,7 +103,31 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
         case 'setParams':
           if (data.params) {
             Object.assign(this.params, data.params);
+            if (!this.params.noiseEnabled || this.params.noiseVol <= 0.0001) {
+              for (let i = 0; i < this.maxVoices; i++) {
+                this.voices[i].b0 = 0;
+                this.voices[i].b1 = 0;
+                this.voices[i].b2 = 0;
+              }
+            }
           }
+          break;
+        case 'getDebug':
+          this.port.postMessage({
+            type: 'debug',
+            currentSample: this.currentSample,
+            params: this.params,
+            voices: this.voices.map((v) => ({
+              active: v.active,
+              midi: v.midi,
+              envStage: v.envStage,
+              envLevel: v.envLevel,
+              startSample: v.startSample,
+              targetReleaseSample: v.targetReleaseSample,
+              ic1eq: v.ic1eq,
+              ic2eq: v.ic2eq
+            }))
+          });
           break;
       }
     };
@@ -142,6 +171,16 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     targetVoice.startSample = targetStart;
     targetVoice.age = ++this.ageCounter;
 
+    // Limpieza estricta de fases y estados resonantes anteriores
+    targetVoice.phase1 = 0;
+    targetVoice.phase2 = 0;
+    targetVoice.phaseSub = 0;
+    targetVoice.ic1eq = 0;
+    targetVoice.ic2eq = 0;
+    targetVoice.b0 = 0;
+    targetVoice.b1 = 0;
+    targetVoice.b2 = 0;
+
     if (startDelay > 0) {
       targetVoice.envStage = 'pending';
       targetVoice.envLevel = 0;
@@ -156,9 +195,15 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
   }
 
   noteOff(midi, delaySamples) {
-    const releaseSample = delaySamples && delaySamples > 0 ? this.currentSample + Math.floor(delaySamples) : this.currentSample;
+    const releaseSample =
+      delaySamples && delaySamples > 0 ? this.currentSample + Math.floor(delaySamples) : this.currentSample;
     for (let i = 0; i < this.maxVoices; i++) {
-      if (this.voices[i].active && this.voices[i].midi === midi && this.voices[i].envStage !== 'release' && this.voices[i].envStage !== 'idle') {
+      if (
+        this.voices[i].active &&
+        this.voices[i].midi === midi &&
+        this.voices[i].envStage !== 'release' &&
+        this.voices[i].envStage !== 'idle'
+      ) {
         if (delaySamples && delaySamples > 0) {
           this.voices[i].targetReleaseSample = releaseSample;
         } else {
@@ -170,7 +215,8 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
   }
 
   allNotesOff(delaySamples) {
-    const releaseSample = delaySamples && delaySamples > 0 ? this.currentSample + Math.floor(delaySamples) : this.currentSample;
+    const releaseSample =
+      delaySamples && delaySamples > 0 ? this.currentSample + Math.floor(delaySamples) : this.currentSample;
     for (let i = 0; i < this.maxVoices; i++) {
       if (this.voices[i].active && this.voices[i].envStage !== 'idle') {
         if (delaySamples && delaySamples > 0) {
@@ -221,19 +267,27 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     const sr = sampleRate;
     const dtBase = 1.0 / sr;
 
-    // Coeficientes de envolvente por bloque
+    // Coeficientes canónicos de envolvente ADSR: factor T60 (-60 dB = 0.001)
+    const TIME_FACTOR = -6.907755;
     const attackStep = dtBase / Math.max(0.001, this.params.attack);
-    const decayFactor = Math.exp(-dtBase / Math.max(0.001, this.params.decay));
-    const releaseFactor = Math.exp(-dtBase / Math.max(0.001, this.params.release));
-    const sustainLevel = this.params.sustain;
+    const decayFactor = Math.exp((TIME_FACTOR * dtBase) / Math.max(0.001, this.params.decay));
+    const releaseFactor = Math.exp((TIME_FACTOR * dtBase) / Math.max(0.001, this.params.release));
+    const sustainLevel = Math.max(0, Math.min(1, this.params.sustain));
     const glideFactor = this.params.glide > 0.001 ? Math.exp(-dtBase / Math.max(0.005, this.params.glide)) : 0;
 
-    // Precalcular factores de transposición de osciladores (0 Math.pow por muestra)
-    const osc1PitchFactor = Math.pow(2, (this.params.osc1Octave * 12 + this.params.osc1Semi + this.params.osc1Detune / 100) / 12);
-    const osc2PitchFactor = this.params.osc2Enabled ? Math.pow(2, (this.params.osc2Octave * 12 + this.params.osc2Semi + this.params.osc2Detune / 100) / 12) : 1;
-    const subPitchFactor = this.params.subEnabled ? Math.pow(2, (this.params.subOctave * 12) / 12) : 0.5;
+    // Precalcular factores de transposición de osciladores
+    const osc1PitchFactor = Math.pow(
+      2,
+      (this.params.osc1Octave * 12 + this.params.osc1Semi + this.params.osc1Detune / 100) / 12
+    );
+    const osc2PitchFactor = this.params.osc2Enabled
+      ? Math.pow(2, (this.params.osc2Octave * 12 + this.params.osc2Semi + this.params.osc2Detune / 100) / 12)
+      : 1;
+    const subPitchFactor = this.params.subEnabled
+      ? Math.pow(2, (this.params.subOctave * 12) / 12)
+      : 0.5;
 
-    // Pre-filtrar índices de voces activas o pendientes para este bloque
+    // Pre-filtrar índices de voces activas o pendientes
     const activeIndices = [];
     for (let v = 0; v < this.maxVoices; v++) {
       if (this.voices[v].active && this.voices[v].envStage !== 'idle') {
@@ -245,13 +299,16 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
       return true;
     }
 
-    // Coeficientes del Filtro SVF (Cytomic / Andrew Simper)
-    const cutoffClamped = Math.max(20, Math.min(sr * 0.49, this.params.filterFreq));
-    const g = Math.tan((Math.PI * cutoffClamped) / sr);
-    const k = 1.0 / Math.max(0.1, this.params.filterQ);
-    const a1 = 1.0 / (1.0 + g * (g + k));
-    const a2 = g * a1;
-    const a3 = g * a2;
+    // Coeficientes del Filtro SVF (Solo calculados si filterEnabled es true)
+    let a1 = 0, a2 = 0, a3 = 0, k = 1;
+    if (this.params.filterEnabled) {
+      const cutoffClamped = Math.max(20, Math.min(sr * 0.49, this.params.filterFreq));
+      const g = Math.tan((Math.PI * cutoffClamped) / sr);
+      k = 1.0 / Math.max(0.1, this.params.filterQ);
+      a1 = 1.0 / (1.0 + g * (g + k));
+      a2 = g * a1;
+      a3 = g * a2;
+    }
 
     const pan = Math.max(-1, Math.min(1, this.params.pan));
     const gainL = this.params.gain * (pan <= 0 ? 1 : 1 - pan);
@@ -284,7 +341,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
           voice.targetReleaseSample = -1;
         }
 
-        // 2. Cálculo de Envolvente ADSR
+        // 2. Cálculo de Envolvente ADSR con curvas analógicas T60
         switch (voice.envStage) {
           case 'attack':
             voice.envLevel += attackStep;
@@ -295,16 +352,26 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
             break;
           case 'decay':
             voice.envLevel = sustainLevel + (voice.envLevel - sustainLevel) * decayFactor;
+            if (sustainLevel <= 0.001 && voice.envLevel < 0.0005) {
+              voice.envLevel = 0;
+              voice.envStage = 'idle';
+              voice.active = false;
+              voice.ic1eq = 0;
+              voice.ic2eq = 0;
+              continue;
+            }
             break;
           case 'sustain':
             voice.envLevel = sustainLevel;
             break;
           case 'release':
             voice.envLevel *= releaseFactor;
-            if (voice.envLevel < 0.0001) {
+            if (voice.envLevel < 0.0005) {
               voice.envLevel = 0;
               voice.envStage = 'idle';
               voice.active = false;
+              voice.ic1eq = 0;
+              voice.ic2eq = 0;
               continue;
             }
             break;
@@ -317,31 +384,40 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
           voice.frequency = voice.targetFrequency;
         }
 
-        // 3. Cálculo de Osciladores con factores de frecuencia precalculados
+        // 3. OSC 1
         const dt1 = voice.frequency * osc1PitchFactor * dtBase;
         voice.phase1 = (voice.phase1 + dt1) % 1.0;
         let voiceSample = this.sampleOsc(this.params.osc1Wave, voice.phase1, dt1) * this.params.osc1Vol;
 
         // OSC 2
-        if (this.params.osc2Enabled) {
+        if (this.params.osc2Enabled && this.params.osc2Vol > 0.0001) {
           const dt2 = voice.frequency * osc2PitchFactor * dtBase;
           voice.phase2 = (voice.phase2 + dt2) % 1.0;
           voiceSample += this.sampleOsc(this.params.osc2Wave, voice.phase2, dt2) * this.params.osc2Vol;
         }
 
-        // Sub-Osc (Onda cuadrada pura 1 o 2 octavas abajo)
-        if (this.params.subEnabled) {
+        // Sub-Oscilador multiforma
+        if (this.params.subEnabled && this.params.subVol > 0.0001) {
           const dtSub = voice.frequency * subPitchFactor * dtBase;
           voice.phaseSub = (voice.phaseSub + dtSub) % 1.0;
-          voiceSample += (voice.phaseSub < 0.5 ? 1.0 : -1.0) * this.params.subVol;
+          voiceSample += this.sampleOsc(this.params.subWave || 'sine', voice.phaseSub, dtSub) * this.params.subVol;
         }
 
-        // Generador de Ruido
-        if (this.params.noiseEnabled) {
-          voiceSample += (Math.random() * 2.0 - 1.0) * this.params.noiseVol;
+        // Generador de Ruido (Blanco y Rosa 1/f)
+        if (this.params.noiseEnabled && this.params.noiseVol > 0.0001) {
+          const white = Math.random() * 2.0 - 1.0;
+          if (this.params.noiseType === 'pink') {
+            voice.b0 = 0.99765 * voice.b0 + white * 0.0990460;
+            voice.b1 = 0.96300 * voice.b1 + white * 0.2965164;
+            voice.b2 = 0.57000 * voice.b2 + white * 1.0526913;
+            const pink = voice.b0 + voice.b1 + voice.b2 + white * 0.1848;
+            voiceSample += pink * 0.18 * this.params.noiseVol;
+          } else {
+            voiceSample += white * this.params.noiseVol;
+          }
         }
 
-        // 4. Filtro SVF Cytomic
+        // 4. Filtro SVF Cytomic opcional
         if (this.params.filterEnabled) {
           const v0 = voiceSample;
           const v1 = a1 * voice.ic1eq + a2 * (v0 - voice.ic2eq);

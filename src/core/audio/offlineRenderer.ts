@@ -20,6 +20,9 @@ import { PIANO_URLS, PIANO_BASE_URL, preloadPianoBuffers, getSharedPianoBuffers 
 import { PhosphorAnalogSynth } from './engine/PhosphorAnalogSynth';
 import { normalizeSynthSettings } from './engine/synthPresets';
 import { faderToDb } from './engine/MixerGraph';
+import { normalizeTrackDb } from './engine/audioTrackMath';
+import { audioBufferRegistry } from './audioBufferRegistry';
+import { createTempoMap } from '../music';
 
 /**
  * Renderiza una sesión completa de forma offline a velocidad máxima de CPU
@@ -88,12 +91,26 @@ export async function renderSessionToAudioBuffer(
       let node = channelNodes.get(channelId);
       if (!node) {
         const ch = channels[channelId];
-        const volVal = ch?.volume ?? 80;
-        const volDb = faderToDb(volVal);
-        const pan = ch ? Math.max(-1, Math.min(1, ch.pan)) : 0;
+        const audioTracks = (session as any).audio?.tracks || [];
+        const audioTrack = audioTracks.find((t: any) => t.id === channelId);
+
+        let volDb = 0;
+        let pan = 0;
+        let isMuted = false;
+
+        if (ch) {
+          volDb = faderToDb(ch.volume ?? 80);
+          pan = Math.max(-1, Math.min(1, ch.pan ?? 0));
+          isMuted = Boolean(ch.muted);
+        } else if (audioTrack) {
+          const trackDb = normalizeTrackDb(audioTrack.volume);
+          volDb = trackDb <= -59 ? -Infinity : Math.min(24, trackDb);
+          pan = Math.max(-1, Math.min(1, audioTrack.pan ?? 0));
+          isMuted = Boolean(audioTrack.muted);
+        }
 
         const volumeNode = new Tone.Volume(volDb);
-        if (ch?.muted) {
+        if (isMuted) {
           volumeNode.mute = true;
         }
         const pannerNode = new Tone.Panner(pan);
@@ -245,6 +262,45 @@ export async function renderSessionToAudioBuffer(
         }
       } catch (_) {}
     });
+
+    // 9. Programar Pistas y Clips de Audio Multitrack
+    const audioSession = (session as any).audio;
+    if (audioSession?.clips && audioSession.clips.length > 0) {
+      const tempoMap = createTempoMap(session.transport.bpm, session.transport.tempoMarkers || []);
+      const audioTracks = audioSession.tracks || [];
+      const trackMap = new Map(audioTracks.map((t: any) => [t.id, t]));
+      const anySolo = audioTracks.some((t: any) => t.solo);
+
+      for (const clip of audioSession.clips) {
+        if (clip.isMuted) continue;
+        const track = trackMap.get(clip.trackId) as any;
+        if (track?.muted) continue;
+        if (anySolo && !track?.solo) continue;
+
+        const buffer = audioBufferRegistry.getBuffer(clip.bufferId);
+        if (!buffer) continue;
+
+        const clipStartSec = tempoMap.beatToSeconds(clip.startBeat);
+        const playDuration = clip.durationSeconds;
+        const sourceOffset = clip.sourceOffsetSeconds;
+
+        if (clipStartSec >= totalDurationSeconds) continue;
+
+        try {
+          const toneBuffer = new Tone.ToneAudioBuffer(buffer);
+          const channelNode = getChannelNode(clip.trackId);
+          const clipGain = clip.gain ?? 1.0;
+          const clipVolDb = Tone.gainToDb(clipGain);
+          const clipVolNode = new Tone.Volume(clipVolDb).connect(channelNode.volumeNode);
+          enforceStereo(clipVolNode);
+
+          const player = new Tone.Player(toneBuffer).connect(clipVolNode);
+          player.fadeIn = Math.max(0.003, clip.fadeInSeconds || 0.003);
+          player.fadeOut = Math.max(0.003, clip.fadeOutSeconds || 0.003);
+          player.start(clipStartSec, sourceOffset, playDuration);
+        } catch (_) {}
+      }
+    }
 
   }, totalDurationSeconds);
 

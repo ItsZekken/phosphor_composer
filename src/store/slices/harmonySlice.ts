@@ -1,6 +1,6 @@
 import type { SliceCreator, HarmonyState, HarmonyActions } from '../types';
-import type { ChordBlock, NoteClass } from '../../utils/typeDefinitions';
-import { getHarmonicSuggestions, detectKey } from '../../core/music';
+import type { ChordBlock } from '../../utils/typeDefinitions';
+import { getHarmonicSuggestions, detectKey, noteToMod12 } from '../../core/music';
 import { loadCustomPatterns, invalidatePatternCache, getDefaultCustomPatterns } from '../../patterns/patternLoader';
 import { generateId } from '../../utils/idGenerator';
 
@@ -61,7 +61,7 @@ export const createHarmonySlice: SliceCreator<HarmonyState & HarmonyActions> = (
         selectedChordIds: [newBlock.id]
       };
     });
-    if (get().isAutoSuggestions) get().updateSuggestions();
+    if (get().isAutoKey || get().isAutoSuggestions) get().updateSuggestions();
   },
 
   updateChordBlock: (id, updates) => {
@@ -69,7 +69,7 @@ export const createHarmonySlice: SliceCreator<HarmonyState & HarmonyActions> = (
       chordBlocks: state.chordBlocks.map(b => b.id === id ? { ...b, ...updates } : b)
         .sort((a, b) => a.startBeat - b.startBeat)
     }));
-    if (get().isAutoSuggestions) get().updateSuggestions();
+    if (get().isAutoKey || get().isAutoSuggestions) get().updateSuggestions();
   },
 
   removeChordBlock: (id) => {
@@ -78,7 +78,7 @@ export const createHarmonySlice: SliceCreator<HarmonyState & HarmonyActions> = (
       selectedChordId: state.selectedChordId === id ? null : state.selectedChordId,
       selectedChordIds: state.selectedChordIds.filter(selectedId => selectedId !== id)
     }));
-    if (get().isAutoSuggestions) get().updateSuggestions();
+    if (get().isAutoKey || get().isAutoSuggestions) get().updateSuggestions();
   },
 
   setSelectedChordId: (selectedChordId) => {
@@ -143,7 +143,7 @@ export const createHarmonySlice: SliceCreator<HarmonyState & HarmonyActions> = (
       selectedChordId: null,
       selectedChordIds: []
     }));
-    if (get().isAutoSuggestions) get().updateSuggestions();
+    if (get().isAutoKey || get().isAutoSuggestions) get().updateSuggestions();
   },
 
   pasteChords: (targetBeat) => {
@@ -179,7 +179,7 @@ export const createHarmonySlice: SliceCreator<HarmonyState & HarmonyActions> = (
       selectedChordId: newIds[0] || null
     });
 
-    if (get().isAutoSuggestions) get().updateSuggestions();
+    if (get().isAutoKey || get().isAutoSuggestions) get().updateSuggestions();
   },
 
   duplicateSelectedChords: () => {
@@ -211,7 +211,7 @@ export const createHarmonySlice: SliceCreator<HarmonyState & HarmonyActions> = (
       selectedChordId: newIds[0] || null
     });
 
-    if (get().isAutoSuggestions) get().updateSuggestions();
+    if (get().isAutoKey || get().isAutoSuggestions) get().updateSuggestions();
   },
 
   deleteSelectedChords: () => {
@@ -222,7 +222,7 @@ export const createHarmonySlice: SliceCreator<HarmonyState & HarmonyActions> = (
       selectedChordId: null,
       selectedChordIds: []
     }));
-    if (get().isAutoSuggestions) get().updateSuggestions();
+    if (get().isAutoKey || get().isAutoSuggestions) get().updateSuggestions();
   },
 
   moveSelectedChords: (deltaBeats) => {
@@ -244,7 +244,7 @@ export const createHarmonySlice: SliceCreator<HarmonyState & HarmonyActions> = (
       }).sort((a, b) => a.startBeat - b.startBeat)
     }));
 
-    if (get().isAutoSuggestions) get().updateSuggestions();
+    if (get().isAutoKey || get().isAutoSuggestions) get().updateSuggestions();
   },
 
   addStyleMarker: (marker) => set((state) => ({
@@ -276,30 +276,63 @@ export const createHarmonySlice: SliceCreator<HarmonyState & HarmonyActions> = (
 
   updateSuggestions: () => {
     const state = get();
-    const { chordBlocks, tracks, activeTrackId, selectedChordId, currentBeat } = state;
+    const { chordBlocks, tracks, activeTrackId, selectedChordId, currentBeat, isAutoKey } = state;
+
+    let currentKey = state.key;
+    let currentScale = state.scale;
+    let newDetectedKey = state.detectedKey;
+
+    // Si Auto Key está activo, detectar automáticamente la tonalidad de la progresión
+    if (isAutoKey) {
+      if (chordBlocks.length > 0) {
+        const detected = detectKey(chordBlocks.map((b) => b.chord));
+        if (detected) {
+          currentKey = detected.key;
+          currentScale = detected.scale;
+          newDetectedKey = `${detected.key} ${detected.scale}`;
+          if (state.key !== detected.key || state.scale !== detected.scale || state.detectedKey !== newDetectedKey) {
+            set({ key: detected.key, scale: detected.scale, detectedKey: newDetectedKey });
+          }
+        } else if (state.detectedKey !== null) {
+          set({ detectedKey: null });
+          newDetectedKey = null;
+        }
+      } else {
+        if (state.detectedKey !== null) {
+          set({ detectedKey: null });
+          newDetectedKey = null;
+        }
+      }
+    }
 
     if (chordBlocks.length === 0) {
-      set({ chordSuggestions: [], ghostNotes: [] });
+      // Sugerencias de apertura basadas en la tonalidad activa
+      const openingSuggestions = getHarmonicSuggestions(currentKey, currentScale, []);
+      set({ chordSuggestions: openingSuggestions });
       return;
     }
+
+    // Ordenar bloques de acordes cronológicamente
+    const sortedBlocks = [...chordBlocks].sort((a, b) => a.startBeat - b.startBeat);
 
     const currentBlock = selectedChordId
-      ? chordBlocks.find((b) => b.id === selectedChordId)
-      : chordBlocks.find(
+      ? sortedBlocks.find((b) => b.id === selectedChordId)
+      : sortedBlocks.find(
           (b) => currentBeat >= b.startBeat && currentBeat < b.startBeat + b.durationBeats
-        ) || chordBlocks[chordBlocks.length - 1];
+        ) || sortedBlocks[sortedBlocks.length - 1];
 
     if (!currentBlock) {
-      set({ chordSuggestions: [] });
+      const openingSuggestions = getHarmonicSuggestions(currentKey, currentScale, []);
+      set({ chordSuggestions: openingSuggestions });
       return;
     }
 
-    const effectiveKey = (state.key || detectKey(chordBlocks.map((b) => b.chord))) as NoteClass;
-    const suggestions = getHarmonicSuggestions(
-      effectiveKey,
-      state.scale,
-      chordBlocks.map((b) => b.chord)
-    );
+    // Contexto armónico: progresión hasta el acorde activo
+    const currentIdx = sortedBlocks.findIndex((b) => b.id === currentBlock.id);
+    const progressionUpToCurrent = (currentIdx !== -1
+      ? sortedBlocks.slice(0, currentIdx + 1)
+      : sortedBlocks
+    ).map((b) => b.chord);
 
     const activeTrack = tracks.find((t) => t.id === activeTrackId);
     const activeMelodyNotes = activeTrack ? activeTrack.notes : [];
@@ -307,15 +340,15 @@ export const createHarmonySlice: SliceCreator<HarmonyState & HarmonyActions> = (
     const activeNotesAtTime = activeMelodyNotes.filter(
       (n) => n.startBeat >= currentBlock.startBeat && n.startBeat < currentBlock.startBeat + currentBlock.durationBeats
     );
+    const melodyPitchClasses = activeNotesAtTime.map((n) => noteToMod12(n.note));
 
-    const ghostNotes = activeNotesAtTime.map((n) => ({
-      id: n.id,
-      note: n.note,
-      midi: n.midi,
-      startBeat: n.startBeat,
-      durationBeats: n.durationBeats
-    }));
+    const suggestions = getHarmonicSuggestions(
+      currentKey,
+      currentScale,
+      progressionUpToCurrent,
+      melodyPitchClasses
+    );
 
-    set({ chordSuggestions: suggestions, ghostNotes });
+    set({ chordSuggestions: suggestions });
   }
 });

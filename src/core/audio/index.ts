@@ -13,4 +13,3 @@ export * from './engine/ChannelInstrumentManager';
 export * from './engine/DrumSoundManager';
 export * from './engine/PreviewManager';
 export * from './engine/AudioTransport';
-export * from './livePitchTracker';

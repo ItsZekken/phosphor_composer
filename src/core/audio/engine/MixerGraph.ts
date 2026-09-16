@@ -6,6 +6,7 @@
 
 import * as Tone from 'tone';
 import type { ChannelConfig } from '../../../utils/typeDefinitions';
+import { normalizeTrackDb } from './audioTrackMath';
 
 export interface ChannelNode {
   volumeNode: Tone.Volume;
@@ -139,6 +140,26 @@ export class MixerGraph {
         nativePanner.channelCount = 2;
         nativePanner.channelCountMode = 'explicit';
       }
+    }
+  }
+
+  /**
+   * Sincroniza volumen, paneo, mute y solo de las pistas de audio multitrack.
+   * Aplica volumen medido directamente en decibeles (-∞ a +24 dB).
+   */
+  public syncAudioTracks(tracks: Array<{ id: string; volume: number; pan: number; muted: boolean; solo: boolean }>) {
+    if (!tracks || tracks.length === 0) return;
+    const anySolo = tracks.some((t) => t.solo);
+    for (const track of tracks) {
+      const node = this.getChannelNode(track.id);
+      const isSilenced = Boolean(track.muted || (anySolo && !track.solo));
+      node.volumeNode.mute = isSilenced;
+      if (!isSilenced) {
+        const volDb = normalizeTrackDb(track.volume);
+        node.volumeNode.volume.value = volDb <= -59 ? -Infinity : Math.min(24, volDb);
+      }
+      const clampedPan = Math.max(-1, Math.min(1, track.pan));
+      node.pannerNode.pan.value = clampedPan;
     }
   }
 

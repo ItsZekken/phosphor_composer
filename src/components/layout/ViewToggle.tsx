@@ -61,6 +61,23 @@ export const ViewToggle = () => {
         DRUM SEQUENCER
       </button>
       <button
+        className={`toggle-btn ${activeView === 'audio-tracks' ? 'active' : ''}`}
+        onClick={() => setActiveView('audio-tracks')}
+      >
+        <span style={{ 
+          display: 'inline-block', 
+          width: '6px', 
+          height: '6px', 
+          borderRadius: '50%', 
+          backgroundColor: activeView === 'audio-tracks' ? '#e5a93c' : '#3a324a', 
+          marginRight: '8px',
+          boxShadow: activeView === 'audio-tracks' ? '0 0 6px #e5a93c, 0 0 10px #e5a93c' : 'none',
+          verticalAlign: 'middle',
+          transition: 'background-color 0.15s'
+        }}></span>
+        TRACKS
+      </button>
+      <button
         className={`toggle-btn ${activeView === 'visualizer' ? 'active' : ''}`}
         onClick={() => setActiveView('visualizer')}
       >

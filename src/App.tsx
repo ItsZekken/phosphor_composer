@@ -13,6 +13,7 @@ import { exportSessionToJson } from './core/session';
 const ChordPlayerView = React.lazy(() => import('./components/chord-player/ChordPlayerView').then(m => ({ default: m.ChordPlayerView })));
 const PianoRollView = React.lazy(() => import('./components/piano-roll/PianoRollView').then(m => ({ default: m.PianoRollView })));
 const DrumSequencerView = React.lazy(() => import('./components/sequencer/DrumSequencerView').then(m => ({ default: m.DrumSequencerView })));
+const AudioTracksView = React.lazy(() => import('./components/audio-tracks/AudioTracksView').then(m => ({ default: m.AudioTracksView })));
 const StageVisualizerView = React.lazy(() => import('./components/visualizer/StageVisualizerView').then(m => ({ default: m.StageVisualizerView })));
 const SettingsPanel = React.lazy(() => import('./components/ui/SettingsPanel').then(m => ({ default: m.SettingsPanel })));
 const SynthConfigModal = React.lazy(() => import('./components/ui/SynthConfigModal').then(m => ({ default: m.SynthConfigModal })));
@@ -171,15 +172,30 @@ export default function App() {
         return;
       }
 
-      // P1: Asegurar que el AudioContext esté activo antes de cualquier nota
-      // (el primer keydown del usuario sirve como gesture para resumir el contexto)
-      toneEngine.init();
-      // Procesar entrada de teclado para tocar melodías en tiempo real
-      toneEngine.handleKeyDown(e);
+      // Atajo 'F' para alternar pantalla completa exclusivamente en la vista STAGE
+      if (store.activeView === 'visualizer' && e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen?.().catch(() => {});
+        } else {
+          document.exitFullscreen?.().catch(() => {});
+        }
+        return;
+      }
+
+      // Teclado virtual melódico: SOLO activo en vistas 'chord' y 'piano-roll'
+      // Libera todas las teclas alfabéticas (A-Z) en 'sequencer', 'audio-tracks' y 'visualizer'
+      if (store.activeView === 'chord' || store.activeView === 'piano-roll') {
+        toneEngine.init();
+        toneEngine.handleKeyDown(e);
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      toneEngine.handleKeyUp(e);
+      const store = useSongStore.getState();
+      if (store.activeView === 'chord' || store.activeView === 'piano-roll') {
+        toneEngine.handleKeyUp(e);
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -225,6 +241,7 @@ export default function App() {
                 {activeView === 'chord' && <ChordPlayerView />}
                 {activeView === 'piano-roll' && <PianoRollView />}
                 {activeView === 'sequencer' && <DrumSequencerView />}
+                {activeView === 'audio-tracks' && <AudioTracksView />}
                 {activeView === 'visualizer' && <StageVisualizerView />}
               </Suspense>
             </main>

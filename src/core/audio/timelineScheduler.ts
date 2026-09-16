@@ -87,7 +87,19 @@ export function scheduleSessionTimeline(
     });
   });
 
-  // 4. Programar Secuenciador de Batería
+  // 4. Clips de Audio Multitrack (Extender maxBeat a la duración total de los clips de audio)
+  const audioSession = (session as any).audio;
+  if (audioSession?.clips && audioSession.clips.length > 0) {
+    audioSession.clips.forEach((clip: any) => {
+      if (clip.isMuted) return;
+      const clipStartSec = tempoMap.beatToSeconds(clip.startBeat);
+      const clipEndSec = clipStartSec + (clip.durationSeconds || 0);
+      const clipEndBeat = tempoMap.secondsToBeat(clipEndSec);
+      maxBeat = Math.max(maxBeat, Math.ceil(clipEndBeat));
+    });
+  }
+
+  // 5. Programar Secuenciador de Batería (ahora maxBeat ya considera los clips de audio)
   const isDrumsAudible = isChannelAudible('drums');
   const drumChannels = session.drums.drumChannels || [];
   const isAnyDrumSolo = drumChannels.some(d => d.solo);

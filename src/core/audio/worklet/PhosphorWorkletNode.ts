@@ -38,27 +38,73 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     this.maxVoices = 16;
     this.ageCounter = 0;
     this.currentSample = 0;
+
     this.params = {
-      osc1Wave: 'sawtooth', osc1Vol: 0.8, osc1Octave: 0, osc1Semi: 0, osc1Detune: 0,
-      osc2Enabled: false, osc2Wave: 'square', osc2Vol: 0.5, osc2Octave: 0, osc2Semi: 0, osc2Detune: 5,
-      subEnabled: false, subVol: 0.4, subOctave: -1,
-      noiseEnabled: false, noiseVol: 0.2,
-      filterEnabled: true, filterType: 'lowpass', filterFreq: 2500, filterQ: 1.5, filterDrive: 0.0,
-      attack: 0.01, decay: 0.2, sustain: 0.7, release: 0.3, glide: 0.0,
-      gain: 0.7, pan: 0.0
+      osc1Wave: 'triangle',
+      osc1Vol: 0.8,
+      osc1Octave: 0,
+      osc1Semi: 0,
+      osc1Detune: 0,
+
+      osc2Enabled: true,
+      osc2Wave: 'sawtooth',
+      osc2Vol: 0.4,
+      osc2Octave: 0,
+      osc2Semi: 0,
+      osc2Detune: 6,
+
+      subEnabled: false,
+      subWave: 'sine',
+      subVol: 0.0,
+      subOctave: -1,
+
+      noiseEnabled: false,
+      noiseType: 'white',
+      noiseVol: 0.0,
+
+      filterEnabled: true,
+      filterType: 'lowpass',
+      filterFreq: 6500,
+      filterQ: 1.5,
+      filterDrive: 0.1,
+
+      attack: 0.04,
+      decay: 0.25,
+      sustain: 0.65,
+      release: 0.6,
+
+      glide: 0.0,
+      gain: 0.7,
+      pan: 0.0
     };
 
     for (let i = 0; i < this.maxVoices; i++) {
       this.voices.push({
-        active: false, midi: 0, frequency: 440, targetFrequency: 440, velocity: 0.8,
-        phase1: 0, phase2: 0, phaseSub: 0, envStage: 'idle', envLevel: 0,
-        startSample: -1, targetReleaseSample: -1, ic1eq: 0, ic2eq: 0, age: 0
+        active: false,
+        midi: 0,
+        frequency: 440,
+        targetFrequency: 440,
+        velocity: 0.8,
+        phase1: 0,
+        phase2: 0,
+        phaseSub: 0,
+        envStage: 'idle',
+        envLevel: 0,
+        startSample: -1,
+        targetReleaseSample: -1,
+        ic1eq: 0,
+        ic2eq: 0,
+        b0: 0,
+        b1: 0,
+        b2: 0,
+        age: 0
       });
     }
 
     this.port.onmessage = (e) => {
       const data = e.data;
       if (!data) return;
+
       switch (data.type) {
         case 'noteOn':
           this.noteOn(data.midi, data.velocity ?? 0.8, data.durationSeconds, data.delaySamples);
@@ -70,7 +116,16 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
           this.allNotesOff(data.delaySamples);
           break;
         case 'setParams':
-          if (data.params) Object.assign(this.params, data.params);
+          if (data.params) {
+            Object.assign(this.params, data.params);
+            if (!this.params.noiseEnabled || this.params.noiseVol <= 0.0001) {
+              for (let i = 0; i < this.maxVoices; i++) {
+                this.voices[i].b0 = 0;
+                this.voices[i].b1 = 0;
+                this.voices[i].b2 = 0;
+              }
+            }
+          }
           break;
       }
     };
@@ -108,6 +163,15 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     targetVoice.velocity = velocity;
     targetVoice.startSample = targetStart;
     targetVoice.age = ++this.ageCounter;
+
+    targetVoice.phase1 = 0;
+    targetVoice.phase2 = 0;
+    targetVoice.phaseSub = 0;
+    targetVoice.ic1eq = 0;
+    targetVoice.ic2eq = 0;
+    targetVoice.b0 = 0;
+    targetVoice.b1 = 0;
+    targetVoice.b2 = 0;
 
     if (startDelay > 0) {
       targetVoice.envStage = 'pending';
@@ -174,21 +238,25 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     }
   }
 
-  process(_inputs, outputs) {
+  process(_inputs, outputs, _parameters) {
     const output = outputs[0];
     if (!output || output.length === 0) return true;
+
     const outL = output[0];
     const outR = output.length > 1 ? output[1] : outL;
     const blockSize = outL.length;
+
     outL.fill(0);
     if (outR !== outL) outR.fill(0);
 
     const sr = sampleRate;
     const dtBase = 1.0 / sr;
+
+    const TIME_FACTOR = -6.907755;
     const attackStep = dtBase / Math.max(0.001, this.params.attack);
-    const decayFactor = Math.exp(-dtBase / Math.max(0.001, this.params.decay));
-    const releaseFactor = Math.exp(-dtBase / Math.max(0.001, this.params.release));
-    const sustainLevel = this.params.sustain;
+    const decayFactor = Math.exp((TIME_FACTOR * dtBase) / Math.max(0.001, this.params.decay));
+    const releaseFactor = Math.exp((TIME_FACTOR * dtBase) / Math.max(0.001, this.params.release));
+    const sustainLevel = Math.max(0, Math.min(1, this.params.sustain));
     const glideFactor = this.params.glide > 0.001 ? Math.exp(-dtBase / Math.max(0.005, this.params.glide)) : 0;
 
     const osc1PitchFactor = Math.pow(2, (this.params.osc1Octave * 12 + this.params.osc1Semi + this.params.osc1Detune / 100) / 12);
@@ -206,12 +274,15 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
       return true;
     }
 
-    const cutoffClamped = Math.max(20, Math.min(sr * 0.49, this.params.filterFreq));
-    const g = Math.tan((Math.PI * cutoffClamped) / sr);
-    const k = 1.0 / Math.max(0.1, this.params.filterQ);
-    const a1 = 1.0 / (1.0 + g * (g + k));
-    const a2 = g * a1;
-    const a3 = g * a2;
+    let a1 = 0, a2 = 0, a3 = 0, k = 1;
+    if (this.params.filterEnabled) {
+      const cutoffClamped = Math.max(20, Math.min(sr * 0.49, this.params.filterFreq));
+      const g = Math.tan((Math.PI * cutoffClamped) / sr);
+      k = 1.0 / Math.max(0.1, this.params.filterQ);
+      a1 = 1.0 / (1.0 + g * (g + k));
+      a2 = g * a1;
+      a3 = g * a2;
+    }
 
     const pan = Math.max(-1, Math.min(1, this.params.pan));
     const gainL = this.params.gain * (pan <= 0 ? 1 : 1 - pan);
@@ -225,9 +296,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
 
       for (let i = 0; i < activeCount; i++) {
         const voice = this.voices[activeIndices[i]];
-        if (!voice.active || voice.envStage === 'idle') {
-          continue;
-        }
+        if (!voice.active || voice.envStage === 'idle') continue;
 
         if (voice.envStage === 'pending') {
           if (this.currentSample >= voice.startSample) {
@@ -252,16 +321,26 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
             break;
           case 'decay':
             voice.envLevel = sustainLevel + (voice.envLevel - sustainLevel) * decayFactor;
+            if (sustainLevel <= 0.001 && voice.envLevel < 0.0005) {
+              voice.envLevel = 0;
+              voice.envStage = 'idle';
+              voice.active = false;
+              voice.ic1eq = 0;
+              voice.ic2eq = 0;
+              continue;
+            }
             break;
           case 'sustain':
             voice.envLevel = sustainLevel;
             break;
           case 'release':
             voice.envLevel *= releaseFactor;
-            if (voice.envLevel < 0.0001) {
+            if (voice.envLevel < 0.0005) {
               voice.envLevel = 0;
               voice.envStage = 'idle';
               voice.active = false;
+              voice.ic1eq = 0;
+              voice.ic2eq = 0;
               continue;
             }
             break;
@@ -277,20 +356,29 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
         voice.phase1 = (voice.phase1 + dt1) % 1.0;
         let voiceSample = this.sampleOsc(this.params.osc1Wave, voice.phase1, dt1) * this.params.osc1Vol;
 
-        if (this.params.osc2Enabled) {
+        if (this.params.osc2Enabled && this.params.osc2Vol > 0.0001) {
           const dt2 = voice.frequency * osc2PitchFactor * dtBase;
           voice.phase2 = (voice.phase2 + dt2) % 1.0;
           voiceSample += this.sampleOsc(this.params.osc2Wave, voice.phase2, dt2) * this.params.osc2Vol;
         }
 
-        if (this.params.subEnabled) {
+        if (this.params.subEnabled && this.params.subVol > 0.0001) {
           const dtSub = voice.frequency * subPitchFactor * dtBase;
           voice.phaseSub = (voice.phaseSub + dtSub) % 1.0;
-          voiceSample += (voice.phaseSub < 0.5 ? 1.0 : -1.0) * this.params.subVol;
+          voiceSample += this.sampleOsc(this.params.subWave || 'sine', voice.phaseSub, dtSub) * this.params.subVol;
         }
 
-        if (this.params.noiseEnabled) {
-          voiceSample += (Math.random() * 2.0 - 1.0) * this.params.noiseVol;
+        if (this.params.noiseEnabled && this.params.noiseVol > 0.0001) {
+          const white = Math.random() * 2.0 - 1.0;
+          if (this.params.noiseType === 'pink') {
+            voice.b0 = 0.99765 * voice.b0 + white * 0.0990460;
+            voice.b1 = 0.96300 * voice.b1 + white * 0.2965164;
+            voice.b2 = 0.57000 * voice.b2 + white * 1.0526913;
+            const pink = voice.b0 + voice.b1 + voice.b2 + white * 0.1848;
+            voiceSample += pink * 0.18 * this.params.noiseVol;
+          } else {
+            voiceSample += white * this.params.noiseVol;
+          }
         }
 
         if (this.params.filterEnabled) {
@@ -595,36 +683,38 @@ export class PhosphorWorkletNode {
 
   public setSettings(settings: SynthSettings): void {
     const params = {
-      osc1Wave: settings.osc1?.waveType || settings.waveType || 'sawtooth',
+      osc1Wave: settings.osc1?.waveType || settings.waveType || 'triangle',
       osc1Vol: settings.osc1?.enabled !== false ? (settings.osc1?.volume ?? 0.8) : 0,
       osc1Octave: settings.osc1?.octave ?? 0,
       osc1Semi: settings.osc1?.semi ?? 0,
       osc1Detune: settings.osc1?.detune ?? 0,
 
       osc2Enabled: settings.osc2?.enabled ?? false,
-      osc2Wave: settings.osc2?.waveType || 'square',
-      osc2Vol: settings.osc2?.volume ?? 0.5,
+      osc2Wave: settings.osc2?.waveType || 'sawtooth',
+      osc2Vol: settings.osc2?.volume ?? 0.4,
       osc2Octave: settings.osc2?.octave ?? 0,
       osc2Semi: settings.osc2?.semi ?? 0,
       osc2Detune: settings.osc2?.detune ?? 0,
 
       subEnabled: settings.subOsc?.enabled ?? false,
-      subVol: settings.subOsc?.volume ?? 0.4,
+      subWave: settings.subOsc?.waveType || 'sine',
+      subVol: settings.subOsc?.enabled ? (settings.subOsc?.volume ?? 0.0) : 0,
       subOctave: settings.subOsc?.octave ?? -1,
 
       noiseEnabled: settings.noise?.enabled ?? false,
-      noiseVol: settings.noise?.volume ?? 0.2,
+      noiseType: settings.noise?.type || 'white',
+      noiseVol: settings.noise?.enabled ? (settings.noise?.volume ?? 0.0) : 0,
 
-      filterEnabled: settings.filter?.enabled ?? true,
+      filterEnabled: settings.filter?.enabled !== false,
       filterType: settings.filter?.type || 'lowpass',
-      filterFreq: settings.filter?.frequency ?? 2500,
-      filterQ: settings.filter?.Q ?? 1.5,
-      filterDrive: settings.filter?.drive ?? 0.0,
+      filterFreq: settings.filter?.enabled ? Math.max(20, Math.min(20000, settings.filter?.frequency ?? 6500)) : 20000,
+      filterQ: Math.max(0.1, Math.min(20, settings.filter?.Q ?? 1.5)),
+      filterDrive: Math.max(0, Math.min(1, settings.filter?.drive ?? 0.1)),
 
-      attack: settings.envelope?.attack ?? 0.01,
-      decay: settings.envelope?.decay ?? 0.2,
-      sustain: settings.envelope?.sustain ?? 0.7,
-      release: settings.envelope?.release ?? 0.3,
+      attack: Math.max(0.001, settings.envelope?.attack ?? 0.04),
+      decay: Math.max(0.001, settings.envelope?.decay ?? 0.25),
+      sustain: Math.max(0, Math.min(1, settings.envelope?.sustain ?? 0.65)),
+      release: Math.max(0.001, settings.envelope?.release ?? 0.6),
 
       glide: settings.glide || 0.0,
       gain: 0.7,

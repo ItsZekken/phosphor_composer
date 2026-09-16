@@ -57,7 +57,7 @@ export interface ChordSuggestion {
   category: 'reposo' | 'tensión' | 'spicy' | 'subdominante' | 'exotic';
 }
 
-export type ActiveView = 'chord' | 'piano-roll' | 'sequencer' | 'visualizer';
+export type ActiveView = 'chord' | 'piano-roll' | 'sequencer' | 'visualizer' | 'audio-tracks';
 
 export type OscWaveType = 'sine' | 'triangle' | 'sawtooth' | 'square' | 'pulse';
 
@@ -247,3 +247,36 @@ export const flattenPatternChain = (chain: PatternChainItem[]): FlatChainStep[] 
   }
   return result;
 };
+
+export type AudioSnapGrid = 'bar' | 'beat' | '1/2' | '1/4' | '1/8' | '1/16' | 'off';
+
+export interface AudioClip {
+  id: string;
+  trackId: string;
+  bufferId: string; // Referencia al buffer en AudioBufferRegistry / IndexedDB
+  name: string;
+  startBeat: number; // Posición de inicio en beats musicales
+  sourceOffsetSeconds: number; // Desplazamiento inicial dentro del audio
+  durationSeconds: number; // Duración visible del clip en segundos
+  gain: number; // Multiplicador de ganancia del clip (1.0 = 0 dB)
+  fadeInSeconds: number; // Micro-fade de entrada anti-click
+  fadeOutSeconds: number; // Micro-fade de salida anti-click
+  isMuted: boolean;
+}
+
+export interface AudioTrack {
+  id: string;
+  name: string;
+  color: string;
+  volume: number; // Decibeles: -60 a +24 dB (0 = 0 dB ganancia unitaria, <= -59 dB es -∞ / silencio)
+  pan: number; // -1.0 a 1.0
+  muted: boolean;
+  solo: boolean;
+  isArmed: boolean;
+  inputMonitoring: boolean;
+}
+
+export interface AudioTracksTimelineViewport {
+  scrollLeft: number;
+  zoomLevel: number; // Píxeles por beat (default 60)
+}

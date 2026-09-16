@@ -50,12 +50,12 @@ export const createTransportSlice: SliceCreator<TransportState & TransportAction
   }),
 
   setKey: (key) => {
-    set({ key, isAutoKey: false });
+    set({ key, isAutoKey: false, detectedKey: null });
     get().updateSuggestions();
   },
 
   setScale: (scale) => {
-    set({ scale, isAutoKey: false });
+    set({ scale, isAutoKey: false, detectedKey: null });
     get().updateSuggestions();
   },
 

@@ -1,0 +1,587 @@
+/* audioTracks.css - Phosphor Analogue Multitrack Audio Workstation Styling */
+
+.audio-tracks-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  overflow: hidden;
+  position: relative;
+  user-select: none;
+}
+
+/* --- TOOLBAR --- */
+.audio-tracks-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 1rem;
+  background: linear-gradient(180deg, #24202e 0%, #1c1924 100%);
+  border-bottom: 2px solid var(--border-color);
+  gap: 0.75rem;
+  z-index: 20;
+}
+
+.audio-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.audio-rack-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.65rem;
+  background: #282334;
+  color: var(--text-primary);
+  border: 1px solid #3d3550;
+  border-radius: 4px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.audio-rack-btn:hover:not(:disabled) {
+  background: #342d45;
+  border-color: #554870;
+  color: #fff;
+}
+
+.audio-rack-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+.audio-rack-btn.active {
+  background: #423659;
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 8px rgba(132, 112, 204, 0.4);
+}
+
+.audio-rack-btn.record-btn {
+  color: #f87171;
+  border-color: #7f1d1d;
+}
+
+.audio-rack-btn.record-btn.recording {
+  background: #991b1b;
+  color: #fff;
+  border-color: #ef4444;
+  animation: pulse-red 1.2s infinite ease-in-out;
+}
+
+@keyframes pulse-red {
+  0% { box-shadow: 0 0 4px #ef4444; }
+  50% { box-shadow: 0 0 14px #ef4444; }
+  100% { box-shadow: 0 0 4px #ef4444; }
+}
+
+.audio-select {
+  background: #282334;
+  color: var(--text-primary);
+  border: 1px solid #3d3550;
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.audio-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.audio-display-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.55rem;
+  background: #14111a;
+  border: 1px solid #2d263b;
+  border-radius: 4px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.7rem;
+  color: #e5a93c;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+/* --- WORKSPACE LAYOUT --- */
+.audio-workspace {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Columna de Cabeceras de Pista (Izquierda) */
+.audio-headers-column {
+  width: 340px;
+  min-width: 340px;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  background: #1e1a27;
+  border-right: 2px solid var(--border-color);
+  z-index: 10;
+  box-shadow: 4px 0 10px rgba(0, 0, 0, 0.25);
+}
+
+.audio-headers-top-spacer {
+  height: 28px;
+  border-bottom: 1px solid var(--border-color);
+  background: #252030;
+  display: flex;
+  align-items: center;
+  padding: 0 0.75rem;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.05em;
+}
+
+.audio-headers-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Cabecera horizontal idéntica a los canales del Drum Sequencer (64px) */
+.audio-track-header {
+  height: 64px;
+  min-height: 64px;
+  max-height: 64px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px 0 12px;
+  border-bottom: 1px solid #2e283d;
+  background: linear-gradient(90deg, #1e1a26 0%, #252030 100%);
+  position: relative;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+  cursor: pointer;
+  user-select: none;
+}
+
+.audio-track-header:hover {
+  background: linear-gradient(90deg, #221d2c 0%, #2a2436 100%);
+}
+
+.audio-track-header.selected {
+  background: linear-gradient(90deg, #252030 0%, #2d263a 100%);
+  box-shadow: inset 3px 0 0 var(--channel-color, #e5a93c), inset 0 0 12px rgba(229, 169, 60, 0.08);
+}
+
+.audio-track-color-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 4px;
+  border-top-left-radius: 2px;
+  border-bottom-left-radius: 2px;
+}
+
+.audio-track-title-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 130px;
+  overflow: hidden;
+  padding-left: 2px;
+}
+
+.audio-track-badge {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.audio-track-name-input {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-primary);
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+  width: 85px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  text-overflow: ellipsis;
+  transition: all 0.12s ease;
+}
+
+.audio-track-name-input:hover {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.audio-track-name-input:focus {
+  background: #14111a;
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 6px rgba(132, 112, 204, 0.3);
+}
+
+.audio-track-delete-btn {
+  background: transparent;
+  border: none;
+  color: #5d536f;
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s ease;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.audio-track-header:hover .audio-track-delete-btn {
+  opacity: 1;
+}
+
+.audio-track-delete-btn:hover {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.15);
+}
+
+.audio-track-hardware-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audio-arm-hardware-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.35);
+  font-family: 'Share Tech Mono', monospace;
+  width: 22px;
+  height: 20px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.audio-arm-hardware-btn .arm-dot {
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+.audio-arm-hardware-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
+.audio-arm-hardware-btn.armed {
+  background: rgba(239, 68, 68, 0.3) !important;
+  color: #ff453a !important;
+  border-color: #ff453a !important;
+  box-shadow: 0 0 8px rgba(255, 69, 58, 0.5) !important;
+  text-shadow: 0 0 6px rgba(255, 69, 58, 0.7) !important;
+}
+
+.audio-track-activity-strip {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.audio-track-activity-led {
+  width: 100%;
+  border-radius: 1px;
+  transition: height 0.06s ease;
+}
+
+/* Mini Vúmetro de Pista */
+.audio-track-vu-meter {
+  width: 5px;
+  min-width: 5px;
+  height: 38px;
+  background: #14111a;
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+  box-shadow: inset 0 0 2px rgba(0, 0, 0, 0.9);
+  flex-shrink: 0;
+}
+
+.audio-track-vu-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(0deg, #22c55e 0%, #eab308 70%, #ef4444 100%);
+  transition: height 0.08s ease-out;
+}
+
+/* CABEZAL DE REPRODUCCIÓN (PLAYHEAD) ANIMADO A 60 FPS */
+.audio-playhead-wrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 25;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.audio-playhead-cap {
+  position: absolute;
+  top: 0;
+  left: -5px;
+  width: 12px;
+  height: 10px;
+  background: #ffd875;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.8));
+}
+
+.audio-playhead-beam {
+  position: absolute;
+  top: 9px;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background-color: #ffd875;
+  box-shadow: 0 0 8px rgba(255, 216, 117, 0.85);
+}
+
+/* Área de Línea de Tiempo y Carriles (Derecha) */
+.audio-timeline-viewport {
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: #191621;
+}
+
+.audio-timeline-inner {
+  position: relative;
+  min-width: 100%;
+}
+
+/* REGLA SUPERIOR */
+.audio-timeline-ruler {
+  height: 28px;
+  background: #252030;
+  border-bottom: 1px solid var(--border-color);
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  cursor: pointer;
+}
+
+.audio-ruler-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* CABEZAL DE REPRODUCCIÓN (PLAYHEAD) */
+.audio-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #e5a93c;
+  pointer-events: none;
+  z-index: 25;
+  box-shadow: 0 0 6px #e5a93c, 0 0 10px #e5a93c;
+}
+
+.audio-playhead::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -5px;
+  width: 12px;
+  height: 12px;
+  background: #e5a93c;
+  clip-path: polygon(50% 100%, 0 0, 100% 0);
+}
+
+/* CARRILES (LANES) */
+.audio-track-lane {
+  height: 64px;
+  border-bottom: 1px solid #2e283d;
+  position: relative;
+  background-size: 60px 100%;
+  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
+
+/* CLIPS DE AUDIO */
+.audio-clip {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  background: rgba(36, 32, 46, 0.9);
+  border: 1px solid rgba(132, 112, 204, 0.4);
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: grab;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: border-color 0.1s;
+}
+
+.audio-clip.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(132, 112, 204, 0.6);
+}
+
+.audio-clip.muted {
+  opacity: 0.45;
+}
+
+.audio-clip:active {
+  cursor: grabbing;
+}
+
+.audio-clip-header {
+  height: 18px;
+  background: rgba(0, 0, 0, 0.35);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.62rem;
+  color: var(--text-primary);
+  pointer-events: none;
+}
+
+.audio-clip-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.audio-clip-canvas {
+  width: 100%;
+  height: calc(100% - 18px);
+  display: block;
+}
+
+/* TIRADORES DE RECORTE (TRIM HANDLES) */
+.audio-clip-trim-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  z-index: 5;
+  cursor: ew-resize;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.audio-clip-trim-handle:hover {
+  background: rgba(132, 112, 204, 0.4);
+}
+
+.audio-clip-trim-handle.left {
+  left: 0;
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+
+.audio-clip-trim-handle.right {
+  right: 0;
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+/* MODAL DE CALIBRACIÓN DE LATENCIA */
+.audio-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 8, 14, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.audio-modal-card {
+  width: 440px;
+  background: #24202e;
+  border: 2px solid var(--border-color);
+  border-radius: 6px;
+  padding: 1.25rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.audio-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.5rem;
+}
+
+.audio-modal-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.audio-modal-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.audio-modal-close-btn:hover {
+  color: #fff;
+}
+
+.audio-modal-body {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.audio-modal-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: #1c1924;
+  padding: 0.75rem;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+}

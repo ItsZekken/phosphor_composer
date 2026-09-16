@@ -12,11 +12,12 @@ import { createTrackSlice, initialTrackState } from './slices/trackSlice';
 import { createDrumSlice, initialDrumState, DEFAULT_DRUM_CHANNELS } from './slices/drumSlice';
 import { createMixerSlice, initialMixerState, DEFAULT_CHANNELS } from './slices/mixerSlice';
 import { createUISlice, initialUIState } from './slices/uiSlice';
+import { createAudioTrackSlice, initialAudioTrackState, DEFAULT_AUDIO_TRACKS } from './slices/audioTrackSlice';
 import { NOTE_CLASSES, transposeNote, transposeChordName } from '../core/music';
 import { deserializeSession } from '../core/session';
 
 export * from './types';
-export { DEFAULT_CHANNELS, DEFAULT_DRUM_CHANNELS };
+export { DEFAULT_CHANNELS, DEFAULT_DRUM_CHANNELS, DEFAULT_AUDIO_TRACKS };
 
 export const useSongStore = create<SongStore>()(
   temporal(
@@ -27,6 +28,7 @@ export const useSongStore = create<SongStore>()(
       ...createDrumSlice(set, get, api),
       ...createMixerSlice(set, get, api),
       ...createUISlice(set, get, api),
+      ...createAudioTrackSlice(set, get, api),
 
       transposeSong: (semitones: number) => {
         set((state) => {
@@ -71,6 +73,7 @@ export const useSongStore = create<SongStore>()(
           ...initialDrumState,
           ...initialMixerState,
           ...initialUIState,
+          ...initialAudioTrackState,
           bpm: 100,
           isAutoKey: false,
           detectedKey: null,
@@ -109,6 +112,9 @@ export const useSongStore = create<SongStore>()(
           activeDrumKitId: session.drums.activeDrumKitId,
           drumChannels: session.drums.drumChannels,
           drumTimelineViewport: session.drums.drumTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 },
+          audioTracks: (session as any).audio?.tracks || DEFAULT_AUDIO_TRACKS,
+          audioClips: (session as any).audio?.clips || [],
+          audioLatencyCalibrationMs: (session as any).audio?.latencyMs ?? 20,
           selectedChainIds: [],
           channels: session.mixer.channels,
           channelOrder: session.mixer.channelOrder,
@@ -149,6 +155,8 @@ export const useSongStore = create<SongStore>()(
         drumChannels: state.drumChannels,
         patternChain: state.patternChain,
         drumTimelineViewport: state.drumTimelineViewport,
+        audioTracks: state.audioTracks,
+        audioClips: state.audioClips,
       }),
     }
   )

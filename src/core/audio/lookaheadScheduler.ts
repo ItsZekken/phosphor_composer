@@ -17,6 +17,8 @@ export interface LookaheadSchedulerCallbacks {
   onTriggerMetronome?: (frequency: number, volumeFactor: number, audioContextTime: number) => void;
   onStepChange?: (currentBeat: number, currentAudioSeconds: number) => void;
   onTempoChange?: (newBpm: number, beat: number, audioTime: number) => void;
+  onScheduleWindow?: (startSec: number, endSec: number, currentAudioSeconds: number, tempoMap: TempoMap) => void;
+  onLoopWrap?: () => void;
   onSongEnd?: () => void;
 }
 
@@ -226,6 +228,10 @@ export class LookaheadScheduler {
 
     if (startSec >= endSec) return;
 
+    if (this.callbacks.onScheduleWindow) {
+      this.callbacks.onScheduleWindow(startSec, endSec, currentAudioSeconds, this.tempoMap);
+    }
+
     // Programar acordes dentro de la ventana de audio [startSec, endSec)
     this.scheduledEvents.chordEvents.forEach((evt) => {
       if (this.isEventInWindow(evt.timeSeconds, startSec, endSec)) {
@@ -299,6 +305,9 @@ export class LookaheadScheduler {
       this.startSecondsOffset = 0;
       this.playbackStartTime = now + (this.totalDurationSeconds - currentAudioSeconds);
       this.nextScheduledSeconds = 0;
+      if (this.callbacks.onLoopWrap) {
+        this.callbacks.onLoopWrap();
+      }
     }
   }
 

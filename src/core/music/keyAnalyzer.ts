@@ -37,6 +37,11 @@ export function getScalePitchClasses(key: NoteClass | string, scale: ScaleType):
   const intervals = SCALE_INTERVALS[scale] || SCALE_INTERVALS.major;
   const set = new Set<number>();
   intervals.forEach(i => set.add((rootVal + i) % 12));
+  // En tonalidades menores, incluir la 7ma mayor (sensible de la menor armónica)
+  // para permitir acordes V mayor y vii° característicos
+  if (scale === 'minor') {
+    set.add((rootVal + 11) % 12);
+  }
   return set;
 }
 
@@ -80,16 +85,34 @@ export function detectKey(chordNames: string[]): { key: NoteClass; scale: ScaleT
       const noteScore = usedPitchClasses.size > 0 ? matchedNotes / usedPitchClasses.size : 0;
       const chordScore = validChords.length > 0 ? matchedChords / validChords.length : 0;
 
-      // El primer acorde otorga una fuerte pista de tónica
+      // El primer acorde otorga una fuerte pista de tónica (considerando su modalidad mayor/menor)
       const firstParsed = parseChord(validChords[0]);
-      const tonicBonus = (firstParsed && firstParsed.root === key) ? 0.18 : 0;
+      let tonicBonus = 0;
+      if (firstParsed && firstParsed.root === key) {
+        const isFirstMinor = firstParsed.quality === 'minor' || firstParsed.quality === 'minor7';
+        const isScaleMinor = scale === 'minor' || scale === 'dorian' || scale === 'phrygian';
+        if (isFirstMinor && isScaleMinor) {
+          tonicBonus = 0.22;
+        } else if (!isFirstMinor && !isScaleMinor) {
+          tonicBonus = 0.22;
+        }
+      }
 
       // El último acorde también sugiere resolución cadencial
       const lastParsed = parseChord(validChords[validChords.length - 1]);
-      const cadenceBonus = (lastParsed && lastParsed.root === key) ? 0.08 : 0;
+      let cadenceBonus = 0;
+      if (lastParsed && lastParsed.root === key) {
+        const isLastMinor = lastParsed.quality === 'minor' || lastParsed.quality === 'minor7';
+        const isScaleMinor = scale === 'minor' || scale === 'dorian' || scale === 'phrygian';
+        if (isLastMinor && isScaleMinor) {
+          cadenceBonus = 0.10;
+        } else if (!isLastMinor && !isScaleMinor) {
+          cadenceBonus = 0.10;
+        }
+      }
 
-      // Ligera preferencia por tonalidades mayores/menores tradicionales
-      const simplicityBonus = (scale === 'major' || scale === 'minor') ? 0.05 : 0;
+      // Preferencia por tonalidades mayores/menores tradicionales frente a modos con notas idénticas
+      const simplicityBonus = (scale === 'major' || scale === 'minor') ? 0.10 : 0;
 
       const score = (noteScore * 0.35) + (chordScore * 0.40) + tonicBonus + cadenceBonus + simplicityBonus;
 

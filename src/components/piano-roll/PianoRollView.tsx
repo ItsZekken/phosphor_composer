@@ -1,11 +1,9 @@
-import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import { useSongStore } from '../../store/songStore';
 import { useShallow } from 'zustand/react/shallow';
-import { toneEngine } from '../../audio/toneEngine';
-import { NOTE_CLASSES, generateMelody, noteToMod12, SCALE_INTERVALS } from '../../core/music';
-import { LivePitchTracker } from '../../core/audio';
+import { NOTE_CLASSES, noteToMod12, SCALE_INTERVALS } from '../../core/music';
 import type { MelodyNote, NoteClass, ScaleType } from '../../utils/typeDefinitions';
-import { Mic, Trash2, Copy, Scissors, Search, ChevronRight, Lightbulb, RefreshCw, Wand2, Layers } from 'lucide-react';
+import { Trash2, Copy, Scissors, Search, ChevronRight, Layers, Lightbulb } from 'lucide-react';
 import { ContextMenuContainer } from '../ui/ContextMenuContainer';
 import { ScaleFinderSection } from './ScaleFinderSection';
 import { ChannelQuickControl } from '../ui/ChannelQuickControl';
@@ -41,16 +39,11 @@ export const PianoRollView: React.FC = () => {
     updateMelodyNote,
     setMelodyNotes,
     setCurrentBeat,
-    ghostNotes,
-    setGhostNotes,
-    isPlaying,
-    bpm,
     key,
     scale,
     setKey,
     setScale,
     chordBlocks,
-    isAutoSuggestions,
     tracks,
     activeTrackId,
     addPianoRollTrack,
@@ -68,16 +61,11 @@ export const PianoRollView: React.FC = () => {
     updateMelodyNote: state.updateMelodyNote,
     setMelodyNotes: state.setMelodyNotes,
     setCurrentBeat: state.setCurrentBeat,
-    ghostNotes: state.ghostNotes || [],
-    setGhostNotes: state.setGhostNotes,
-    isPlaying: state.isPlaying,
-    bpm: state.bpm || 120,
     key: state.key || 'C',
     scale: state.scale || 'major',
     setKey: state.setKey,
     setScale: state.setScale,
     chordBlocks: state.chordBlocks || [],
-    isAutoSuggestions: state.isAutoSuggestions,
     tracks: state.tracks || [],
     activeTrackId: state.activeTrackId,
     addPianoRollTrack: state.addPianoRollTrack,
@@ -99,19 +87,12 @@ export const PianoRollView: React.FC = () => {
 
   // Estados de control
   const [selectedNoteLength, setSelectedNoteLength] = useState<number>(1);
-  const [isRecording, setIsRecording] = useState(false);
-  const [snapToScale, setSnapToScale] = useState(true);
   const [isScaleHighlightActive, setIsScaleHighlightActive] = useState(true);
-  const [livePitch, setLivePitch] = useState<{ midi: number; note: string; clarity: number } | null>(null);
-  const [, setIsGeneratingGhost] = useState(false);
 
   // UX de Selección
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
   const [isScaleFinderOpen, setIsScaleFinderOpen] = useState(false);
   const [confirmModalConfig, setConfirmModalConfig] = useState<{ isOpen: boolean; trackId: string; trackName: string; type: 'track' | 'clear' }>({ isOpen: false, trackId: '', trackName: '', type: 'track' });
-
-  // Referencias para la grabación de audio con LivePitchTracker
-  const livePitchTrackerRef = useRef<LivePitchTracker | null>(null);
 
   // Zoom y dimensiones
   const { rowHeight, beatWidth, setRowHeight, setBeatWidth, TOTAL_BEATS } = useGridZoom();
@@ -229,48 +210,6 @@ export const PianoRollView: React.FC = () => {
     currentChannelId
   });
 
-  // Generador Melódico Algorítmico Inteligente
-  const fetchGhostNotes = useCallback(async () => {
-    setIsGeneratingGhost(true);
-    try {
-      const suggestions = generateMelody({
-        key: key || 'C',
-        scale: scale || 'major',
-        chordBlocks: chordBlocks || [],
-        totalBeats: TOTAL_BEATS,
-        style: 'catchy'
-      });
-      setGhostNotes(suggestions);
-    } catch (err) {
-      console.error('Error generando sugerencias melódicas:', err);
-    } finally {
-      setIsGeneratingGhost(false);
-    }
-  }, [chordBlocks, TOTAL_BEATS, key, scale, setGhostNotes]);
-
-  useEffect(() => {
-    if (!isAutoSuggestions) return;
-    let active = true;
-    const timer = setTimeout(() => {
-      if (!active) return;
-      setIsGeneratingGhost(true);
-      try {
-        const suggestions = generateMelody({
-          key: key || 'C',
-          scale: scale || 'major',
-          chordBlocks: chordBlocks || [],
-          totalBeats: TOTAL_BEATS,
-          style: 'catchy'
-        });
-        if (active) setGhostNotes(suggestions);
-      } catch (err) {
-        console.error('Error generando sugerencias automáticas:', err);
-      } finally {
-        if (active) setIsGeneratingGhost(false);
-      }
-    }, 400);
-    return () => { active = false; clearTimeout(timer); };
-  }, [chordBlocks, TOTAL_BEATS, key, scale, setGhostNotes, isAutoSuggestions]);
 
   // Zoom interactivo centrado: Alt+Wheel (horizontal), Ctrl+Wheel (vertical)
   useEffect(() => {
@@ -332,114 +271,6 @@ export const PianoRollView: React.FC = () => {
     }
   }, [rowHeight]);
 
-  // Convertir las notas fantasma en notas reales
-  const acceptGhostNotes = () => {
-    if ((ghostNotes || []).length === 0) return;
-    (ghostNotes || []).forEach(gn => {
-      const duplicate = (melodyNotes || []).some(
-        n => n.midi === gn.midi && n.startBeat === gn.startBeat
-      );
-      if (!duplicate) {
-        addMelodyNote({
-          note: gn.note,
-          midi: gn.midi,
-          startBeat: gn.startBeat,
-          durationBeats: gn.durationBeats,
-          velocity: 0.7
-        });
-      }
-    });
-    setGhostNotes([]);
-  };
-
-  // Transcripción de audio / Live Vocal-to-MIDI
-  const startRecording = async () => {
-    try {
-      if (!isPlaying) {
-        await toneEngine.init();
-        useSongStore.getState().setPlaying(true);
-      }
-
-      const currentTransportSec = ((useSongStore.getState().currentBeat ?? 0) * 60) / (bpm || 120);
-      const tracker = new LivePitchTracker({
-        minMidi: MIN_MIDI,
-        maxMidi: MAX_MIDI,
-        clarityThreshold: 0.80,
-        onLivePitch: (p) => setLivePitch(p)
-      });
-      livePitchTrackerRef.current = tracker;
-
-      await tracker.start(currentTransportSec);
-      setIsRecording(true);
-    } catch (err) {
-      console.error('Error accediendo al micrófono:', err);
-    }
-  };
-
-  const stopRecording = () => {
-    setIsRecording(false);
-    setLivePitch(null);
-
-    const tracker = livePitchTrackerRef.current;
-    if (!tracker) return;
-
-    const rawSamples = tracker.stop();
-    livePitchTrackerRef.current = null;
-
-    if (rawSamples.length === 0) return;
-
-    const consolidatedNotes: { midi: number; startBeat: number; durationBeats: number }[] = [];
-    let currentSegment: { midi: number; startBeat: number; endBeat: number } | null = null;
-
-    rawSamples.forEach((sample) => {
-      const beat = (sample.time * (bpm || 120)) / 60;
-      const snappedBeat = Math.round(beat / GRID_SNAP) * GRID_SNAP;
-
-      let effectiveMidi = sample.midi;
-      if (snapToScale) {
-        let bestMidi = sample.midi;
-        let minDiff = Infinity;
-        for (let offset = -6; offset <= 6; offset++) {
-          const testMidi = sample.midi + offset;
-          const pitchClass = ((testMidi % 12) + 12) % 12;
-          if (scalePitchClasses?.has(pitchClass)) {
-            const diff = Math.abs(offset);
-            if (diff < minDiff) {
-              minDiff = diff;
-              bestMidi = testMidi;
-            }
-          }
-        }
-        effectiveMidi = bestMidi;
-      }
-
-      if (!currentSegment) {
-        currentSegment = { midi: effectiveMidi, startBeat: snappedBeat, endBeat: snappedBeat + GRID_SNAP };
-      } else if (currentSegment.midi === effectiveMidi && snappedBeat <= currentSegment.endBeat + GRID_SNAP) {
-        currentSegment.endBeat = Math.max(currentSegment.endBeat, snappedBeat + GRID_SNAP);
-      } else {
-        const duration = Math.max(GRID_SNAP, currentSegment.endBeat - currentSegment.startBeat);
-        consolidatedNotes.push({ midi: currentSegment.midi, startBeat: currentSegment.startBeat, durationBeats: duration });
-        currentSegment = { midi: effectiveMidi, startBeat: snappedBeat, endBeat: snappedBeat + GRID_SNAP };
-      }
-    });
-
-    if (currentSegment) {
-      const seg = currentSegment as { midi: number; startBeat: number; endBeat: number };
-      const duration = Math.max(GRID_SNAP, seg.endBeat - seg.startBeat);
-      consolidatedNotes.push({ midi: seg.midi, startBeat: seg.startBeat, durationBeats: duration });
-    }
-
-    consolidatedNotes.forEach((n) => {
-      addMelodyNote({
-        note: midiToNoteName(n.midi),
-        midi: n.midi,
-        startBeat: n.startBeat,
-        durationBeats: n.durationBeats,
-        velocity: 0.8
-      });
-    });
-  };
 
   const handleClearMelody = () => {
     if ((melodyNotes || []).length === 0) return;
@@ -540,53 +371,6 @@ export const PianoRollView: React.FC = () => {
         }
         right={
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            {/* Botón Grabar Tarareo (Mic) */}
-            <button 
-              type="button"
-              className={`physical-btn ${isRecording ? 'active' : ''}`}
-              onClick={isRecording ? stopRecording : startRecording}
-              title={isRecording ? "Detener y procesar tarareo" : "Grabar tarareo silbando/cantando"}
-            >
-              <Mic size={13} />
-              <span className={`physical-led-dot ${isRecording ? 'lit-red' : ''}`} />
-            </button>
-
-            {/* Selector de Modo de Afinación: Escala vs Cromático */}
-            <button
-              type="button"
-              className={`physical-btn ${snapToScale ? 'active' : ''}`}
-              onClick={() => setSnapToScale(!snapToScale)}
-              title={snapToScale ? "Modo Mic: Acoplado a Escala" : "Modo Mic: Cromático Libre"}
-            >
-              <span>{snapToScale ? 'ESCALA' : 'CROM'}</span>
-              <span className={`physical-led-dot ${snapToScale ? 'lit-amber' : 'lit-magenta'}`} />
-            </button>
-
-            {/* Botón actualizar sugerencias melódicas (modo manual) */}
-            {!isAutoSuggestions && (
-              <button
-                type="button"
-                className="physical-btn"
-                onClick={fetchGhostNotes}
-                title="Generar sugerencias melódicas algorítmicas"
-              >
-                <RefreshCw size={13} />
-              </button>
-            )}
-
-            {/* Botón Aceptar Sugerencias */}
-            {(ghostNotes || []).length > 0 && (
-              <button 
-                type="button"
-                className="physical-btn active" 
-                onClick={acceptGhostNotes} 
-                title={`Aceptar sugerencias melódicas (${ghostNotes.length} notas)`}
-              >
-                <Wand2 size={13} style={{ color: 'var(--accent)' }} />
-                <span style={{ fontSize: '0.68rem', fontWeight: 'bold', color: '#ffd875' }}>{ghostNotes.length}</span>
-              </button>
-            )}
-            
             {/* Botón Limpiar Melodía (Trash) */}
             <button 
               type="button"
@@ -695,7 +479,6 @@ export const PianoRollView: React.FC = () => {
             selectedNoteIds={selectedNoteIds}
             lassoRect={lassoRect}
             tempNote={tempNote}
-            livePitch={livePitch}
             scalePitchClasses={scalePitchClasses}
             rootMidiMod={rootMidiMod}
             isScaleHighlightActive={isScaleHighlightActive}

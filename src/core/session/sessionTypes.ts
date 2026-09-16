@@ -68,6 +68,12 @@ export interface UIPreferenceState {
   isAutoSuggestions?: boolean;
 }
 
+export interface AudioSessionState {
+  tracks: import('../../utils/typeDefinitions').AudioTrack[];
+  clips: import('../../utils/typeDefinitions').AudioClip[];
+  latencyMs?: number;
+}
+
 /**
  * Esquema de Proyecto / Sesión Canónico v2 (Phosphor Composer)
  */
@@ -81,6 +87,7 @@ export interface SessionV2 {
   drums: DrumSessionState;
   mixer: MixerState;
   ui?: UIPreferenceState;
+  audio?: AudioSessionState;
   customSynthSettings?: Record<string, SynthSettings>;
 }
 

@@ -11,5 +11,4 @@ export * from './patternResolver';
 export * from './keyAnalyzer';
 export * from './harmonyAdvisor';
 export * from './scaleFinder';
-export * from './melodyGenerator';
 export * from './tempoMap';

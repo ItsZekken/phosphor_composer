@@ -15,6 +15,7 @@ import { ChannelInstrumentManager } from '../core/audio/engine/ChannelInstrument
 import { DrumSoundManager } from '../core/audio/engine/DrumSoundManager';
 import { PreviewManager } from '../core/audio/engine/PreviewManager';
 import { AudioTransport } from '../core/audio/engine/AudioTransport';
+import { AudioTrackEngine } from '../core/audio/engine/AudioTrackEngine';
 import { LookaheadScheduler } from '../core/audio/lookaheadScheduler';
 import { flattenPatternChain, type ChannelConfig, type SynthSettings } from '../utils/typeDefinitions';
 import type { PatternDef } from '../patterns/patternTypes';
@@ -66,6 +67,7 @@ class ToneEngine {
   private drumManager: DrumSoundManager;
   private previewManager: PreviewManager;
   private transportManager: AudioTransport;
+  private audioTrackEngine: AudioTrackEngine;
   private lookaheadScheduler: LookaheadScheduler;
 
   private isInitialized = false;
@@ -91,6 +93,7 @@ class ToneEngine {
     this.mixerGraph = new MixerGraph();
     this.instrumentManager = new ChannelInstrumentManager(this.mixerGraph);
     this.drumManager = new DrumSoundManager(this.mixerGraph);
+    this.audioTrackEngine = new AudioTrackEngine(this.mixerGraph);
     this.previewManager = new PreviewManager({
       instrumentManager: this.instrumentManager,
       onActiveNotesChange: (notes) => useSongStore.getState().setActiveNotes(notes),
@@ -100,6 +103,12 @@ class ToneEngine {
 
     // Lookahead Scheduler en tiempo real (Zero Audio Glitches en edición interactiva)
     this.lookaheadScheduler = new LookaheadScheduler({
+      onScheduleWindow: (startSec, endSec, currentAudioSeconds, tempoMap) => {
+        this.audioTrackEngine.scheduleWindow(startSec, endSec, currentAudioSeconds, tempoMap);
+      },
+      onLoopWrap: () => {
+        this.audioTrackEngine.onLoopWrap();
+      },
       onTriggerChord: (evt, time) => {
         const isPiano = useSongStore.getState().channels.chords?.instrument === 'piano';
         this.instrumentManager.triggerAttackRelease('chords', isPiano, evt.note, evt.durationSeconds, time, evt.velocity);
@@ -302,6 +311,8 @@ class ToneEngine {
     let prevSwing = initialState.swing;
     let prevSustain = initialState.sustain;
     let prevTempoMarkers = initialState.tempoMarkers;
+    let prevAudioTracks = initialState.audioTracks;
+    let prevAudioClips = initialState.audioClips;
 
     this.unsubscribeStore = useSongStore.subscribe((state) => {
       this.cachedIsKeyboardMelodyEnabled = state.isKeyboardMelodyEnabled;
@@ -425,11 +436,6 @@ class ToneEngine {
         }
       }
 
-      // 9. Hot-Reloading: sincronización continua en caliente si hay reproducción activa
-      if (musicalContentChanged && state.isPlaying) {
-        this.syncTimelineDebounced();
-      }
-
       // 10. Modulaciones globales (Swing, Sustain)
       if (state.swing !== prevSwing) {
         prevSwing = state.swing;
@@ -439,6 +445,22 @@ class ToneEngine {
       if (state.sustain !== prevSustain) {
         prevSustain = state.sustain;
         this.updateSustain(state.sustain);
+      }
+
+      // 11. Pistas y Clips de Audio Multitrack
+      if (state.audioTracks !== prevAudioTracks) {
+        prevAudioTracks = state.audioTracks;
+        this.mixerGraph.syncAudioTracks(state.audioTracks || []);
+        musicalContentChanged = true;
+      }
+      if (state.audioClips !== prevAudioClips) {
+        prevAudioClips = state.audioClips;
+        musicalContentChanged = true;
+      }
+
+      // 12. Hot-Reloading: sincronización continua en caliente si hay reproducción activa
+      if (musicalContentChanged && state.isPlaying) {
+        this.syncTimelineDebounced();
       }
     });
 
@@ -452,6 +474,7 @@ class ToneEngine {
       initialState.metroVolume
     );
     this.syncChannels(initialState.channels);
+    this.mixerGraph.syncAudioTracks(initialState.audioTracks || []);
     this.updateSustain(initialState.sustain);
   }
 
@@ -592,6 +615,7 @@ class ToneEngine {
     this.instrumentManager.releaseAll();
     this.previewManager.dispose();
     this.drumManager.stopAll();
+    this.audioTrackEngine.stop();
   }
 
   public stop() {
@@ -625,6 +649,7 @@ class ToneEngine {
   public seekToBeat(beat: number) {
     if (!this.isInitialized) this.init();
     this.lookaheadScheduler.seek(beat);
+    this.audioTrackEngine.seek();
     const bpmAtBeat = this.lookaheadScheduler.getLiveBpm();
     this.cachedBpm = bpmAtBeat;
     Tone.Transport.bpm.value = bpmAtBeat;
@@ -635,6 +660,10 @@ class ToneEngine {
     if (!useSongStore.getState().isPlaying) {
       this.silence();
     }
+  }
+
+  public getAudioTrackEngine(): AudioTrackEngine {
+    return this.audioTrackEngine;
   }
 
   public handleKeyDown(e: KeyboardEvent) {
@@ -759,6 +788,7 @@ class ToneEngine {
     this.cachedMaxBeat = scheduled.totalBeats;
 
     this.lookaheadScheduler.setEvents(scheduled, bpm, state.isLooping, state.tempoMarkers);
+    this.mixerGraph.syncAudioTracks(state.audioTracks || []);
 
     const loopEndSeconds = scheduled.totalDurationSeconds - 2.0;
     this.transportManager.setLoop(state.isLooping, 0, loopEndSeconds);

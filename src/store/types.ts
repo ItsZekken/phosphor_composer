@@ -270,6 +270,8 @@ export type SongStore = TransportState &
   MixerActions &
   UIState &
   UIActions &
+  import('./slices/audioTrackSlice').AudioTrackState &
+  import('./slices/audioTrackSlice').AudioTrackActions &
   ProjectActions;
 
 export type SliceCreator<T> = StateCreator<SongStore, [], [], T>;

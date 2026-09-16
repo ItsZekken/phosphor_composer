@@ -39,12 +39,6 @@ export interface TempNote {
   durationBeats: number;
 }
 
-export interface LivePitchInfo {
-  midi: number;
-  note: string;
-  clarity: number;
-}
-
 interface PianoRollCanvasProps {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   beatWidth: number;
@@ -55,7 +49,6 @@ interface PianoRollCanvasProps {
   selectedNoteIds: string[];
   lassoRect: LassoRect | null;
   tempNote: TempNote | null;
-  livePitch?: LivePitchInfo | null;
   scalePitchClasses: Set<number>;
   rootMidiMod: number;
   isScaleHighlightActive: boolean;
@@ -147,7 +140,6 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
   selectedNoteIds = [],
   lassoRect,
   tempNote,
-  livePitch,
   scalePitchClasses,
   rootMidiMod,
   isScaleHighlightActive,
@@ -155,7 +147,6 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
   handleMouseMoveIdle
 }) => {
   const melodyNotes = useSongStore(state => state.melodyNotes || []);
-  const ghostNotes = useSongStore(state => state.ghostNotes || []);
   const tracks = useSongStore(state => state.tracks || []);
   const activeTrackId = useSongStore(state => state.activeTrackId);
   const activeTrack = tracks.find(t => t.id === activeTrackId);
@@ -226,22 +217,6 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
       ctx.stroke();
     }
 
-    // 3. Dibujar notas fantasma (Ghost Notes de acordes / armonía)
-    (ghostNotes || []).forEach((note) => {
-      const row = MAX_MIDI - note.midi;
-      if (row >= 0 && row < NOTE_COUNT) {
-        const x = note.startBeat * beatWidth;
-        const y = row * rowHeight;
-        const width = note.durationBeats * beatWidth;
-
-        ctx.fillStyle = 'rgba(168, 85, 247, 0.12)';
-        ctx.strokeStyle = 'rgba(168, 85, 247, 0.35)';
-        ctx.lineWidth = 1.5;
-        
-        ctx.fillRect(x + 2, y + 2, width - 4, rowHeight - 4);
-        ctx.strokeRect(x + 2, y + 2, width - 4, rowHeight - 4);
-      }
-    });
 
     // 4. Dibujar nota temporal en creación por arrastre
     if (tempNote) {
@@ -323,35 +298,14 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
       ctx.setLineDash([]);
     }
 
-    // 7. Dibujar Live Pitch detectado por micrófono
-    if (livePitch && livePitch.midi >= MIN_MIDI && livePitch.midi <= MAX_MIDI) {
-      const row = MAX_MIDI - livePitch.midi;
-      const currentBeat = useSongStore.getState().currentBeat ?? 0;
-      const x = currentBeat * beatWidth;
-      const y = row * rowHeight;
-      const width = Math.max(beatWidth * 0.5, 20);
-
-      ctx.fillStyle = 'rgba(255, 0, 128, 0.7)';
-      ctx.strokeStyle = '#ff00aa';
-      ctx.lineWidth = 2;
-      ctx.fillRect(x - 2, y + 1, width, rowHeight - 2);
-      ctx.strokeRect(x - 2, y + 1, width, rowHeight - 2);
-
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 11px monospace';
-      ctx.fillText(livePitch.note, x + 4, y + (rowHeight / 2 + 4));
-    }
-
   }, [
     canvasRef,
     melodyNotes,
-    ghostNotes,
     canvasWidth,
     canvasHeight,
     selectedNoteIds,
     lassoRect,
     tempNote,
-    livePitch,
     rowHeight,
     beatWidth,
     scalePitchClasses,

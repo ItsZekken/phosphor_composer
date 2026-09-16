@@ -258,6 +258,11 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
       channels,
       channelOrder
     },
+    audio: {
+      tracks: (raw as any).audio?.tracks || (raw as any).audioTracks || [],
+      clips: (raw as any).audio?.clips || (raw as any).audioClips || [],
+      latencyMs: (raw as any).audio?.latencyMs ?? 20
+    },
     ui: {
       isCrtEnabled: raw.isCrtEnabled,
       crtParams: raw.crtParams,
@@ -366,6 +371,11 @@ export function serializeSession(state: any, metadataUpdates?: Partial<SessionMe
         }
       },
       channelOrder: state.channelOrder || ['master', 'chords', 'melody', 'drums']
+    },
+    audio: {
+      tracks: state.audioTracks || [],
+      clips: state.audioClips || [],
+      latencyMs: state.audioLatencyCalibrationMs ?? 20
     },
     ui: {
       isCrtEnabled: state.isCrtEnabled,
