@@ -248,7 +248,12 @@ class ToneEngine {
 
     this.initPromise = (async () => {
       try {
-        await Tone.start();
+        // En navegadores modernos, Tone.start() espera interacción del usuario.
+        // Usamos race para no bloquear la inicialización de la interfaz gráfica.
+        await Promise.race([
+          Tone.start(),
+          new Promise((resolve) => setTimeout(resolve, 80))
+        ]);
       } catch (e) {
         console.warn('Advertencia al iniciar Tone.start():', e);
       }
@@ -256,7 +261,10 @@ class ToneEngine {
       const activeCtx = Tone.getContext().rawContext as AudioContext;
       if (activeCtx && activeCtx.state === 'suspended') {
         try {
-          await activeCtx.resume();
+          await Promise.race([
+            activeCtx.resume(),
+            new Promise((resolve) => setTimeout(resolve, 80))
+          ]);
         } catch (_) {}
       }
 
@@ -269,11 +277,12 @@ class ToneEngine {
         console.warn('Advertencia al precargar PhosphorWorklet:', e);
       }
 
-      if (activeCtx && activeCtx.state === 'running') {
+      if (activeCtx) {
         this.isInitialized = true;
       }
     })();
     await this.initPromise;
+
 
     Tone.Transport.cancel(0);
 

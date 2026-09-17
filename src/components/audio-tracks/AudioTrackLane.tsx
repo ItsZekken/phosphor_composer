@@ -8,12 +8,13 @@
  * - AudioTrackLane: Carril de clips sobre la cuadrícula temporal (derecho, desplazable).
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Trash2 } from 'lucide-react';
 import type { AudioTrack, AudioClip } from '../../utils/typeDefinitions';
 import { useSongStore } from '../../store/songStore';
 import { AudioClipComponent } from './AudioClipComponent';
 import { Knob } from '../ui/Knob';
+import { toneEngine } from '../../audio/toneEngine';
 import {
   faderPosToDb,
   dbToFaderPos,
@@ -35,12 +36,37 @@ export const AudioTrackHeader: React.FC<AudioTrackHeaderProps> = ({
   const updateAudioTrack = useSongStore((state) => state.updateAudioTrack);
   const removeAudioTrack = useSongStore((state) => state.removeAudioTrack);
   const setArmedTrackId = useSongStore((state) => state.setArmedTrackId);
+  const isPlaying = useSongStore((state) => state.isPlaying);
 
   const [trackName, setTrackName] = useState(track.name);
+  const [playbackRms, setPlaybackRms] = useState(0);
   const isSelected = selectedTrackId === track.id;
 
   const trackDb = normalizeTrackDb(track.volume);
   const faderPos = dbToFaderPos(trackDb);
+
+  // Vúmetro en tiempo real durante la reproducción
+  useEffect(() => {
+    if (!isPlaying) {
+      setPlaybackRms(0);
+      return;
+    }
+
+    let animId: number;
+    const updateMeter = () => {
+      const db = toneEngine.getChannelMeterLevel(track.id);
+      if (isFinite(db) && db > -60) {
+        const linear = Math.pow(10, db / 20);
+        setPlaybackRms((prev) => prev * 0.65 + linear * 0.35);
+      } else {
+        setPlaybackRms((prev) => Math.max(0, prev * 0.82));
+      }
+      animId = requestAnimationFrame(updateMeter);
+    };
+
+    animId = requestAnimationFrame(updateMeter);
+    return () => cancelAnimationFrame(animId);
+  }, [isPlaying, track.id]);
 
   const handleNameBlur = () => {
     if (trackName.trim()) {
@@ -86,7 +112,8 @@ export const AudioTrackHeader: React.FC<AudioTrackHeaderProps> = ({
       : `Paneo: R${Math.round(track.pan * 100)}%`;
 
   const volTooltip = `Volumen: ${formatDb(trackDb)} dB (0 dB al 75%)`;
-  const vuHeightPercent = Math.min(100, Math.round(liveRms * 280));
+  const effectiveRms = track.isArmed ? liveRms : playbackRms;
+  const vuHeightPercent = Math.min(100, Math.round(effectiveRms * 280));
 
   return (
     <div
@@ -140,29 +167,33 @@ export const AudioTrackHeader: React.FC<AudioTrackHeaderProps> = ({
         </button>
 
         {/* Knob de Volumen con calibración en dB */}
-        <div title={volTooltip}>
+        <div className="audio-hardware-knob-wrapper" title={volTooltip}>
           <Knob
             value={faderPos}
             min={0}
             max={1}
-            size={24}
+            size={22}
             label="VOL"
             onChange={handleVolumeChange}
             onDoubleClick={handleVolumeReset}
           />
+          <span className="audio-knob-readout">{formatDb(trackDb)}</span>
         </div>
 
         {/* Knob de Paneo estéreo L / C / R */}
-        <div title={panTooltip}>
+        <div className="audio-hardware-knob-wrapper" title={panTooltip}>
           <Knob
             value={track.pan}
             min={-1}
             max={1}
-            size={24}
+            size={22}
             label="PAN"
             onChange={handlePanChange}
             onDoubleClick={handlePanReset}
           />
+          <span className="audio-knob-readout">
+            {track.pan === 0 ? 'C' : track.pan < 0 ? `L${Math.round(track.pan * -100)}` : `R${Math.round(track.pan * 100)}`}
+          </span>
         </div>
 
         {/* Conmutadores Mute y Solo apilados verticalmente */}
@@ -197,7 +228,7 @@ export const AudioTrackHeader: React.FC<AudioTrackHeaderProps> = ({
         <div
           className="audio-track-activity-led"
           style={{
-            height: `${track.isArmed ? Math.max(20, vuHeightPercent) : 0}%`,
+            height: `${vuHeightPercent}%`,
             backgroundColor: vuHeightPercent > 85 ? '#ff3b30' : track.color
           }}
         />
@@ -222,12 +253,35 @@ export const AudioTrackLane: React.FC<AudioTrackLaneProps> = ({
   const selectedClipIds = useSongStore((state) => state.selectedClipIds);
   const selectClip = useSongStore((state) => state.selectClip);
   const setSelectedTrackId = useSongStore((state) => state.setSelectedTrackId);
+  const snapGrid = useSongStore((state) => state.audioSnapGrid);
+
+  const handleLaneClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) {
+      setSelectedTrackId(track.id);
+      const rect = e.currentTarget.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const rawBeat = clickX / zoomLevel;
+
+      let step = 1;
+      if (snapGrid === 'bar') step = 4;
+      else if (snapGrid === 'beat') step = 1;
+      else if (snapGrid === '1/2') step = 0.5;
+      else if (snapGrid === '1/4') step = 0.25;
+      else if (snapGrid === '1/8') step = 0.125;
+      else if (snapGrid === '1/16') step = 0.0625;
+      else if (snapGrid === 'off') step = 0;
+
+      const targetBeat = step > 0 ? Math.max(0, Math.round(rawBeat / step) * step) : Math.max(0, rawBeat);
+      toneEngine.seekToBeat(targetBeat);
+    }
+  };
 
   return (
     <div
       className="audio-track-lane"
+      data-track-id={track.id}
       style={{ width: totalWidth, minWidth: totalWidth }}
-      onClick={() => setSelectedTrackId(track.id)}
+      onClick={handleLaneClick}
     >
       {clips.map((clip) => (
         <AudioClipComponent

@@ -27,6 +27,8 @@ export class MixerGraph {
   private channelNodes = new Map<string, ChannelNode>();
   private analyserNode: Tone.Analyser | null = null;
   private fftNode: Tone.Analyser | null = null;
+  private cachedChannels: Record<string, ChannelConfig> = {};
+  private cachedAudioTracks: Array<{ id: string; volume: number; pan: number; muted: boolean; solo: boolean }> = [];
 
   constructor() {}
 
@@ -113,16 +115,24 @@ export class MixerGraph {
     } catch (_) {}
   }
 
+  private isGlobalSoloActive(): boolean {
+    const channelList = Object.values(this.cachedChannels || {});
+    const anyChannelSolo = channelList.filter((ch) => ch && ch.id !== 'master').some((ch) => ch.solo);
+    const anyTrackSolo = (this.cachedAudioTracks || []).some((t) => t.solo);
+    return anyChannelSolo || anyTrackSolo;
+  }
+
   public syncChannels(channels: Record<string, ChannelConfig>) {
     if (!channels) return;
+    this.cachedChannels = channels;
     const channelList = Object.values(channels);
-    const nonMasterList = channelList.filter((ch) => ch.id !== 'master');
-    const anySolo = nonMasterList.some((ch) => ch.solo);
+    const globalSolo = this.isGlobalSoloActive();
 
     for (const ch of channelList) {
+      if (!ch) continue;
       const node = this.getChannelNode(ch.id);
       const isMaster = ch.id === 'master';
-      const isSilenced = isMaster ? Boolean(ch.muted) : Boolean(ch.muted || (anySolo && !ch.solo));
+      const isSilenced = isMaster ? Boolean(ch.muted) : Boolean(ch.muted || (globalSolo && !ch.solo));
       node.volumeNode.mute = isSilenced;
 
       if (!isSilenced) {
@@ -141,6 +151,15 @@ export class MixerGraph {
         nativePanner.channelCountMode = 'explicit';
       }
     }
+
+    // Refrescar mutes de audio tracks si existe un solo global
+    if (this.cachedAudioTracks.length > 0) {
+      for (const track of this.cachedAudioTracks) {
+        const node = this.getChannelNode(track.id);
+        const isSilenced = Boolean(track.muted || (globalSolo && !track.solo));
+        node.volumeNode.mute = isSilenced;
+      }
+    }
   }
 
   /**
@@ -148,11 +167,13 @@ export class MixerGraph {
    * Aplica volumen medido directamente en decibeles (-∞ a +24 dB).
    */
   public syncAudioTracks(tracks: Array<{ id: string; volume: number; pan: number; muted: boolean; solo: boolean }>) {
-    if (!tracks || tracks.length === 0) return;
-    const anySolo = tracks.some((t) => t.solo);
+    if (!tracks) return;
+    this.cachedAudioTracks = tracks;
+    const globalSolo = this.isGlobalSoloActive();
+
     for (const track of tracks) {
       const node = this.getChannelNode(track.id);
-      const isSilenced = Boolean(track.muted || (anySolo && !track.solo));
+      const isSilenced = Boolean(track.muted || (globalSolo && !track.solo));
       node.volumeNode.mute = isSilenced;
       if (!isSilenced) {
         const volDb = normalizeTrackDb(track.volume);
@@ -160,6 +181,15 @@ export class MixerGraph {
       }
       const clampedPan = Math.max(-1, Math.min(1, track.pan));
       node.pannerNode.pan.value = clampedPan;
+    }
+
+    // Refrescar mutes de canales de sintetizador/batería si un audio track activa Solo
+    if (this.cachedChannels && Object.keys(this.cachedChannels).length > 0) {
+      for (const ch of Object.values(this.cachedChannels)) {
+        if (!ch || ch.id === 'master') continue;
+        const node = this.getChannelNode(ch.id);
+        node.volumeNode.mute = Boolean(ch.muted || (globalSolo && !ch.solo));
+      }
     }
   }
 

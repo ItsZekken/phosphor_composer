@@ -4,58 +4,65 @@ import { toneEngine } from '../../audio/toneEngine';
 import { PhosphorLogo } from './PhosphorLogo';
 
 export const GlobalLoader: React.FC = () => {
-  const setIsEngineReady = useSongStore(state => state.setIsEngineReady);
-  const setIsAudioLoading = useSongStore(state => state.setIsAudioLoading);
-  const instrumentType = useSongStore(state => state.instrumentType);
-
   // 'closed': pantalla en negro con logo en el centro
   // 'opening': división horizontal que se abre hacia arriba y hacia abajo
   // 'hidden': componente desmontado
   const [bootPhase, setBootPhase] = useState<'closed' | 'opening' | 'hidden'>('closed');
 
+  const openCurtain = React.useCallback(() => {
+    setBootPhase((prev) => {
+      if (prev === 'hidden' || prev === 'opening') return prev;
+      return 'opening';
+    });
+
+    setTimeout(() => {
+      const state = useSongStore.getState();
+      state.setIsEngineReady(true);
+      state.setIsAudioLoading(false);
+      setBootPhase('hidden');
+    }, 550);
+  }, []);
+
   useEffect(() => {
-    let isMounted = true;
+    let didOpen = false;
+
+    const triggerOpen = () => {
+      if (didOpen) return;
+      didOpen = true;
+      openCurtain();
+    };
+
+    // Temporizador de seguridad infranqueable: La cortina DEBE abrirse en máximo 1.5s
+    const fallbackTimer = window.setTimeout(() => {
+      triggerOpen();
+    }, 1500);
 
     const autoBoot = async () => {
       try {
-        // Inicializar audio y pre-cargar todos los samples (batería, piano y nodos de mezcla)
         await toneEngine.init();
-        if (!isMounted) return;
 
-        await toneEngine.preloadProjectAudio();
-        if (!isMounted) return;
+        // Pre-cargar samples con timeout defensivo para que nada bloquee la apertura
+        await Promise.race([
+          toneEngine.preloadProjectAudio(),
+          new Promise(r => setTimeout(r, 800))
+        ]);
 
-        // Breve pausa para contemplar el logo antes de abrir la cortina
-        await new Promise(r => setTimeout(r, 300));
-        if (!isMounted) return;
-
-        // Iniciar apertura horizontal desde el centro hacia arriba y abajo
-        setBootPhase('opening');
-
-        // Al terminar la animación de apertura, desbloquear la app
-        setTimeout(() => {
-          if (!isMounted) return;
-          setIsEngineReady(true);
-          setIsAudioLoading(false);
-          setBootPhase('hidden');
-        }, 550);
-
+        await new Promise(r => setTimeout(r, 200));
+        triggerOpen();
       } catch (e) {
         console.warn('Auto-boot advertencia (audio continuará bajo demanda):', e);
-        if (isMounted) {
-          setIsEngineReady(true);
-          setIsAudioLoading(false);
-          setBootPhase('hidden');
-        }
+        triggerOpen();
+      } finally {
+        clearTimeout(fallbackTimer);
       }
     };
 
     autoBoot();
 
     return () => {
-      isMounted = false;
+      clearTimeout(fallbackTimer);
     };
-  }, [instrumentType, setIsAudioLoading, setIsEngineReady]);
+  }, [openCurtain]);
 
   if (bootPhase === 'hidden') {
     return null;
@@ -66,11 +73,19 @@ export const GlobalLoader: React.FC = () => {
   return (
     <div
       className="global-curtain-container"
+      onClick={() => {
+        toneEngine.init().catch(() => {});
+        openCurtain();
+      }}
+      role="button"
+      tabIndex={0}
+      title="Haz clic para entrar a Phosphor"
       style={{
         position: 'fixed',
         inset: 0,
         zIndex: 99999,
         pointerEvents: isOpening ? 'none' : 'all',
+        cursor: isOpening ? 'default' : 'pointer',
         overflow: 'hidden'
       }}
     >

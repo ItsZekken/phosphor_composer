@@ -26,12 +26,13 @@ export const AudioTracksView: React.FC = () => {
   const audioTimelineViewport = useSongStore((state) => state.audioTimelineViewport);
 
   const splitAudioClip = useSongStore((state) => state.splitAudioClip);
+  const duplicateAudioClip = useSongStore((state) => state.duplicateAudioClip);
+  const toggleClipMute = useSongStore((state) => state.toggleClipMute);
   const removeAudioClip = useSongStore((state) => state.removeAudioClip);
   const clearClipSelection = useSongStore((state) => state.clearClipSelection);
   const addAudioTrack = useSongStore((state) => state.addAudioTrack);
   const addAudioClip = useSongStore((state) => state.addAudioClip);
-  const startAudioRecording = useSongStore((state) => state.startAudioRecording);
-  const stopAudioRecording = useSongStore((state) => state.stopAudioRecording);
+  const setAudioTimelineViewport = useSongStore((state) => state.setAudioTimelineViewport);
 
   const headersListRef = useRef<HTMLDivElement | null>(null);
   const timelineViewportRef = useRef<HTMLDivElement | null>(null);
@@ -72,7 +73,7 @@ export const AudioTracksView: React.FC = () => {
     });
   }, []);
 
-  // 2. Atajos de teclado locales estilo DAW (S = Split, Del = Eliminar, R = Grabar)
+  // 2. Atajos de teclado locales estilo DAW (S = Split, Del = Eliminar, Ctrl+D = Duplicar, M = Mute)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (
@@ -83,12 +84,24 @@ export const AudioTracksView: React.FC = () => {
         return;
       }
 
-      // Tecla S: Dividir clip seleccionado en la posición del cabezal
+      // Tecla S: Dividir clip seleccionado en la posición del cabezal (o clip bajo el cabezal en la pista seleccionada)
       if (e.key.toLowerCase() === 's' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
-        const selId = useSongStore.getState().selectedClipIds[0];
+        const store = useSongStore.getState();
+        const selId = store.selectedClipIds[0];
         if (selId) {
-          splitAudioClip(selId, useSongStore.getState().currentBeat);
+          splitAudioClip(selId, store.currentBeat);
+        } else if (store.selectedTrackId) {
+          // Buscar clip en la pista seleccionada que intersecte con el cabezal
+          const trackClip = store.audioClips.find(
+            (c) =>
+              c.trackId === store.selectedTrackId &&
+              store.currentBeat >= c.startBeat &&
+              store.currentBeat <= c.startBeat + (c.durationSeconds * store.bpm) / 60
+          );
+          if (trackClip) {
+            splitAudioClip(trackClip.id, store.currentBeat);
+          }
         }
         return;
       }
@@ -103,13 +116,22 @@ export const AudioTracksView: React.FC = () => {
         return;
       }
 
-      // Tecla R: Iniciar/Detener grabación en la pista armada
-      if (e.key.toLowerCase() === 'r' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        e.preventDefault();
-        if (useSongStore.getState().isRecordingAudio) {
-          stopAudioRecording();
-        } else {
-          startAudioRecording();
+      // Atajo Ctrl+D / Cmd+D: Duplicar clips seleccionados
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+        const selIds = useSongStore.getState().selectedClipIds;
+        if (selIds.length > 0) {
+          e.preventDefault();
+          selIds.forEach((id) => duplicateAudioClip(id));
+        }
+        return;
+      }
+
+      // Atajo M (sin modificadores): Silenciar / Desmutear clip(s) seleccionado(s)
+      if (e.key.toLowerCase() === 'm' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        const selIds = useSongStore.getState().selectedClipIds;
+        if (selIds.length > 0) {
+          e.preventDefault();
+          selIds.forEach((id) => toggleClipMute(id));
         }
         return;
       }
@@ -125,9 +147,24 @@ export const AudioTracksView: React.FC = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [splitAudioClip, removeAudioClip, clearClipSelection, startAudioRecording, stopAudioRecording]);
+  }, [splitAudioClip, removeAudioClip, duplicateAudioClip, toggleClipMute, clearClipSelection]);
 
-  // 3. Deselección al hacer click en espacio vacío
+  // 3. Zoom con Ctrl+Rueda y Scroll Horizontal con Shift+Rueda
+  const handleTimelineWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const currentZoom = useSongStore.getState().audioTimelineViewport.zoomLevel || 60;
+      const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
+      const nextZoom = Math.max(20, Math.min(180, Math.round(currentZoom * zoomFactor)));
+      setAudioTimelineViewport({ zoomLevel: nextZoom });
+    } else if (e.shiftKey) {
+      if (timelineViewportRef.current) {
+        timelineViewportRef.current.scrollLeft += e.deltaY;
+      }
+    }
+  }, [setAudioTimelineViewport]);
+
+  // 4. Deselección al hacer click en espacio vacío
   const handleTimelineBackgroundClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('audio-track-lane')) {
       clearClipSelection();
@@ -223,6 +260,7 @@ export const AudioTracksView: React.FC = () => {
           className="audio-timeline-viewport"
           onClick={handleTimelineBackgroundClick}
           onScroll={handleTimelineScroll}
+          onWheel={handleTimelineWheel}
         >
           <div className="audio-timeline-inner" style={{ width: totalTimelineWidth }}>
             {/* Regla de compases */}
@@ -250,6 +288,17 @@ export const AudioTracksView: React.FC = () => {
                 );
               })}
             </div>
+
+            {/* Watermark de estado vacío cuando no hay clips */}
+            {audioClips.length === 0 && (
+              <div className="audio-tracks-empty-watermark">
+                <div className="watermark-icon">✦</div>
+                <div className="watermark-title">ESTACIÓN DE AUDIO MULTITRACK</div>
+                <div className="watermark-subtitle">
+                  Arrastra archivos de audio (WAV, MP3, FLAC) aquí o pulsa <strong>R</strong> para grabar en la pista armada.
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

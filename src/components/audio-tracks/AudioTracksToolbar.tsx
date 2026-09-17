@@ -27,6 +27,9 @@ export const AudioTracksToolbar: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const audioTracks = useSongStore((state) => state.audioTracks);
+  const audioClips = useSongStore((state) => state.audioClips);
+  const bpm = useSongStore((state) => state.bpm);
+  const timeSignature = useSongStore((state) => state.timeSignature);
   const selectedTrackId = useSongStore((state) => state.selectedTrackId);
   const selectedClipIds = useSongStore((state) => state.selectedClipIds);
   const currentBeat = useSongStore((state) => state.currentBeat);
@@ -117,15 +120,29 @@ export const AudioTracksToolbar: React.FC = () => {
     }
   };
 
-  // 3. Herramienta Split (Cortar clip seleccionado en el compás actual)
+  // 3. Herramienta Split (Cortar clips seleccionados o el clip bajo el cabezal en la pista activa)
+  const clipUnderPlayhead = activeTrack
+    ? audioClips.find(
+        (c) =>
+          c.trackId === activeTrack.id &&
+          currentBeat >= c.startBeat &&
+          currentBeat <= c.startBeat + (c.durationSeconds * bpm) / 60
+      )
+    : undefined;
+
+  const canSplit = selectedClipIds.length > 0 || Boolean(clipUnderPlayhead);
+
   const handleSplitAtPlayhead = () => {
-    if (selectedClipIds.length === 0) return;
-    const clipIdToSplit = selectedClipIds[0];
-    splitAudioClip(clipIdToSplit, currentBeat);
+    if (selectedClipIds.length > 0) {
+      selectedClipIds.forEach((id) => splitAudioClip(id, currentBeat));
+    } else if (clipUnderPlayhead) {
+      splitAudioClip(clipUnderPlayhead.id, currentBeat);
+    }
   };
 
-  const measureNum = Math.floor(currentBeat / 4) + 1;
-  const beatInMeasure = Math.floor(currentBeat % 4) + 1;
+  const beatsPerMeasure = timeSignature === '3/4' ? 3 : timeSignature === '6/8' ? 6 : 4;
+  const measureNum = Math.floor(currentBeat / beatsPerMeasure) + 1;
+  const beatInMeasure = Math.floor(currentBeat % beatsPerMeasure) + 1;
 
   // Opciones de pistas para el selector de hardware
   const trackOptions = audioTracks.map((t) => ({
@@ -267,8 +284,8 @@ export const AudioTracksToolbar: React.FC = () => {
             type="button"
             className="physical-btn"
             onClick={handleSplitAtPlayhead}
-            disabled={selectedClipIds.length === 0}
-            title="Dividir clip en el cabezal (Tecla S)"
+            disabled={!canSplit}
+            title={canSplit ? "Dividir clip en el cabezal (Tecla S)" : "Selecciona un clip o sitúa el cabezal sobre una pista con audio (Tecla S)"}
           >
             <Scissors size={13} />
             <span>SPLIT</span>

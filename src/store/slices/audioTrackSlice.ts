@@ -61,6 +61,10 @@ export interface AudioTrackActions {
   removeAudioClip: (id: string) => void;
   updateAudioClip: (id: string, updates: Partial<AudioClip>) => void;
   splitAudioClip: (clipId: string, splitBeat: number) => void;
+  duplicateAudioClip: (id: string) => string | null;
+  toggleClipMute: (id: string) => void;
+  setClipGain: (id: string, gain: number) => void;
+  moveClipToTrack: (clipId: string, targetTrackId: string, newStartBeat?: number) => void;
   selectClip: (id: string, multi?: boolean) => void;
   clearClipSelection: () => void;
   setArmedTrackId: (id: string | null) => void;
@@ -208,6 +212,53 @@ export const createAudioTrackSlice: StateCreator<
     });
   },
 
+  duplicateAudioClip: (id) => {
+    const state = get();
+    const clip = state.audioClips.find((c) => c.id === id);
+    if (!clip) return null;
+
+    const clipDurationBeats = (clip.durationSeconds * state.bpm) / 60;
+    const newStartBeat = Math.round((clip.startBeat + clipDurationBeats) * 100) / 100;
+
+    const newClip: AudioClip = {
+      ...clip,
+      id: `clip_${generateId()}`,
+      name: `${clip.name} (copia)`,
+      startBeat: newStartBeat
+    };
+
+    set({
+      audioClips: [...state.audioClips, newClip],
+      selectedClipIds: [newClip.id]
+    });
+    return newClip.id;
+  },
+
+  toggleClipMute: (id) => {
+    set((state) => ({
+      audioClips: state.audioClips.map((c) => (c.id === id ? { ...c, isMuted: !c.isMuted } : c))
+    }));
+  },
+
+  setClipGain: (id, gain) => {
+    set((state) => ({
+      audioClips: state.audioClips.map((c) => (c.id === id ? { ...c, gain: Math.max(0, Math.min(4.0, gain)) } : c))
+    }));
+  },
+
+  moveClipToTrack: (clipId, targetTrackId, newStartBeat) => {
+    set((state) => ({
+      audioClips: state.audioClips.map((c) => {
+        if (c.id !== clipId) return c;
+        return {
+          ...c,
+          trackId: targetTrackId,
+          ...(newStartBeat !== undefined ? { startBeat: Math.max(0, newStartBeat) } : {})
+        };
+      })
+    }));
+  },
+
   selectClip: (id, multi = false) => {
     set((state) => {
       if (multi) {
@@ -229,6 +280,9 @@ export const createAudioTrackSlice: StateCreator<
   setArmedTrackId: (id) => {
     set((state) => {
       const nextArmed = state.armedTrackId === id ? null : id;
+      if (nextArmed) {
+        audioRecorder.prepare().catch(() => {});
+      }
       return {
         armedTrackId: nextArmed,
         audioTracks: state.audioTracks.map((t) => ({

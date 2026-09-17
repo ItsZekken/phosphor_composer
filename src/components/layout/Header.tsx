@@ -211,8 +211,10 @@ export const Header = () => {
 
   const handleExportProject = () => {
     const state = useSongStore.getState();
-    if (chordBlocks.length === 0 && melodyNotes.length === 0 && (!state.patternChain || state.patternChain.length === 0)) {
-      alert('La canción está vacía. Agrega notas, acordes o patrones de batería primero.');
+    const hasAudioClips = Boolean(state.audioClips && state.audioClips.length > 0);
+    const hasDrums = Boolean(state.drumChannels && state.drumChannels.some(ch => ch.patterns && ch.patterns.some(p => p.some(s => s?.isActive)))) || Boolean(state.patternChain && state.patternChain.length > 0);
+    if (chordBlocks.length === 0 && melodyNotes.length === 0 && !hasDrums && !hasAudioClips) {
+      alert('La canción está vacía. Agrega notas, acordes, patrones de batería o pistas de audio primero.');
       return;
     }
 
@@ -231,8 +233,11 @@ export const Header = () => {
 
   const handleExportAudio = async () => {
     setExportDropdownOpen(false);
-    if (chordBlocks.length === 0 && melodyNotes.length === 0) {
-      alert('La canción está vacía. Agrega notas o acordes primero.');
+    const state = useSongStore.getState();
+    const hasAudioClips = Boolean(state.audioClips && state.audioClips.length > 0);
+    const hasDrums = Boolean(state.drumChannels && state.drumChannels.some(ch => ch.patterns && ch.patterns.some(p => p.some(s => s?.isActive)))) || Boolean(state.patternChain && state.patternChain.length > 0);
+    if (chordBlocks.length === 0 && melodyNotes.length === 0 && !hasDrums && !hasAudioClips) {
+      alert('La canción está vacía. Agrega notas, acordes, batería o pistas de audio primero.');
       return;
     }
 
@@ -266,8 +271,11 @@ export const Header = () => {
 
   const handleExportCompressedAudio = async () => {
     setExportDropdownOpen(false);
-    if (chordBlocks.length === 0 && melodyNotes.length === 0) {
-      alert('La canción está vacía. Agrega notas o acordes primero.');
+    const state = useSongStore.getState();
+    const hasAudioClips = Boolean(state.audioClips && state.audioClips.length > 0);
+    const hasDrums = Boolean(state.drumChannels && state.drumChannels.some(ch => ch.patterns && ch.patterns.some(p => p.some(s => s?.isActive)))) || Boolean(state.patternChain && state.patternChain.length > 0);
+    if (chordBlocks.length === 0 && melodyNotes.length === 0 && !hasDrums && !hasAudioClips) {
+      alert('La canción está vacía. Agrega notas, acordes, batería o pistas de audio primero.');
       return;
     }
 

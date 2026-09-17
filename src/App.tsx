@@ -50,7 +50,8 @@ export default function App() {
     let prevModelKey = '';
 
     const unsubscribe = useSongStore.subscribe((state) => {
-      const currentModelKey = `${state.bpm}_${state.key}_${state.scale}_${state.tracks.length}_${state.chordBlocks.length}_${state.drumChannels.length}_${state.patternChain.length}_${state.pattern}`;
+      const clipsSignature = (state.audioClips || []).map(c => `${c.id}:${c.trackId}:${c.startBeat}:${c.durationSeconds}:${c.isMuted}`).join('|');
+      const currentModelKey = `${state.bpm}_${state.key}_${state.scale}_${state.tracks.length}_${state.chordBlocks.length}_${state.drumChannels.length}_${state.patternChain.length}_${state.pattern}_${(state.audioTracks || []).length}_${clipsSignature}`;
       if (currentModelKey === prevModelKey) return;
       prevModelKey = currentModelKey;
 
@@ -121,6 +122,10 @@ export default function App() {
           currentStore.resetDrumTimelineScroll();
           const el = document.querySelector('.pattern-chain-track-wrapper');
           if (el) el.scrollLeft = 0;
+        } else if (currentStore.activeView === 'audio-tracks') {
+          const el = document.querySelector('.audio-timeline-viewport');
+          if (el) el.scrollLeft = 0;
+          currentStore.setCurrentBeat(0);
         }
       };
 
@@ -142,7 +147,23 @@ export default function App() {
         return;
       }
 
+      // Atajo R: En vista 'audio-tracks' controla la grabación; en las demás alterna bucle (Loop)
       if (e.key.toLowerCase() === 'r' && !e.shiftKey) {
+        e.preventDefault();
+        if (store.activeView === 'audio-tracks') {
+          if (store.isRecordingAudio) {
+            store.stopAudioRecording();
+          } else {
+            store.startAudioRecording();
+          }
+        } else {
+          store.setLooping(!store.isLooping);
+        }
+        return;
+      }
+
+      // En vista 'audio-tracks', Shift+R permite alternar bucle
+      if (e.key.toLowerCase() === 'r' && e.shiftKey && store.activeView === 'audio-tracks') {
         e.preventDefault();
         store.setLooping(!store.isLooping);
         return;
