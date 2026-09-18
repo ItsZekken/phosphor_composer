@@ -103,6 +103,8 @@ export default function App() {
           // Obtener el estado fresco dentro de la promesa
           const currentStore = useSongStore.getState();
           currentStore.setPlaying(!currentStore.isPlaying);
+        }).catch((err) => {
+          console.error('[App] Error al alternar reproducción con Space:', err);
         });
         return;
       }

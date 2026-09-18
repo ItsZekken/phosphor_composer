@@ -132,8 +132,13 @@ export const Header = () => {
   const [tapTimes, setTapTimes] = useState<number[]>([]);
 
   const handlePlayToggle = async () => {
-    await toneEngine.init();
-    setPlaying(!isPlaying);
+    try {
+      await toneEngine.init();
+      const current = useSongStore.getState().isPlaying;
+      setPlaying(!current);
+    } catch (e) {
+      console.error('[Header] Error al iniciar/pausar reproducción:', e);
+    }
   };
 
   const handleStop = () => {

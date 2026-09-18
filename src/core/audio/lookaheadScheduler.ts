@@ -128,7 +128,7 @@ export class LookaheadScheduler {
     }, this.intervalMs);
   }
 
-  public stop() {
+  public stop(resetPosition = false) {
     this.isRunning = false;
     if (this.intervalTimer !== null) {
       clearInterval(this.intervalTimer);
@@ -136,6 +136,12 @@ export class LookaheadScheduler {
     }
     this.lastEmittedBpm = -1;
     this.lastEmittedStep = -1;
+    if (resetPosition) {
+      this.currentBeat = 0;
+      this.startSecondsOffset = 0;
+      this.nextScheduledSeconds = 0;
+      this.playbackStartTime = 0;
+    }
   }
 
   public seek(beat: number) {
@@ -163,11 +169,11 @@ export class LookaheadScheduler {
 
   public getLiveSeconds(): number {
     if (!this.isRunning) return this.tempoMap.beatToSeconds(this.currentBeat);
-    const elapsedSeconds = Tone.now() - this.playbackStartTime;
+    const elapsedSeconds = Math.max(0, Tone.now() - this.playbackStartTime);
     let currentAudioSeconds = this.startSecondsOffset + elapsedSeconds;
 
     if (this.isLooping && this.totalDurationSeconds > 0) {
-      currentAudioSeconds = currentAudioSeconds % this.totalDurationSeconds;
+      currentAudioSeconds = ((currentAudioSeconds % this.totalDurationSeconds) + this.totalDurationSeconds) % this.totalDurationSeconds;
     }
     return currentAudioSeconds;
   }
@@ -188,8 +194,29 @@ export class LookaheadScheduler {
     if (!this.isRunning || !this.scheduledEvents) return;
 
     const now = Tone.now();
-    const elapsedSeconds = now - this.playbackStartTime;
+    const elapsedSeconds = Math.max(0, now - this.playbackStartTime);
     let currentAudioSeconds = this.startSecondsOffset + elapsedSeconds;
+
+    // Normalización continua de tiempo en bucle
+    if (this.isLooping && this.totalDurationSeconds > 0) {
+      if (currentAudioSeconds >= this.totalDurationSeconds) {
+        const loopCount = Math.floor(currentAudioSeconds / this.totalDurationSeconds);
+        this.playbackStartTime += loopCount * this.totalDurationSeconds;
+        this.startSecondsOffset = 0;
+        currentAudioSeconds = currentAudioSeconds % this.totalDurationSeconds;
+        this.nextScheduledSeconds = Math.max(0, this.nextScheduledSeconds - loopCount * this.totalDurationSeconds);
+        if (this.callbacks.onLoopWrap) {
+          this.callbacks.onLoopWrap();
+        }
+      }
+    } else if (!this.isLooping && currentAudioSeconds >= this.totalDurationSeconds) {
+      // Fin de la canción en modo sin bucle
+      this.stop(true);
+      if (this.callbacks.onSongEnd) {
+        this.callbacks.onSongEnd();
+      }
+      return;
+    }
 
     // Actualizar currentBeat para telemetría y cursores
     this.currentBeat = this.tempoMap.secondsToBeat(currentAudioSeconds);
@@ -213,56 +240,56 @@ export class LookaheadScheduler {
     }
 
     const windowEndSeconds = currentAudioSeconds + this.lookaheadSeconds;
-
-    // Verificar fin de canción en modo no loop
-    if (!this.isLooping && currentAudioSeconds >= this.totalDurationSeconds) {
-      this.stop();
-      if (this.callbacks.onSongEnd) {
-        this.callbacks.onSongEnd();
-      }
-      return;
-    }
-
     const startSec = this.nextScheduledSeconds;
     const endSec = windowEndSeconds;
 
     if (startSec >= endSec) return;
 
     if (this.callbacks.onScheduleWindow) {
-      this.callbacks.onScheduleWindow(startSec, endSec, currentAudioSeconds, this.tempoMap);
+      this.callbacks.onScheduleWindow(
+        startSec,
+        Math.min(endSec, this.totalDurationSeconds),
+        currentAudioSeconds,
+        this.tempoMap
+      );
+      if (this.isLooping && this.totalDurationSeconds > 0 && endSec > this.totalDurationSeconds) {
+        this.callbacks.onScheduleWindow(
+          0,
+          endSec - this.totalDurationSeconds,
+          currentAudioSeconds - this.totalDurationSeconds,
+          this.tempoMap
+        );
+      }
     }
 
-    // Programar acordes dentro de la ventana de audio [startSec, endSec)
+    // Programar acordes dentro de la ventana de audio
     this.scheduledEvents.chordEvents.forEach((evt) => {
-      if (this.isEventInWindow(evt.timeSeconds, startSec, endSec)) {
-        const timeOffset = evt.timeSeconds - currentAudioSeconds;
-        const triggerTime = Math.max(now, now + timeOffset);
+      const times = this.getEventTriggerTimes(evt.timeSeconds, startSec, endSec, currentAudioSeconds, now);
+      times.forEach((triggerTime) => {
         try {
           this.callbacks.onTriggerChord(evt, triggerTime);
         } catch (_) {}
-      }
+      });
     });
 
     // Programar pistas melódicas del Piano Roll
     this.scheduledEvents.trackEvents.forEach((evt) => {
-      if (this.isEventInWindow(evt.timeSeconds, startSec, endSec)) {
-        const timeOffset = evt.timeSeconds - currentAudioSeconds;
-        const triggerTime = Math.max(now, now + timeOffset);
+      const times = this.getEventTriggerTimes(evt.timeSeconds, startSec, endSec, currentAudioSeconds, now);
+      times.forEach((triggerTime) => {
         try {
           this.callbacks.onTriggerTrack(evt, triggerTime);
         } catch (_) {}
-      }
+      });
     });
 
     // Programar batería
     this.scheduledEvents.drumEvents.forEach((evt) => {
-      if (this.isEventInWindow(evt.timeSeconds, startSec, endSec)) {
-        const timeOffset = evt.timeSeconds - currentAudioSeconds;
-        const triggerTime = Math.max(now, now + timeOffset);
+      const times = this.getEventTriggerTimes(evt.timeSeconds, startSec, endSec, currentAudioSeconds, now);
+      times.forEach((triggerTime) => {
         try {
           this.callbacks.onTriggerDrum(evt, triggerTime);
         } catch (_) {}
-      }
+      });
     });
 
     // Programar metrónomo en fase exacta con la métrica y tempo
@@ -279,10 +306,9 @@ export class LookaheadScheduler {
         const clickBeat = s * stepBeats;
         if (clickBeat < 0) continue;
         const clickSec = this.tempoMap.beatToSeconds(clickBeat);
-        if (this.isEventInWindow(clickSec, startSec, endSec)) {
-          const timeOffset = clickSec - currentAudioSeconds;
-          const triggerTime = Math.max(now, now + timeOffset);
+        const times = this.getEventTriggerTimes(clickSec, startSec, endSec, currentAudioSeconds, now);
 
+        if (times.length > 0) {
           const isMeasureStart = Math.abs(clickBeat % beatsPerMeasure) < 0.001 || Math.abs((clickBeat % beatsPerMeasure) - beatsPerMeasure) < 0.001;
           const isBeat = Math.abs(clickBeat % 1) < 0.001 || Math.abs((clickBeat % 1) - 1) < 0.001;
 
@@ -293,36 +319,41 @@ export class LookaheadScheduler {
             freq = 800;
           }
           const volumeFactor = isMeasureStart || isBeat ? 1.0 : 0.5;
-          this.callbacks.onTriggerMetronome(freq, volumeFactor, triggerTime);
+          times.forEach((triggerTime) => {
+            this.callbacks.onTriggerMetronome!(freq, volumeFactor, triggerTime);
+          });
         }
       }
     }
 
     this.nextScheduledSeconds = endSec;
-
-    // Manejo de bucle (Loop wrapping)
-    if (this.isLooping && this.totalDurationSeconds > 0 && windowEndSeconds >= this.totalDurationSeconds) {
-      this.startSecondsOffset = 0;
-      this.playbackStartTime = now + (this.totalDurationSeconds - currentAudioSeconds);
-      this.nextScheduledSeconds = 0;
-      if (this.callbacks.onLoopWrap) {
-        this.callbacks.onLoopWrap();
-      }
-    }
   }
 
-  private isEventInWindow(evtSeconds: number, startSeconds: number, endSeconds: number): boolean {
-    if (this.isLooping && this.totalDurationSeconds > 0) {
-      const wrappedEvt = evtSeconds % this.totalDurationSeconds;
-      const wrappedStart = startSeconds % this.totalDurationSeconds;
-      const wrappedEnd = endSeconds % this.totalDurationSeconds;
+  private getEventTriggerTimes(
+    evtSeconds: number,
+    startSec: number,
+    endSec: number,
+    currentAudioSeconds: number,
+    now: number
+  ): number[] {
+    const triggerTimes: number[] = [];
+    const L = this.totalDurationSeconds;
 
-      if (wrappedStart < wrappedEnd) {
-        return wrappedEvt >= wrappedStart && wrappedEvt < wrappedEnd;
-      } else {
-        return wrappedEvt >= wrappedStart || wrappedEvt < wrappedEnd;
+    // 1. Ocurrencia en el ciclo actual
+    if (evtSeconds >= startSec && evtSeconds < endSec) {
+      const timeOffset = evtSeconds - currentAudioSeconds;
+      triggerTimes.push(Math.max(now, now + timeOffset));
+    }
+
+    // 2. Ocurrencia en el siguiente ciclo si la ventana sobrepasa la duración del bucle
+    if (this.isLooping && L > 0 && endSec > L) {
+      const nextCycleSeconds = evtSeconds + L;
+      if (nextCycleSeconds >= startSec && nextCycleSeconds < endSec) {
+        const timeOffset = nextCycleSeconds - currentAudioSeconds;
+        triggerTimes.push(Math.max(now, now + timeOffset));
       }
     }
-    return evtSeconds >= startSeconds && evtSeconds < endSeconds;
+
+    return triggerTimes;
   }
 }

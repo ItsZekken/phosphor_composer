@@ -92,8 +92,13 @@ export const StageTelemetryHUD: React.FC<StageTelemetryHUDProps> = React.memo(({
   }, [isPlaying, currentBeat]);
 
   const handleTogglePlay = async () => {
-    await toneEngine.init();
-    setPlaying(!isPlaying);
+    try {
+      await toneEngine.init();
+      const current = useSongStore.getState().isPlaying;
+      setPlaying(!current);
+    } catch (e) {
+      console.error('[StageTelemetryHUD] Error al iniciar/pausar reproducción:', e);
+    }
   };
 
   const handleStop = () => {

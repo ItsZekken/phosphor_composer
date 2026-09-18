@@ -82,6 +82,7 @@ class ToneEngine {
   private cachedMaxBeat = 16;
 
   private unsubscribeStore: (() => void) | null = null;
+  private hasSubscribedToStore = false;
   private playheadRafId: number | null = null;
   private syncTimelineDebounced: () => void;
 
@@ -188,6 +189,8 @@ class ToneEngine {
     this.syncTimelineDebounced = debounce(() => {
       this.syncTimeline();
     }, 50);
+
+    this.ensureStoreSubscribed();
   }
 
   private scheduleVisualNote(note: string, isMelody: boolean, triggerAudioTime: number, durationSeconds: number) {
@@ -235,25 +238,35 @@ class ToneEngine {
     if (state.activeMelodyNotes.length > 0) state.setActiveMelodyNotes([]);
   }
 
-  public async init() {
+  public async init(interactive = true): Promise<boolean> {
+    this.ensureStoreSubscribed();
+
     const rawCtx = Tone.getContext().rawContext as AudioContext;
-    if (this.isInitialized && rawCtx && rawCtx.state === 'running') return;
+    if (this.isInitialized && rawCtx && rawCtx.state === 'running') {
+      return true;
+    }
+
     if (this.initPromise) {
       try {
         await this.initPromise;
         const currentCtx = Tone.getContext().rawContext as AudioContext;
-        if (this.isInitialized && currentCtx && currentCtx.state === 'running') return;
+        if (this.isInitialized && currentCtx && currentCtx.state === 'running') {
+          return true;
+        }
       } catch (_) {}
     }
 
     this.initPromise = (async () => {
       try {
-        // En navegadores modernos, Tone.start() espera interacción del usuario.
-        // Usamos race para no bloquear la inicialización de la interfaz gráfica.
-        await Promise.race([
-          Tone.start(),
-          new Promise((resolve) => setTimeout(resolve, 80))
-        ]);
+        if (interactive) {
+          await Tone.start();
+        } else {
+          // En modo no interactivo (autoboot sin user gesture), no bloquear indefinidamente
+          await Promise.race([
+            Tone.start(),
+            new Promise((resolve) => setTimeout(resolve, 80))
+          ]);
+        }
       } catch (e) {
         console.warn('Advertencia al iniciar Tone.start():', e);
       }
@@ -261,10 +274,14 @@ class ToneEngine {
       const activeCtx = Tone.getContext().rawContext as AudioContext;
       if (activeCtx && activeCtx.state === 'suspended') {
         try {
-          await Promise.race([
-            activeCtx.resume(),
-            new Promise((resolve) => setTimeout(resolve, 80))
-          ]);
+          if (interactive) {
+            await activeCtx.resume();
+          } else {
+            await Promise.race([
+              activeCtx.resume(),
+              new Promise((resolve) => setTimeout(resolve, 80))
+            ]);
+          }
         } catch (_) {}
       }
 
@@ -277,20 +294,26 @@ class ToneEngine {
         console.warn('Advertencia al precargar PhosphorWorklet:', e);
       }
 
-      if (activeCtx) {
+      if (activeCtx && activeCtx.state === 'running') {
         this.isInitialized = true;
       }
     })();
+
     await this.initPromise;
+    this.initPromise = null;
 
+    return this.isInitialized;
+  }
 
-    Tone.Transport.cancel(0);
+  private ensureStoreSubscribed() {
+    if (this.hasSubscribedToStore) return;
+    this.hasSubscribedToStore = true;
 
     const initialState = useSongStore.getState();
     const initialBpm = initialState.bpm || 120;
     this.cachedBpm = initialBpm;
     this.transportManager.setBpm(initialBpm);
-    Tone.Transport.bpm.value = initialBpm;
+    try { Tone.Transport.bpm.value = initialBpm; } catch (_) {}
 
     this.cachedIsKeyboardMelodyEnabled = initialState.isKeyboardMelodyEnabled;
     this.cachedIsKeyboardChromatic = initialState.isKeyboardChromatic;
@@ -397,7 +420,7 @@ class ToneEngine {
         prevBpm = state.bpm;
         this.cachedBpm = state.bpm;
         this.transportManager.setBpm(state.bpm);
-        Tone.Transport.bpm.value = state.bpm;
+        try { Tone.Transport.bpm.value = state.bpm; } catch (_) {}
         musicalContentChanged = true;
       }
 
@@ -434,29 +457,46 @@ class ToneEngine {
       if (state.isPlaying !== prevIsPlaying) {
         prevIsPlaying = state.isPlaying;
         if (state.isPlaying) {
-          this.syncTimeline();
-          this.lookaheadScheduler.start(state.currentBeat, state.bpm, state.tempoMarkers);
-          const liveSec = this.lookaheadScheduler.getLiveSeconds();
-          this.transportManager.start(state.currentBeat, state.bpm, liveSec);
+          const doPlay = () => {
+            this.syncTimeline();
+            this.lookaheadScheduler.start(state.currentBeat, state.bpm, state.tempoMarkers);
+            const liveSec = this.lookaheadScheduler.getLiveSeconds();
+            this.transportManager.start(state.currentBeat, state.bpm, liveSec);
+          };
+
+          if (!this.isInitialized) {
+            this.init(true).then(() => {
+              if (useSongStore.getState().isPlaying) {
+                doPlay();
+              }
+            }).catch((err) => {
+              console.error('[ToneEngine] Error al iniciar AudioContext para reproducción:', err);
+              useSongStore.getState().setPlaying(false);
+            });
+          } else {
+            doPlay();
+          }
         } else {
-          this.lookaheadScheduler.stop();
+          this.lookaheadScheduler.stop(false);
           this.transportManager.pause();
           this.silence();
         }
       }
 
-      // 10. Modulaciones globales (Swing, Sustain)
+      // 9. Modulaciones globales (Swing, Sustain)
       if (state.swing !== prevSwing) {
         prevSwing = state.swing;
-        Tone.Transport.swing = state.swing;
-        Tone.Transport.swingSubdivision = '16n';
+        try {
+          Tone.Transport.swing = state.swing;
+          Tone.Transport.swingSubdivision = '16n';
+        } catch (_) {}
       }
       if (state.sustain !== prevSustain) {
         prevSustain = state.sustain;
         this.updateSustain(state.sustain);
       }
 
-      // 11. Pistas y Clips de Audio Multitrack
+      // 10. Pistas y Clips de Audio Multitrack
       if (state.audioTracks !== prevAudioTracks) {
         prevAudioTracks = state.audioTracks;
         this.mixerGraph.syncAudioTracks(state.audioTracks || []);
@@ -467,7 +507,7 @@ class ToneEngine {
         musicalContentChanged = true;
       }
 
-      // 12. Hot-Reloading: sincronización continua en caliente si hay reproducción activa
+      // 11. Hot-Reloading: sincronización continua en caliente si hay reproducción activa
       if (musicalContentChanged && state.isPlaying) {
         this.syncTimelineDebounced();
       }
@@ -485,6 +525,7 @@ class ToneEngine {
     this.syncChannels(initialState.channels);
     this.mixerGraph.syncAudioTracks(initialState.audioTracks || []);
     this.updateSustain(initialState.sustain);
+    this.syncTimeline();
   }
 
   public getAnalyser(): Tone.Analyser {
@@ -628,7 +669,7 @@ class ToneEngine {
   }
 
   public stop() {
-    this.lookaheadScheduler.stop();
+    this.lookaheadScheduler.stop(true);
     this.transportManager.stop();
     this.silence();
     const state = useSongStore.getState();
@@ -783,14 +824,12 @@ class ToneEngine {
    * Sincronización continua de la sesión en el LookaheadScheduler (Zero Audio Glitches).
    */
   private syncTimeline() {
-    if (!this.isInitialized) return;
-
     const state = useSongStore.getState();
     const bpm = state.bpm || 120;
     this.cachedBpm = bpm;
 
     this.transportManager.setBpm(bpm);
-    Tone.Transport.bpm.value = bpm;
+    try { Tone.Transport.bpm.value = bpm; } catch (_) {}
 
     const session = serializeSession(state);
     const scheduled = scheduleSessionTimeline(session, state.customPatterns || []);
@@ -799,7 +838,7 @@ class ToneEngine {
     this.lookaheadScheduler.setEvents(scheduled, bpm, state.isLooping, state.tempoMarkers);
     this.mixerGraph.syncAudioTracks(state.audioTracks || []);
 
-    const loopEndSeconds = scheduled.totalDurationSeconds - 2.0;
+    const loopEndSeconds = Math.max(0.1, scheduled.totalDurationSeconds - 2.0);
     this.transportManager.setLoop(state.isLooping, 0, loopEndSeconds);
   }
 

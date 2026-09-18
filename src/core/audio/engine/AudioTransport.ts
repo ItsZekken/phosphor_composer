@@ -74,22 +74,35 @@ export class AudioTransport {
   }
 
   public start(currentBeat: number, bpm: number, audioSeconds?: number) {
-    Tone.Transport.bpm.value = bpm;
-    Tone.Transport.seconds = audioSeconds !== undefined ? audioSeconds : currentBeat * (60 / bpm);
-    Tone.Transport.start();
+    try {
+      Tone.Transport.bpm.value = bpm;
+      Tone.Transport.seconds = audioSeconds !== undefined ? audioSeconds : currentBeat * (60 / bpm);
+      if (Tone.Transport.state !== 'started') {
+        Tone.Transport.start();
+      }
+    } catch (_) {}
   }
 
   public pause() {
-    Tone.Transport.pause();
+    try {
+      if (Tone.Transport.state === 'started') {
+        Tone.Transport.pause();
+      }
+    } catch (_) {}
   }
 
   public stop() {
-    Tone.Transport.stop();
+    try {
+      Tone.Transport.stop();
+      Tone.Transport.seconds = 0;
+    } catch (_) {}
   }
 
   public seek(beat: number, bpm: number, audioSeconds?: number) {
-    Tone.Transport.bpm.value = bpm;
-    Tone.Transport.seconds = audioSeconds !== undefined ? audioSeconds : beat * (60 / bpm);
+    try {
+      Tone.Transport.bpm.value = bpm;
+      Tone.Transport.seconds = audioSeconds !== undefined ? audioSeconds : beat * (60 / bpm);
+    } catch (_) {}
   }
 
   public dispose() {
