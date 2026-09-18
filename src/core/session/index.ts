@@ -5,3 +5,4 @@
 
 export * from './sessionTypes';
 export * from './sessionSerializer';
+export * from './phosphorBundle';

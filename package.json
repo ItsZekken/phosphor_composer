@@ -21,6 +21,7 @@
     "@tonejs/midi": "^2.0.28",
     "@tonejs/piano": "^0.2.1",
     "events": "^3.3.0",
+    "fflate": "^0.8.3",
     "lucide-react": "^1.23.0",
     "mediabunny": "^1.55.5",
     "react": "^19.2.7",

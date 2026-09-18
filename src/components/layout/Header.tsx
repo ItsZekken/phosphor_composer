@@ -9,7 +9,7 @@ import { Play, Square, Trash2, RefreshCw, Bell, Settings as SettingsIcon, Slider
 import { CustomSelect } from '../ui/CustomSelect';
 
 import { exportSessionToMidi, importMidiToSession } from '../../utils/midiService';
-import { exportSessionToJson } from '../../core/session';
+import { exportSessionToJson, exportProjectToPhosBundle, importProjectFromPhosBundle, isPhosBundle } from '../../core/session';
 import { ExportProgressModal } from '../ui/ExportProgressModal';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { PhosphorLogo } from '../ui/PhosphorLogo';
@@ -175,6 +175,7 @@ export const Header = () => {
   }, [exportDropdownOpen]);
 
   const handleExportNormal = () => {
+    setExportDropdownOpen(false);
     const state = useSongStore.getState();
     const hasChords = Boolean(state.chordBlocks && state.chordBlocks.length > 0);
     const hasTracks = Boolean(state.tracks && state.tracks.some(t => t.notes && t.notes.length > 0));
@@ -209,7 +210,35 @@ export const Header = () => {
     downloadMidiFile(midiArray, `phosphor_${state.key}_${state.scale}_${state.bpm}bpm_multitrack.mid`);
   };
 
-  const handleExportProject = () => {
+  const handleExportProject = async () => {
+    setExportDropdownOpen(false);
+    const state = useSongStore.getState();
+    const hasAudioClips = Boolean(state.audioClips && state.audioClips.length > 0);
+    const hasDrums = Boolean(state.drumChannels && state.drumChannels.some(ch => ch.patterns && ch.patterns.some(p => p.some(s => s?.isActive)))) || Boolean(state.patternChain && state.patternChain.length > 0);
+    if (chordBlocks.length === 0 && melodyNotes.length === 0 && !hasDrums && !hasAudioClips) {
+      alert('La canción está vacía. Agrega notas, acordes, patrones de batería o pistas de audio primero.');
+      return;
+    }
+
+    try {
+      const result = await exportProjectToPhosBundle(state, {
+        title: `Phosphor Project ${key} ${scale}`
+      });
+      const url = URL.createObjectURL(result.blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = result.filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (err) {
+      alert('Error al exportar paquete de proyecto (.phos): ' + (err as Error).message);
+    }
+  };
+
+  const handleExportJson = () => {
+    setExportDropdownOpen(false);
     const state = useSongStore.getState();
     const hasAudioClips = Boolean(state.audioClips && state.audioClips.length > 0);
     const hasDrums = Boolean(state.drumChannels && state.drumChannels.some(ch => ch.patterns && ch.patterns.some(p => p.some(s => s?.isActive)))) || Boolean(state.patternChain && state.patternChain.length > 0);
@@ -229,6 +258,7 @@ export const Header = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
   };
 
   const handleExportAudio = async () => {
@@ -329,7 +359,7 @@ export const Header = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.name.endsWith('.json')) {
+    if (file.name.toLowerCase().endsWith('.json')) {
       const reader = new FileReader();
       reader.onload = (event) => {
         try {
@@ -347,6 +377,21 @@ export const Header = () => {
         if (!arrayBuffer) return;
 
         try {
+          // 1. Detección y desempaquetado de proyecto Phosphor (.phos o archivo ZIP)
+          if (
+            file.name.toLowerCase().endsWith('.phos') ||
+            file.name.toLowerCase().endsWith('.zip') ||
+            isPhosBundle(arrayBuffer)
+          ) {
+            const { session, warnings } = await importProjectFromPhosBundle(arrayBuffer);
+            importSong(session);
+            if (warnings && warnings.length > 0) {
+              console.warn('[Header] Advertencias al importar paquete .phos:', warnings);
+            }
+            return;
+          }
+
+          // 2. Importación estándar de archivo MIDI (.mid / .midi)
           const result = importMidiToSession(arrayBuffer, customPatterns);
           if (result.success) {
             importSong({
@@ -373,7 +418,7 @@ export const Header = () => {
             alert('Error importando MIDI: ' + (result.message || 'Error desconocido'));
           }
         } catch (err) {
-          alert('Error al leer archivo MIDI.');
+          alert('Error al importar archivo: ' + (err as Error).message);
         }
       };
       reader.readAsArrayBuffer(file);
@@ -550,11 +595,11 @@ export const Header = () => {
         <input
           type="file"
           id="import-midi"
-          accept=".mid,.midi,.json"
+          accept=".phos,.zip,.json,.mid,.midi"
           style={{ display: 'none' }}
           onChange={handleImportFile}
         />
-        <label htmlFor="import-midi" className="action-btn" title="Importar">
+        <label htmlFor="import-midi" className="action-btn" title="Importar (.phos, .json, .mid)">
           <FolderOpen size={16} />
         </label>
 
@@ -572,11 +617,14 @@ export const Header = () => {
           </button>
           {exportDropdownOpen && (
             <div className="export-dropdown-menu">
+              <button className="export-dropdown-item" onClick={handleExportProject}>
+                Guardar Proyecto (.phos)
+              </button>
+              <button className="export-dropdown-item" onClick={handleExportJson}>
+                Exportar solo JSON (.json)
+              </button>
               <button className="export-dropdown-item" onClick={handleExportNormal}>
                 Exportar MIDI Multicanal (.mid)
-              </button>
-              <button className="export-dropdown-item" onClick={handleExportProject}>
-                Guardar Proyecto (.json)
               </button>
               <div style={{ height: '1px', background: 'rgba(255,255,255,0.08)', margin: '4px 0' }} />
               <button className="export-dropdown-item" onClick={handleExportAudio}>
