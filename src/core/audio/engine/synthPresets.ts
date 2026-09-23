@@ -37,7 +37,7 @@ export const DEFAULT_SYNTH_SETTINGS: SynthSettings = {
     waveType: 'sawtooth',
     octave: 0,
     semi: 0,
-    detune: 6,
+    detune: 0,
     volume: 0.4
   },
   subOsc: {
@@ -106,7 +106,7 @@ export const SYNTH_PRESETS: SynthPresetDef[] = [
       envelope: { attack: 0.02, decay: 0.2, sustain: 0.7, release: 0.5 },
       filter: { enabled: true, type: 'lowpass', frequency: 10000, Q: 1.0, rolloff: -12, drive: 0.0, envAmount: 0.0, keyTracking: 0.5 },
       osc1: { enabled: true, waveType: 'triangle', octave: 0, semi: 0, detune: 0, volume: 0.8 },
-      osc2: { enabled: false, waveType: 'sawtooth', octave: 0, semi: 0, detune: 5, volume: 0.0 },
+      osc2: { enabled: false, waveType: 'sawtooth', octave: 0, semi: 0, detune: 0, volume: 0.0 },
       subOsc: { enabled: false, waveType: 'sine', octave: -1, volume: 0.0 },
       noise: { enabled: false, type: 'white', volume: 0.0 },
       filterEnv: { attack: 0.02, decay: 0.3, sustain: 0.5, release: 0.5 },
@@ -418,7 +418,7 @@ export function normalizeSynthSettings(raw?: Partial<SynthSettings> | null): Syn
   const filter = {
     enabled: raw.filter?.enabled !== undefined ? Boolean(raw.filter.enabled) : base.filter.enabled,
     type: raw.filter?.type || base.filter.type,
-    frequency: typeof raw.filter?.frequency === 'number' ? Math.max(40, Math.min(20000, raw.filter.frequency)) : base.filter.frequency,
+    frequency: typeof raw.filter?.frequency === 'number' ? Math.max(20, Math.min(20000, raw.filter.frequency)) : base.filter.frequency,
     Q: typeof raw.filter?.Q === 'number' ? Math.max(0.1, Math.min(20, raw.filter.Q)) : base.filter.Q,
     rolloff: raw.filter?.rolloff || base.filter.rolloff,
     drive: typeof raw.filter?.drive === 'number' ? raw.filter.drive : base.filter.drive,
@@ -441,7 +441,7 @@ export function normalizeSynthSettings(raw?: Partial<SynthSettings> | null): Syn
     waveType: raw.osc2?.waveType || base.osc2?.waveType || 'sawtooth',
     octave: typeof raw.osc2?.octave === 'number' ? raw.osc2.octave : (base.osc2?.octave ?? 0),
     semi: typeof raw.osc2?.semi === 'number' ? raw.osc2.semi : (base.osc2?.semi ?? 0),
-    detune: typeof raw.osc2?.detune === 'number' ? raw.osc2.detune : (base.osc2?.detune ?? 6),
+    detune: typeof raw.osc2?.detune === 'number' ? raw.osc2.detune : (base.osc2?.detune ?? 0),
     volume: typeof raw.osc2?.volume === 'number' ? raw.osc2.volume : (base.osc2?.volume ?? 0.4),
     pulseWidth: raw.osc2?.pulseWidth ?? base.osc2?.pulseWidth
   };

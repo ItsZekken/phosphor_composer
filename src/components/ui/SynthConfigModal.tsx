@@ -52,6 +52,12 @@ import type {
 
 export const SynthConfigModal: React.FC = () => {
   const isSynthModalOpen = useSongStore((state) => state.isSynthModalOpen);
+  if (!isSynthModalOpen) return null;
+
+  return <SynthConfigModalContent />;
+};
+
+const SynthConfigModalContent: React.FC = () => {
   const setSynthModalOpen = useSongStore((state) => state.setSynthModalOpen);
   const editingChannelId = useSongStore((state) => state.editingChannelId);
   const setChannelSynthSettings = useSongStore((state) => state.setChannelSynthSettings);
@@ -59,6 +65,7 @@ export const SynthConfigModal: React.FC = () => {
 
   const targetChannelId = editingChannelId || 'chords';
   const targetChannel = useSongStore((state) => state.channels[targetChannelId] || state.channels['chords']);
+  const channelName = (targetChannel?.name || targetChannelId || 'SYNTH').toUpperCase();
 
   const scopeCanvasRef = useRef<HTMLCanvasElement>(null);
   const filterSvgRef = useRef<SVGSVGElement>(null);
@@ -77,8 +84,6 @@ export const SynthConfigModal: React.FC = () => {
 
   // 1. Osciloscopio y Espectro FFT Aislado Exclusivo del Canal (Buffer reutilizado para cero GC)
   useEffect(() => {
-    if (!isSynthModalOpen) return;
-
     let animId: number;
     const canvas = scopeCanvasRef.current;
     if (!canvas) return;
@@ -174,7 +179,7 @@ export const SynthConfigModal: React.FC = () => {
       cancelAnimationFrame(animId);
       toneEngine.disconnectSynthAnalysers();
     };
-  }, [isSynthModalOpen, targetChannelId, scopeMode]);
+  }, [targetChannelId, scopeMode]);
 
   // Actualización de configuración (sin reproducir sonido preview al modificar parámetros)
   const updateSettings = useCallback(
@@ -194,13 +199,17 @@ export const SynthConfigModal: React.FC = () => {
   const updateOsc1 = useCallback(
     (partial: Partial<OscConfig>) => {
       const base = synthSettings.osc1 || DEFAULT_SYNTH_SETTINGS.osc1!;
+      const nextDetune = partial.detune !== undefined ? partial.detune : base.detune;
+      const nextWave = partial.waveType || base.waveType;
       updateSettings({
+        detune: nextDetune,
+        waveType: nextWave === 'pulse' ? 'square' : nextWave,
         osc1: {
           enabled: partial.enabled !== undefined ? partial.enabled : base.enabled,
-          waveType: partial.waveType || base.waveType,
+          waveType: nextWave,
           octave: partial.octave !== undefined ? partial.octave : base.octave,
           semi: partial.semi !== undefined ? partial.semi : base.semi,
-          detune: partial.detune !== undefined ? partial.detune : base.detune,
+          detune: nextDetune,
           volume: partial.volume !== undefined ? partial.volume : base.volume,
           pulseWidth: partial.pulseWidth !== undefined ? partial.pulseWidth : base.pulseWidth
         }
@@ -437,16 +446,14 @@ export const SynthConfigModal: React.FC = () => {
     reader.readAsText(file);
   };
 
-  if (!isSynthModalOpen) return null;
-
-  // Interacción gráfica con la curva del filtro VCF
-  const handleFilterSvgInteraction = (e: React.MouseEvent<SVGSVGElement>) => {
+  // Interacción gráfica con la curva del filtro VCF con captura global del ratón
+  const handleFilterSvgInteraction = useCallback((clientX: number, clientY: number) => {
     const svg = filterSvgRef.current;
     if (!svg || !synthSettings.filter.enabled) return;
 
     const rect = svg.getBoundingClientRect();
-    const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
-    const y = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+    const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+    const y = Math.max(0, Math.min(rect.height, clientY - rect.top));
 
     const normX = x / rect.width;
     const freq = Math.round(20 * Math.pow(1000, normX));
@@ -458,7 +465,27 @@ export const SynthConfigModal: React.FC = () => {
       frequency: Math.max(20, Math.min(20000, freq)),
       Q: Math.max(0.5, Math.min(16, qVal))
     });
-  };
+  }, [synthSettings.filter.enabled, updateFilter]);
+
+  const handleFilterMouseDown = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+    if (!synthSettings.filter.enabled) return;
+    e.preventDefault();
+    setIsDraggingFilterNode(true);
+    handleFilterSvgInteraction(e.clientX, e.clientY);
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      handleFilterSvgInteraction(moveEvent.clientX, moveEvent.clientY);
+    };
+
+    const onMouseUp = () => {
+      setIsDraggingFilterNode(false);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, [synthSettings.filter.enabled, handleFilterSvgInteraction]);
 
   // Coordenadas para la curva del filtro SVG
   const svgWidth = 320;
@@ -493,7 +520,16 @@ export const SynthConfigModal: React.FC = () => {
     { type: 'pulse', label: 'PLS', symbol: '|-|' }
   ];
 
-  const currentPresetVal = synthSettings.presetName === 'CUSTOM' ? 'CUSTOM' : synthSettings.presetName || 'CUSTOM';
+  const allPresets = useMemo(() => [...SYNTH_PRESETS, ...userPresets], [userPresets]);
+
+  const currentPresetId = useMemo(() => {
+    const pName = synthSettings.presetName;
+    if (!pName || pName === 'CUSTOM') return 'CUSTOM';
+    const found = allPresets.find(
+      (p) => p.id === pName || p.name.toLowerCase() === pName.toLowerCase()
+    );
+    return found ? found.id : 'CUSTOM';
+  }, [allPresets, synthSettings.presetName]);
 
   return (
     <div className="synth-modal-overlay" onClick={() => setSynthModalOpen(false)}>
@@ -544,19 +580,19 @@ export const SynthConfigModal: React.FC = () => {
           <div className="synth-header-left">
             <div className="synth-brand-tag">
               <Activity className="header-icon pulse-icon" size={15} />
-              <span>PHOSPHOR // {targetChannel.name.toUpperCase()}</span>
+              <span>PHOSPHOR // {channelName}</span>
             </div>
 
             {/* BARRA DE PRESETS (SIN ÍCONO SPARKLES) */}
             <div className="synth-preset-picker-wrap">
               <select
                 className="synth-preset-select"
-                value={currentPresetVal}
+                value={currentPresetId}
                 onChange={(e) => handleApplyPreset(e.target.value)}
                 title="Seleccionar Preset"
               >
                 <option value="CUSTOM">
-                  {currentPresetVal === 'CUSTOM' ? 'CUSTOM' : 'PERSONALIZADO'}
+                  {currentPresetId === 'CUSTOM' ? 'CUSTOM' : 'PERSONALIZADO'}
                 </option>
                 {userPresets.length > 0 && (
                   <optgroup label="PRESETS DE USUARIO">
@@ -696,12 +732,7 @@ export const SynthConfigModal: React.FC = () => {
                     <button
                       key={w.type}
                       className={`wave-icon-btn ${synthSettings.osc1?.waveType === w.type ? 'active' : ''}`}
-                      onClick={() =>
-                        updateSettings({
-                          waveType: w.type === 'pulse' ? 'square' : w.type,
-                          osc1: { ...(synthSettings.osc1 || DEFAULT_SYNTH_SETTINGS.osc1!), waveType: w.type }
-                        })
-                      }
+                      onClick={() => updateOsc1({ waveType: w.type })}
                       title={`${w.label} Wave`}
                     >
                       <span className="wave-glyph">{w.symbol}</span>
@@ -720,10 +751,7 @@ export const SynthConfigModal: React.FC = () => {
                     step={1}
                     defaultValue={0}
                     size={34}
-                    onChange={(v) => {
-                      updateSettings({ detune: v });
-                      updateOsc1({ detune: v });
-                    }}
+                    onChange={(v) => updateOsc1({ detune: v })}
                   />
                   <RotaryKnob
                     label="SEMI"
@@ -807,7 +835,7 @@ export const SynthConfigModal: React.FC = () => {
                     min={-50}
                     max={50}
                     step={1}
-                    defaultValue={6}
+                    defaultValue={0}
                     size={34}
                     onChange={(v) => updateOsc2({ detune: v })}
                   />
@@ -852,9 +880,33 @@ export const SynthConfigModal: React.FC = () => {
                       id="sub-toggle"
                     />
                     <label htmlFor="sub-toggle" className="field-label clickable">
-                      SUB -1OCT
+                      SUB {synthSettings.subOsc?.octave || -1}OCT
                     </label>
                   </label>
+                  <div style={{ display: 'flex', gap: '3px', margin: '2px 0' }}>
+                    {([-1, -2] as const).map((oct) => (
+                      <button
+                        key={oct}
+                        disabled={!synthSettings.subOsc?.enabled}
+                        className={`step-btn ${synthSettings.subOsc?.octave === oct ? 'active' : ''}`}
+                        style={{ fontSize: '0.62rem', padding: '1px 4px', height: '18px', minWidth: '22px' }}
+                        onClick={() => updateSubOsc({ octave: oct })}
+                      >
+                        {oct}
+                      </button>
+                    ))}
+                    {(['sine', 'square'] as const).map((w) => (
+                      <button
+                        key={w}
+                        disabled={!synthSettings.subOsc?.enabled}
+                        className={`step-btn ${synthSettings.subOsc?.waveType === w ? 'active' : ''}`}
+                        style={{ fontSize: '0.62rem', padding: '1px 4px', height: '18px', minWidth: '22px' }}
+                        onClick={() => updateSubOsc({ waveType: w })}
+                      >
+                        {w === 'sine' ? '~' : '|_|'}
+                      </button>
+                    ))}
+                  </div>
                   <RotaryKnob
                     label="SUB"
                     unit="%"
@@ -863,7 +915,7 @@ export const SynthConfigModal: React.FC = () => {
                     min={0}
                     max={100}
                     step={1}
-                    defaultValue={0}
+                    defaultValue={50}
                     size={32}
                     accentColor="#38bdf8"
                     onChange={(v) => updateSubOsc({ volume: v / 100 })}
@@ -884,6 +936,19 @@ export const SynthConfigModal: React.FC = () => {
                       NOISE
                     </label>
                   </label>
+                  <div style={{ display: 'flex', gap: '3px', margin: '2px 0' }}>
+                    {(['white', 'pink'] as const).map((nt) => (
+                      <button
+                        key={nt}
+                        disabled={!synthSettings.noise?.enabled}
+                        className={`step-btn ${synthSettings.noise?.type === nt ? 'active' : ''}`}
+                        style={{ fontSize: '0.62rem', padding: '1px 5px', height: '18px' }}
+                        onClick={() => updateNoise({ type: nt })}
+                      >
+                        {nt === 'white' ? 'WHT' : 'PNK'}
+                      </button>
+                    ))}
+                  </div>
                   <RotaryKnob
                     label="NOISE"
                     unit="%"
@@ -892,7 +957,7 @@ export const SynthConfigModal: React.FC = () => {
                     min={0}
                     max={100}
                     step={1}
-                    defaultValue={0}
+                    defaultValue={30}
                     size={32}
                     accentColor="#a855f7"
                     onChange={(v) => updateNoise({ volume: v / 100 })}
@@ -947,16 +1012,8 @@ export const SynthConfigModal: React.FC = () => {
                   ref={filterSvgRef}
                   width={svgWidth}
                   height={svgHeight}
-                  className="filter-svg-canvas"
-                  onMouseDown={(e) => {
-                    setIsDraggingFilterNode(true);
-                    handleFilterSvgInteraction(e);
-                  }}
-                  onMouseMove={(e) => {
-                    if (isDraggingFilterNode) handleFilterSvgInteraction(e);
-                  }}
-                  onMouseUp={() => setIsDraggingFilterNode(false)}
-                  onMouseLeave={() => setIsDraggingFilterNode(false)}
+                  className={`filter-svg-canvas ${isDraggingFilterNode ? 'dragging' : ''}`}
+                  onMouseDown={handleFilterMouseDown}
                 >
                   {/* Curva de filtro estilizada */}
                   <path
@@ -970,11 +1027,11 @@ export const SynthConfigModal: React.FC = () => {
                   <circle
                     cx={nodeX}
                     cy={nodeY}
-                    r="6.5"
+                    r={isDraggingFilterNode ? 8 : 6.5}
                     fill="#ff00aa"
                     stroke="#fff"
                     strokeWidth="2"
-                    style={{ filter: 'drop-shadow(0 0 8px #ff00aa)' }}
+                    style={{ filter: isDraggingFilterNode ? 'drop-shadow(0 0 12px #ff00aa)' : 'drop-shadow(0 0 8px #ff00aa)' }}
                   />
                 </svg>
               </div>
@@ -1022,7 +1079,7 @@ export const SynthConfigModal: React.FC = () => {
                   min={20}
                   max={20000}
                   step={10}
-                  defaultValue={4500}
+                  defaultValue={6500}
                   size={42}
                   accentColor="#a855f7"
                   onChange={(v) => updateFilter({ frequency: v })}
@@ -1034,7 +1091,7 @@ export const SynthConfigModal: React.FC = () => {
                   min={0.1}
                   max={20}
                   step={0.1}
-                  defaultValue={2.0}
+                  defaultValue={1.5}
                   size={42}
                   accentColor="#a855f7"
                   onChange={(v) => updateFilter({ Q: v })}
@@ -1047,7 +1104,7 @@ export const SynthConfigModal: React.FC = () => {
                   min={-100}
                   max={100}
                   step={1}
-                  defaultValue={30}
+                  defaultValue={0}
                   size={36}
                   accentColor="#ec4899"
                   onChange={(v) => updateFilter({ envAmount: v / 100 })}
@@ -1060,7 +1117,7 @@ export const SynthConfigModal: React.FC = () => {
                   min={0}
                   max={100}
                   step={1}
-                  defaultValue={10}
+                  defaultValue={0}
                   size={36}
                   accentColor="#f97316"
                   onChange={(v) => updateFilter({ drive: v / 100 })}
@@ -1131,7 +1188,7 @@ export const SynthConfigModal: React.FC = () => {
                   min={0.001}
                   max={4.0}
                   step={0.01}
-                  defaultValue={activeEnvTab === 'amp' ? 0.05 : 0.02}
+                  defaultValue={activeEnvTab === 'amp' ? 0.04 : 0.02}
                   size={42}
                   accentColor={activeEnvTab === 'amp' ? '#00e5ff' : '#ec4899'}
                   onChange={(v) => {
@@ -1167,7 +1224,7 @@ export const SynthConfigModal: React.FC = () => {
                   min={0}
                   max={100}
                   step={1}
-                  defaultValue={activeEnvTab === 'amp' ? 60 : 30}
+                  defaultValue={activeEnvTab === 'amp' ? 65 : 30}
                   size={42}
                   accentColor={activeEnvTab === 'amp' ? '#00e5ff' : '#ec4899'}
                   onChange={(v) => {
@@ -1185,7 +1242,7 @@ export const SynthConfigModal: React.FC = () => {
                   min={0.001}
                   max={8.0}
                   step={0.01}
-                  defaultValue={activeEnvTab === 'amp' ? 0.8 : 0.6}
+                  defaultValue={0.6}
                   size={42}
                   accentColor={activeEnvTab === 'amp' ? '#00e5ff' : '#ec4899'}
                   onChange={(v) => {

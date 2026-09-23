@@ -114,6 +114,10 @@ const RotaryKnobComponent: React.FC<RotaryKnobProps> = ({
 
       if (step > 0) {
         rawVal = Math.round(rawVal / step) * step;
+        const decimals = step < 1 ? (step.toString().split('.')[1]?.length ?? 1) : 0;
+        if (decimals > 0) {
+          rawVal = parseFloat(rawVal.toFixed(decimals));
+        }
       }
       rawVal = Math.max(min, Math.min(max, rawVal));
       onChangeRef.current(rawVal);
@@ -148,11 +152,17 @@ const RotaryKnobComponent: React.FC<RotaryKnobProps> = ({
     return norm > 0.005 ? describeArc(center, center, radius, -135, -135 + norm * 270) : '';
   }, [center, radius, norm]);
 
+  const precision = useMemo(() => {
+    if (step >= 1) return 0;
+    const dec = step.toString().split('.')[1];
+    return dec ? Math.min(4, dec.length) : 1;
+  }, [step]);
+
   const formattedDisplay =
     displayValue !== undefined
       ? displayValue
       : step < 1
-      ? value.toFixed(step < 0.01 ? 3 : 1)
+      ? value.toFixed(precision)
       : Math.round(value);
 
   return (

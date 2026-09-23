@@ -35,7 +35,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
       osc2Vol: 0.4,
       osc2Octave: 0,
       osc2Semi: 0,
-      osc2Detune: 6,
+      osc2Detune: 0,
 
       subEnabled: false,
       subWave: 'sine',
@@ -431,6 +431,8 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
             voiceSample = v1;
           } else if (this.params.filterType === 'highpass') {
             voiceSample = v0 - k * v1 - v2;
+          } else if (this.params.filterType === 'notch') {
+            voiceSample = v0 - k * v1;
           }
         }
 
