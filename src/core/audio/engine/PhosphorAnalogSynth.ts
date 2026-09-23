@@ -20,6 +20,7 @@ import { PhosphorWorkletNode } from '../worklet/PhosphorWorkletNode';
  * Transpone una nota musical (ej: "C4") por octavas y semitonos mediante aritmética entera pura (0 GC).
  */
 function transposeNoteFast(noteName: string, octaves: number, semi: number): string {
+  if (!noteName) return 'C4';
   if (octaves === 0 && semi === 0) return noteName;
   const midi = noteToMidi(noteName);
   const transposed = Math.max(12, Math.min(127, midi + octaves * 12 + semi));
@@ -51,6 +52,7 @@ export class PhosphorAnalogSynth {
 
   // Sumador de Mezcla y Salida Calibrada
   private mixerSumNode: Tone.Gain;
+  private fxInputNode: Tone.Gain;
   public outputNode: Tone.Gain;
 
   // Nodos DSP con True Dynamic Bypass (creados e insertados solo cuando están activos)
@@ -83,11 +85,14 @@ export class PhosphorAnalogSynth {
       this.outputNode.connect(destinationNode);
     }
 
-    // 2. Sumador de mezcla y nodo de ganancia LFO Amp (Tremolo)
+    // 2. Bus de entrada al FX Rack (compartido por AudioWorklet en tiempo real y síntesis fallback offline)
+    this.fxInputNode = new Tone.Gain(1.0);
+
+    // 3. Sumador de mezcla y nodo de ganancia LFO Amp (Tremolo) para síntesis fallback
     this.mixerSumNode = new Tone.Gain(1.0);
     this.lfoAmpNode = new Tone.Gain(1.0);
 
-    // 3. Filtro VCF base
+    // 4. Filtro VCF base para fallback
     const filter = this.settings.filter;
     this.filterNode = new Tone.Filter({
       frequency: filter.enabled ? Math.max(20, Math.min(20000, filter.frequency)) : 20000,
@@ -96,18 +101,25 @@ export class PhosphorAnalogSynth {
       rolloff: filter.rolloff === -24 ? -24 : -12
     });
 
-    // 4. Construir el grafo de audio conectando únicamente los nodos activos
+    // 5. Construir el grafo de audio (fallback pre-FX -> fxInputNode -> FX Rack -> outputNode)
     this.rebuildAudioGraph();
 
-    // 5. Inicializar AudioWorklet DSP (Motor nativo en el hilo de audio del SO)
-    const rawContext = Tone.getContext().rawContext as AudioContext;
-    const isOffline = typeof OfflineAudioContext !== 'undefined' && rawContext instanceof OfflineAudioContext;
-    this.isWorkletSupported = !isOffline && typeof AudioWorkletNode !== 'undefined' && !!rawContext?.audioWorklet;
+    // 6. Detección infalible de contexto offline vs tiempo real
+    const rawContext = Tone.getContext().rawContext as any;
+    const isOffline = Boolean(
+      Tone.getContext().isOffline ||
+      (typeof OfflineAudioContext !== 'undefined' && rawContext instanceof OfflineAudioContext) ||
+      rawContext?.constructor?.name === 'OfflineAudioContext' ||
+      rawContext?._nativeOfflineAudioContext ||
+      typeof rawContext?.startRendering === 'function'
+    );
+    this.isWorkletSupported = !isOffline && typeof AudioWorkletNode !== 'undefined' && typeof rawContext?.audioWorklet?.addModule === 'function';
 
     if (this.isWorkletSupported) {
       try {
         this.workletNode = new PhosphorWorkletNode(this.id, rawContext);
-        this.workletNode.connect(this.outputNode);
+        // Conectar la salida del AudioWorklet directamente al bus del FX Rack
+        this.workletNode.connect(this.fxInputNode);
         this.workletNode.setSettings(this.settings);
       } catch (err) {
         console.warn(`[PhosphorAnalogSynth] Falló AudioWorklet para ${this.id}, operando en fallback PolySynth:`, err);
@@ -116,7 +128,12 @@ export class PhosphorAnalogSynth {
       }
     }
 
-    // 6. Sincronizar LFO
+    // Si estamos en render offline, inicializar inmediatamente las voces de fallback para el timeline
+    if (isOffline) {
+      this.initFallbackSynths();
+    }
+
+    // 7. Sincronizar LFO
     this.applyLFO();
   }
 
@@ -151,17 +168,19 @@ export class PhosphorAnalogSynth {
   private rebuildAudioGraph() {
     if (this.isDisposed) return;
 
-    // Desconectar etapa intermedia
+    // Desconectar etapas intermedias de fallback y FX
     try { this.mixerSumNode.disconnect(); } catch (_) {}
     if (this.vibratoNode) try { this.vibratoNode.disconnect(); } catch (_) {}
     if (this.driveNode) try { this.driveNode.disconnect(); } catch (_) {}
     try { this.filterNode.disconnect(); } catch (_) {}
     try { this.lfoAmpNode.disconnect(); } catch (_) {}
+    try { this.fxInputNode.disconnect(); } catch (_) {}
     if (this.chorusNode) try { this.chorusNode.disconnect(); } catch (_) {}
     if (this.delayNode) try { this.delayNode.disconnect(); } catch (_) {}
     if (this.reverbNode) try { this.reverbNode.disconnect(); } catch (_) {}
 
-    let current: Tone.ToneAudioNode = this.mixerSumNode;
+    // --- PARTE 1: CADENA PRE-FX DE FALLBACK (Osciladores -> VCF/Drive/Amp -> fxInputNode) ---
+    let fallbackChain: Tone.ToneAudioNode = this.mixerSumNode;
 
     // 0. Etapa de Modulación de Tono / Pitch Vibrato (Solo si LFO pitch activo y depth > 0.01)
     const lfo = this.settings.lfo;
@@ -182,8 +201,8 @@ export class PhosphorAnalogSynth {
         this.vibratoNode.depth.value = depth * 0.9;
         this.vibratoNode.type = waveType as any;
       }
-      current.connect(this.vibratoNode);
-      current = this.vibratoNode;
+      fallbackChain.connect(this.vibratoNode);
+      fallbackChain = this.vibratoNode;
     } else if (this.vibratoNode) {
       try { this.vibratoNode.dispose(); } catch (_) {}
       this.vibratoNode = null;
@@ -198,8 +217,8 @@ export class PhosphorAnalogSynth {
       } else {
         this.driveNode.distortion = driveVal * 0.4;
       }
-      current.connect(this.driveNode);
-      current = this.driveNode;
+      fallbackChain.connect(this.driveNode);
+      fallbackChain = this.driveNode;
     }
 
     // 2. Etapa de Filtro VCF (Solo si filter.enabled === true)
@@ -208,15 +227,22 @@ export class PhosphorAnalogSynth {
       this.filterNode.rolloff = filter.rolloff === -24 ? -24 : -12;
       this.filterNode.frequency.value = Math.max(20, Math.min(20000, filter.frequency));
       this.filterNode.Q.value = Math.max(0.1, Math.min(20, filter.Q));
-      current.connect(this.filterNode);
-      current = this.filterNode;
+      fallbackChain.connect(this.filterNode);
+      fallbackChain = this.filterNode;
     }
 
     // 3. Etapa de Modulación de Amplitud (LFO Amp Tremolo)
-    current.connect(this.lfoAmpNode);
-    current = this.lfoAmpNode;
+    fallbackChain.connect(this.lfoAmpNode);
+    fallbackChain = this.lfoAmpNode;
 
-    // 3. Etapa de Chorus (Solo si chorus.enabled && mix > 0.01)
+    // La síntesis de fallback se conecta al bus de entrada de efectos
+    fallbackChain.connect(this.fxInputNode);
+
+    // --- PARTE 2: FX RACK UNIFICADO (fxInputNode -> Chorus -> Delay -> Reverb -> outputNode) ---
+    // Tanto el AudioWorklet en tiempo real como la síntesis fallback offline pasan por este rack
+    let fxChain: Tone.ToneAudioNode = this.fxInputNode;
+
+    // 4. Etapa de Chorus (Solo si chorus.enabled && mix > 0.01)
     const fx = this.settings.fx;
     const isChorusActive = Boolean(fx?.chorus?.enabled && (fx.chorus.mix ?? 0) > 0.01);
     if (isChorusActive) {
@@ -233,13 +259,13 @@ export class PhosphorAnalogSynth {
         this.chorusNode.wet.value = fx!.chorus.mix ?? 0.3;
       }
       try { this.chorusNode.start(); } catch (_) {}
-      current.connect(this.chorusNode);
-      current = this.chorusNode;
+      fxChain.connect(this.chorusNode);
+      fxChain = this.chorusNode;
     } else if (this.chorusNode) {
       try { this.chorusNode.stop(); } catch (_) {}
     }
 
-    // 4. Etapa de Delay (Solo si delay.enabled && mix > 0.01)
+    // 5. Etapa de Delay (Solo si delay.enabled && mix > 0.01)
     const isDelayActive = Boolean(fx?.delay?.enabled && (fx.delay.mix ?? 0) > 0.01);
     if (isDelayActive) {
       if (!this.delayNode) {
@@ -253,11 +279,11 @@ export class PhosphorAnalogSynth {
         this.delayNode.feedback.value = Math.min(0.85, fx?.delay?.feedback ?? 0.25);
         this.delayNode.wet.value = fx!.delay.mix ?? 0.2;
       }
-      current.connect(this.delayNode);
-      current = this.delayNode;
+      fxChain.connect(this.delayNode);
+      fxChain = this.delayNode;
     }
 
-    // 5. Etapa de Reverb (Solo si reverb.enabled && mix > 0.01)
+    // 6. Etapa de Reverb (Solo si reverb.enabled && mix > 0.01)
     const isReverbActive = Boolean(fx?.reverb?.enabled && (fx.reverb.mix ?? 0) > 0.01);
     if (isReverbActive) {
       if (!this.reverbNode) {
@@ -270,12 +296,12 @@ export class PhosphorAnalogSynth {
         this.reverbNode.roomSize.value = Math.max(0.1, Math.min(0.9, (fx?.reverb?.decay ?? 1.8) / 4));
         this.reverbNode.wet.value = fx!.reverb.mix ?? 0.15;
       }
-      current.connect(this.reverbNode);
-      current = this.reverbNode;
+      fxChain.connect(this.reverbNode);
+      fxChain = this.reverbNode;
     }
 
-    // Conectar el final de la cadena a la salida calibrada
-    current.connect(this.outputNode);
+    // Conectar el final del FX Rack a la salida principal calibrada
+    fxChain.connect(this.outputNode);
   }
 
   private syncSecondarySources() {
@@ -495,7 +521,7 @@ export class PhosphorAnalogSynth {
     }
 
     // 1. Restaurar frecuencia estática del filtro VCF
-    if (this.filterNode) {
+    if (this.filterNode && this.currentLfoTarget === 'cutoff') {
       try {
         this.filterNode.frequency.cancelScheduledValues(0);
         this.filterNode.frequency.value = this.settings.filter.enabled ? this.settings.filter.frequency : 20000;
@@ -503,7 +529,7 @@ export class PhosphorAnalogSynth {
     }
 
     // 2. Restaurar ganancia estática de modulación de amplitud (Tremolo)
-    if (this.lfoAmpNode) {
+    if (this.lfoAmpNode && this.currentLfoTarget === 'amp') {
       try {
         this.lfoAmpNode.gain.cancelScheduledValues(0);
         this.lfoAmpNode.gain.value = 1.0;
@@ -511,7 +537,7 @@ export class PhosphorAnalogSynth {
     }
 
     // 3. Restaurar ganancia estática de salida
-    if (this.outputNode) {
+    if (this.outputNode && this.currentLfoTarget !== 'none') {
       try {
         this.outputNode.gain.cancelScheduledValues(0);
         this.outputNode.gain.value = 0.6;
@@ -879,6 +905,7 @@ export class PhosphorAnalogSynth {
     }
 
     try { this.mixerSumNode.dispose(); } catch (_) {}
+    try { this.fxInputNode.dispose(); } catch (_) {}
     if (this.driveNode) try { this.driveNode.dispose(); } catch (_) {}
     try { this.filterNode.dispose(); } catch (_) {}
     try { this.lfoAmpNode.dispose(); } catch (_) {}

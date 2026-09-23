@@ -7681,6 +7681,17 @@ input[type="range"]::-webkit-slider-thumb:hover {
   100% { stroke-dashoffset: -12; }
 }
 
+.chain-connector.drop-target-active .chain-cord-path {
+  stroke: #ffd875;
+  stroke-width: 3;
+  filter: drop-shadow(0 0 10px rgba(255, 216, 117, 0.8));
+}
+
+.chain-connector.drop-target-active .chain-node-dot {
+  fill: #ffd875;
+  filter: drop-shadow(0 0 10px #ffd875);
+}
+
 /* Modal Copiar Patrón */
 .copy-pattern-modal {
   width: 420px;

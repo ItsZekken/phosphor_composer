@@ -28,7 +28,8 @@ import {
   KeyboardSensor,
   PointerSensor,
   useSensor,
-  useSensors
+  useSensors,
+  useDroppable
 } from '@dnd-kit/core';
 import type {
   DragStartEvent,
@@ -58,6 +59,193 @@ const colors = [
   '#a270b5',
   '#6fa882',
 ];
+
+interface DroppableConnectorProps {
+  id: string;
+  index: number;
+  isPlaying: boolean;
+  isPatternRepeatOn: boolean;
+  activeId: string | null;
+}
+
+const DroppableConnector: React.FC<DroppableConnectorProps> = ({ id, index, isPlaying, isPatternRepeatOn, activeId }) => {
+  const { setNodeRef, isOver } = useDroppable({
+    id,
+    data: { type: 'connector', insertIndex: index + 1 }
+  });
+
+  const isDraggingAny = Boolean(activeId);
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`chain-connector ${isPlaying && !isPatternRepeatOn ? 'active-pulse' : ''} ${isOver ? 'drop-target-active' : ''}`}
+      style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: isDraggingAny ? '0 10px' : '0 2px',
+        transition: 'all 0.15s ease',
+        cursor: isDraggingAny ? 'copy' : 'default',
+        minWidth: isOver ? '52px' : isDraggingAny ? '36px' : '24px'
+      }}
+    >
+      <svg
+        className="chain-link-svg"
+        viewBox="0 0 40 20"
+        style={{
+          width: isOver ? '48px' : '36px',
+          height: '18px',
+          transition: 'all 0.15s ease'
+        }}
+      >
+        <path 
+          d="M 0 10 Q 10 0, 20 10 T 40 10" 
+          className="chain-cord-path"
+          style={{
+            stroke: isOver ? '#ffd875' : undefined,
+            strokeWidth: isOver ? 3 : 2
+          }}
+        />
+        <circle
+          cx="20"
+          cy="10"
+          r={isOver ? 5 : 3}
+          className="chain-node-dot"
+          style={{
+            fill: isOver ? '#ffd875' : undefined,
+            stroke: isOver ? '#ffd875' : undefined
+          }}
+        />
+      </svg>
+      {isOver && (
+        <div style={{
+          position: 'absolute',
+          top: '-18px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: '#ffd875',
+          color: '#0a0812',
+          fontSize: '0.62rem',
+          fontWeight: 800,
+          fontFamily: "'Outfit', system-ui, sans-serif",
+          padding: '1px 6px',
+          borderRadius: '3px',
+          pointerEvents: 'none',
+          whiteSpace: 'nowrap',
+          zIndex: 100,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.5)'
+        }}>
+          INSERTAR AQUÍ
+        </div>
+      )}
+    </div>
+  );
+};
+
+const DroppableStartZone: React.FC<{ activeId: string | null }> = ({ activeId }) => {
+  const { setNodeRef, isOver } = useDroppable({
+    id: 'connector-start',
+    data: { type: 'connector', insertIndex: 0 }
+  });
+
+  if (!activeId) return null;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        width: isOver ? '42px' : '16px',
+        alignSelf: 'stretch',
+        borderRadius: '6px',
+        border: isOver ? '2px dashed #ffd875' : '1px dashed rgba(255,255,255,0.2)',
+        background: isOver ? 'rgba(255, 216, 117, 0.15)' : 'transparent',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        transition: 'all 0.15s ease',
+        position: 'relative',
+        flexShrink: 0,
+        marginRight: '4px'
+      }}
+    >
+      {isOver && (
+        <div style={{
+          position: 'absolute',
+          top: '-18px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: '#ffd875',
+          color: '#0a0812',
+          fontSize: '0.62rem',
+          fontWeight: 800,
+          fontFamily: "'Outfit', system-ui, sans-serif",
+          padding: '1px 6px',
+          borderRadius: '3px',
+          pointerEvents: 'none',
+          whiteSpace: 'nowrap',
+          zIndex: 100,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.5)'
+        }}>
+          AL INICIO
+        </div>
+      )}
+    </div>
+  );
+};
+
+const DroppableEndZone: React.FC<{ activeId: string | null; count: number }> = ({ activeId, count }) => {
+  const { setNodeRef, isOver } = useDroppable({
+    id: 'connector-end',
+    data: { type: 'connector', insertIndex: count }
+  });
+
+  if (!activeId) return null;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        width: isOver ? '52px' : '20px',
+        minHeight: '64px',
+        alignSelf: 'stretch',
+        borderRadius: '6px',
+        border: isOver ? '2px dashed #ffd875' : '1px dashed rgba(255,255,255,0.2)',
+        background: isOver ? 'rgba(255, 216, 117, 0.15)' : 'transparent',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        transition: 'all 0.15s ease',
+        position: 'relative',
+        flexShrink: 0,
+        marginLeft: '4px'
+      }}
+    >
+      {isOver && (
+        <div style={{
+          position: 'absolute',
+          top: '-18px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: '#ffd875',
+          color: '#0a0812',
+          fontSize: '0.62rem',
+          fontWeight: 800,
+          fontFamily: "'Outfit', system-ui, sans-serif",
+          padding: '1px 6px',
+          borderRadius: '3px',
+          pointerEvents: 'none',
+          whiteSpace: 'nowrap',
+          zIndex: 100,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.5)'
+        }}>
+          AL FINAL
+        </div>
+      )}
+    </div>
+  );
+};
 
 interface SortablePatternItemProps {
   item: PatternChainItem;
@@ -409,6 +597,11 @@ const SortableGroupItem: React.FC<SortableGroupItemProps> = ({
     isDragging
   } = useSortable({ id: group.id, data: { type: 'group' } });
 
+  const { setNodeRef: setGroupDropRef, isOver: isOverGroupDrop } = useDroppable({
+    id: `group-inner-${group.id}`,
+    data: { type: 'group-inner', groupId: group.id }
+  });
+
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -417,10 +610,10 @@ const SortableGroupItem: React.FC<SortableGroupItemProps> = ({
     flexDirection: 'column',
     gap: '6px',
     padding: '8px 10px',
-    border: isSelected ? '1px solid #ffd875' : '1px dashed rgba(255, 255, 255, 0.18)',
-    boxShadow: isSelected ? '0 0 16px rgba(255, 216, 117, 0.4)' : '0 4px 12px rgba(0, 0, 0, 0.35)',
+    border: isSelected ? '1px solid #ffd875' : isOverGroupDrop ? '1px dashed var(--accent)' : '1px dashed rgba(255, 255, 255, 0.18)',
+    boxShadow: isSelected ? '0 0 16px rgba(255, 216, 117, 0.4)' : isOverGroupDrop ? '0 0 12px rgba(0, 229, 255, 0.25)' : '0 4px 12px rgba(0, 0, 0, 0.35)',
     borderRadius: '8px',
-    background: isSelected ? 'rgba(255, 216, 117, 0.08)' : 'rgba(15, 11, 22, 0.65)',
+    background: isSelected ? 'rgba(255, 216, 117, 0.08)' : isOverGroupDrop ? 'rgba(0, 229, 255, 0.06)' : 'rgba(15, 11, 22, 0.65)',
     cursor: 'grab'
   } as React.CSSProperties;
 
@@ -450,45 +643,69 @@ const SortableGroupItem: React.FC<SortableGroupItemProps> = ({
         <span style={{ fontSize: '0.72rem', color: isSelected ? '#ffd875' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '5px', fontFamily: "'Outfit', system-ui, sans-serif", fontWeight: 700 }}>
           <Folder size={13} style={{ color: '#ffd875' }} />
           <span>GRUPO</span>
+          {group.items && group.items.length > 0 && (
+            <span style={{ fontSize: '0.65rem', opacity: 0.6, fontWeight: 500 }}>({group.items.length} {group.items.length === 1 ? 'patrón' : 'patrones'})</span>
+          )}
         </span>
         <div className="block-nav-btns" onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
           <button className="chain-nav-btn remove-btn" onClick={(e) => { e.stopPropagation(); removeChainItem(group.id); }} title="Eliminar grupo">✕</button>
         </div>
       </div>
       
-      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', overflowX: 'auto', paddingBottom: '2px', minHeight: '68px', minWidth: '80px' }}>
+      <div 
+        ref={setGroupDropRef}
+        style={{
+          display: 'flex',
+          gap: '6px',
+          alignItems: 'center',
+          overflowX: 'auto',
+          padding: '4px',
+          minHeight: '68px',
+          minWidth: '80px',
+          borderRadius: '6px',
+          background: isOverGroupDrop ? 'rgba(255, 216, 117, 0.1)' : 'rgba(0,0,0,0.2)',
+          border: isOverGroupDrop ? '1px dashed #ffd875' : '1px solid rgba(255,255,255,0.05)',
+          transition: 'all 0.15s ease'
+        }}
+      >
         <SortableContext
           items={(group.items || []).map(i => i.id)}
           strategy={horizontalListSortingStrategy}
         >
-          {group.items?.map((item, i) => (
-            <React.Fragment key={item.id}>
-              <SortablePatternItem
-                item={item}
-                totalPatterns={totalPatterns}
-                isInsideGroup={true}
-                parentGroupId={group.id}
-                isCurrentPlaying={isPlaying && !isPatternRepeatOn && currentChainItemId === item.id}
-                isSelected={selectedChainIds.includes(item.id)}
-                zoomLevel={zoomLevel}
-                updateChainItem={updateChainItem}
-                removeChainItem={removeChainItem}
-                setCurrentDrumPatternEdit={setCurrentDrumPatternEdit}
-                onSelect={onSelect}
-                onContextMenu={onContextMenu}
-                onRemoveFromGroup={handleRemoveFromGroup}
-                onUpdateInGroup={handleUpdateInGroup}
-              />
-              {i < (group.items?.length ?? 0) - 1 && (
-                <div style={{ color: 'var(--border-color)', opacity: 0.6 }}><LinkIcon size={12} /></div>
-              )}
-            </React.Fragment>
-          ))}
+          {group.items && group.items.length > 0 ? (
+            group.items.map((item, i) => (
+              <React.Fragment key={item.id}>
+                <SortablePatternItem
+                  item={item}
+                  totalPatterns={totalPatterns}
+                  isInsideGroup={true}
+                  parentGroupId={group.id}
+                  isCurrentPlaying={isPlaying && !isPatternRepeatOn && currentChainItemId === item.id}
+                  isSelected={selectedChainIds.includes(item.id)}
+                  zoomLevel={zoomLevel}
+                  updateChainItem={updateChainItem}
+                  removeChainItem={removeChainItem}
+                  setCurrentDrumPatternEdit={setCurrentDrumPatternEdit}
+                  onSelect={onSelect}
+                  onContextMenu={onContextMenu}
+                  onRemoveFromGroup={handleRemoveFromGroup}
+                  onUpdateInGroup={handleUpdateInGroup}
+                />
+                {i < (group.items?.length ?? 0) - 1 && (
+                  <div style={{ color: 'var(--border-color)', opacity: 0.6 }}><LinkIcon size={12} /></div>
+                )}
+              </React.Fragment>
+            ))
+          ) : (
+            <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', opacity: 0.6, padding: '0 8px', fontStyle: 'italic', pointerEvents: 'none' }}>
+              Arrastra un patrón aquí
+            </div>
+          )}
         </SortableContext>
         <button 
           type="button"
           className="action-btn"
-          style={{ width: '28px', height: '28px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.8 }}
+          style={{ width: '28px', height: '28px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.8, flexShrink: 0 }}
           onPointerDown={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
@@ -725,16 +942,88 @@ export const PatternChainArranger: React.FC = () => {
     }));
   };
 
-  const findContainer = (id: string) => {
-    if (patternChain.find(i => i.id === id)) {
+  const findContainer = (id: string, chain: PatternChainItem[]) => {
+    if (chain.some(i => i.id === id)) {
       return 'root';
     }
-    for (const group of patternChain) {
-      if (group.type === 'group' && group.items?.find(i => i.id === id)) {
+    for (const group of chain) {
+      if (group.type === 'group' && group.items?.some(i => i.id === id)) {
         return group.id;
       }
     }
     return null;
+  };
+
+  const moveItemAcrossContainers = (
+    chain: PatternChainItem[],
+    activeId: string,
+    activeContainer: string,
+    overContainer: string,
+    overId: string,
+    insertIndex?: number
+  ): PatternChainItem[] => {
+    let activeItem: PatternChainItem | undefined;
+    let newChain: PatternChainItem[];
+    let rootOldIdx = -1;
+
+    if (activeContainer === 'root') {
+      rootOldIdx = chain.findIndex(i => i.id === activeId);
+      if (rootOldIdx === -1) return chain;
+      activeItem = chain[rootOldIdx];
+      newChain = chain.filter(i => i.id !== activeId);
+    } else {
+      newChain = chain.map(item => {
+        if (item.id === activeContainer && item.items) {
+          const subIdx = item.items.findIndex(s => s.id === activeId);
+          if (subIdx !== -1) {
+            activeItem = item.items[subIdx];
+            return {
+              ...item,
+              items: item.items.filter(s => s.id !== activeId)
+            };
+          }
+        }
+        return item;
+      });
+    }
+
+    if (!activeItem) return chain;
+
+    if (overContainer === 'root') {
+      let targetIdx: number;
+      if (typeof insertIndex === 'number') {
+        const adjustedInsertIndex = (activeContainer === 'root' && rootOldIdx >= 0 && insertIndex > rootOldIdx)
+          ? insertIndex - 1
+          : insertIndex;
+        targetIdx = Math.max(0, Math.min(newChain.length, adjustedInsertIndex));
+      } else {
+        const overIdx = newChain.findIndex(i => i.id === overId);
+        targetIdx = overIdx >= 0 ? overIdx : newChain.length;
+      }
+      const result = [...newChain];
+      result.splice(targetIdx, 0, activeItem);
+      return result;
+    } else {
+      return newChain.map(item => {
+        if (item.id === overContainer) {
+          const currentItems = item.items || [];
+          let targetIdx: number;
+          if (typeof insertIndex === 'number') {
+            targetIdx = Math.max(0, Math.min(currentItems.length, insertIndex));
+          } else {
+            const overIdx = currentItems.findIndex(s => s.id === overId);
+            targetIdx = overIdx >= 0 ? overIdx : currentItems.length;
+          }
+          const updatedItems = [...currentItems];
+          updatedItems.splice(targetIdx, 0, activeItem!);
+          return {
+            ...item,
+            items: updatedItems
+          };
+        }
+        return item;
+      });
+    }
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -743,52 +1032,46 @@ export const PatternChainArranger: React.FC = () => {
 
   const handleDragOver = (event: DragOverEvent) => {
     const { active, over } = event;
-    const overId = over?.id;
+    if (!over || active.id === over.id) return;
 
-    if (!overId || active.id === overId) return;
+    const activeData = active.data.current;
+    const overData = over.data.current;
 
-    const activeContainer = findContainer(active.id as string);
-    let overContainer = findContainer(overId as string);
-    
-    if (patternChain.find(i => i.id === overId && i.type === 'group')) {
-      overContainer = overId as string;
+    // Si se arrastra un grupo, NUNCA puede entrar en otro grupo
+    if (activeData?.type === 'group') {
+      return;
     }
 
-    if (!activeContainer || !overContainer || activeContainer === overContainer) return;
+    // Los conectores son targets de drop en dragEnd, no mutan el estado en dragOver
+    if (overData?.type === 'connector') {
+      return;
+    }
 
+    const activeContainer = findContainer(active.id as string, patternChain);
+    let overContainer: string | null = null;
+
+    if (overData?.type === 'group-inner') {
+      overContainer = overData.groupId as string;
+    } else if (overData?.parentGroupId) {
+      overContainer = overData.parentGroupId as string;
+    } else {
+      overContainer = findContainer(over.id as string, patternChain);
+    }
+
+    // Si el contenedor no cambia, no mutar estado en dragOver (dnd-kit sortable maneja CSS transforms fluidamente)
+    if (!activeContainer || !overContainer || activeContainer === overContainer) {
+      return;
+    }
+
+    // Solo mover si cambia de contenedor
     useSongStore.setState((state) => {
-      const nextChain = JSON.parse(JSON.stringify(state.patternChain)) as PatternChainItem[];
-      let activeItem: PatternChainItem | undefined;
-      
-      if (activeContainer === 'root') {
-        const index = nextChain.findIndex(i => i.id === active.id);
-        activeItem = nextChain[index];
-        nextChain.splice(index, 1);
-      } else {
-        const groupIndex = nextChain.findIndex(g => g.id === activeContainer);
-        if (groupIndex !== -1 && nextChain[groupIndex].items) {
-          const index = nextChain[groupIndex].items!.findIndex(i => i.id === active.id);
-          activeItem = nextChain[groupIndex].items![index];
-          nextChain[groupIndex].items!.splice(index, 1);
-        }
-      }
-
-      if (!activeItem) return { patternChain: nextChain };
-
-      if (overContainer === 'root') {
-        const overIndex = nextChain.findIndex(i => i.id === overId);
-        const newIndex = overIndex >= 0 ? overIndex : nextChain.length;
-        nextChain.splice(newIndex, 0, activeItem);
-      } else {
-        const groupIndex = nextChain.findIndex(g => g.id === overContainer);
-        if (groupIndex !== -1) {
-          if (!nextChain[groupIndex].items) nextChain[groupIndex].items = [];
-          const overIndex = nextChain[groupIndex].items!.findIndex(i => i.id === overId);
-          const newIndex = overIndex >= 0 ? overIndex : nextChain[groupIndex].items!.length;
-          nextChain[groupIndex].items!.splice(newIndex, 0, activeItem);
-        }
-      }
-
+      const nextChain = moveItemAcrossContainers(
+        state.patternChain,
+        active.id as string,
+        activeContainer,
+        overContainer!,
+        over.id as string
+      );
       return { patternChain: nextChain };
     });
   };
@@ -797,32 +1080,130 @@ export const PatternChainArranger: React.FC = () => {
     const { active, over } = event;
     setActiveId(null);
 
-    if (!over || active.id === over.id) return;
+    if (!over) return;
 
-    const activeContainer = findContainer(active.id as string);
-    const overContainer = findContainer(over.id as string);
+    const activeId = active.id as string;
+    const overId = over.id as string;
+    const activeData = active.data.current;
+    const overData = over.data.current;
 
-    if (activeContainer && activeContainer === overContainer) {
+    // 1. Caso: Se soltó sobre un conector o zona de inserción
+    if (overData?.type === 'connector') {
+      const insertIndex = overData.insertIndex as number;
       useSongStore.setState((state) => {
-        const nextChain = JSON.parse(JSON.stringify(state.patternChain)) as PatternChainItem[];
+        const activeContainer = findContainer(activeId, state.patternChain);
+        if (!activeContainer) return state;
 
-        if (activeContainer === 'root') {
-          const oldIndex = nextChain.findIndex(i => i.id === active.id);
-          const newIndex = nextChain.findIndex(i => i.id === over.id);
-          return { patternChain: arrayMove(nextChain, oldIndex, newIndex) };
-        } else {
-          const groupIndex = nextChain.findIndex(g => g.id === activeContainer);
-          if (groupIndex !== -1 && nextChain[groupIndex].items) {
-            const items = nextChain[groupIndex].items!;
-            const oldIndex = items.findIndex(i => i.id === active.id);
-            const newIndex = items.findIndex(i => i.id === over.id);
-            nextChain[groupIndex].items = arrayMove(items, oldIndex, newIndex);
-            return { patternChain: nextChain };
+        if (activeData?.type === 'group') {
+          const oldIndex = state.patternChain.findIndex(i => i.id === activeId);
+          if (oldIndex === -1) return state;
+          const targetIndex = insertIndex > oldIndex ? insertIndex - 1 : insertIndex;
+          if (oldIndex !== targetIndex) {
+            return { patternChain: arrayMove(state.patternChain, oldIndex, targetIndex) };
           }
+          return state;
+        }
+
+        const nextChain = moveItemAcrossContainers(
+          state.patternChain,
+          activeId,
+          activeContainer,
+          'root',
+          overId,
+          insertIndex
+        );
+        return { patternChain: nextChain };
+      });
+      return;
+    }
+
+    // 2. Caso: Se soltó sobre el área interna de un grupo
+    if (overData?.type === 'group-inner') {
+      const targetGroupId = overData.groupId as string;
+      if (activeData?.type === 'group') return; // Grupos jamás entran en otros grupos
+
+      useSongStore.setState((state) => {
+        const activeContainer = findContainer(activeId, state.patternChain);
+        if (!activeContainer) return state;
+        const nextChain = moveItemAcrossContainers(
+          state.patternChain,
+          activeId,
+          activeContainer,
+          targetGroupId,
+          overId
+        );
+        return { patternChain: nextChain };
+      });
+      return;
+    }
+
+    if (activeId === overId) return;
+
+    // 3. Caso: Se soltó un GRUPO sobre otro elemento
+    if (activeData?.type === 'group') {
+      let rootTargetId = overId;
+      if (overData?.parentGroupId) {
+        rootTargetId = overData.parentGroupId;
+      }
+      useSongStore.setState((state) => {
+        const oldIndex = state.patternChain.findIndex(i => i.id === activeId);
+        const newIndex = state.patternChain.findIndex(i => i.id === rootTargetId);
+        if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
+          return { patternChain: arrayMove(state.patternChain, oldIndex, newIndex) };
         }
         return state;
       });
+      return;
     }
+
+    // 4. Caso: Se soltó un PATRÓN sobre otro elemento
+    useSongStore.setState((state) => {
+      const activeContainer = findContainer(activeId, state.patternChain);
+      let overContainer: string | null = null;
+
+      if (overData?.parentGroupId) {
+        overContainer = overData.parentGroupId as string;
+      } else {
+        overContainer = findContainer(overId, state.patternChain);
+      }
+
+      if (!activeContainer || !overContainer) return state;
+
+      if (activeContainer === overContainer) {
+        if (activeContainer === 'root') {
+          const oldIndex = state.patternChain.findIndex(i => i.id === activeId);
+          const newIndex = state.patternChain.findIndex(i => i.id === overId);
+          if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
+            return { patternChain: arrayMove(state.patternChain, oldIndex, newIndex) };
+          }
+        } else {
+          const groupIndex = state.patternChain.findIndex(g => g.id === activeContainer);
+          if (groupIndex !== -1 && state.patternChain[groupIndex].items) {
+            const items = state.patternChain[groupIndex].items!;
+            const oldIndex = items.findIndex(i => i.id === activeId);
+            const newIndex = items.findIndex(i => i.id === overId);
+            if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
+              const nextChain = [...state.patternChain];
+              nextChain[groupIndex] = {
+                ...nextChain[groupIndex],
+                items: arrayMove(items, oldIndex, newIndex)
+              };
+              return { patternChain: nextChain };
+            }
+          }
+        }
+        return state;
+      } else {
+        const nextChain = moveItemAcrossContainers(
+          state.patternChain,
+          activeId,
+          activeContainer,
+          overContainer,
+          overId
+        );
+        return { patternChain: nextChain };
+      }
+    });
   };
 
   const activeItem = activeId 
@@ -1005,6 +1386,7 @@ export const PatternChainArranger: React.FC = () => {
         >
           <div className="pattern-chain-track">
             <SortableContext items={patternChain.map(i => i.id)} strategy={horizontalListSortingStrategy}>
+              <DroppableStartZone activeId={activeId} />
               {patternChain.map((item, index) => (
                 <React.Fragment key={item.id}>
                   {item.type === 'group' 
@@ -1039,18 +1421,17 @@ export const PatternChainArranger: React.FC = () => {
                   }
 
                   {index < patternChain.length - 1 && (
-                    <div className={`chain-connector ${isPlaying && !isPatternRepeatOn ? 'active-pulse' : ''}`}>
-                      <svg className="chain-link-svg" viewBox="0 0 40 20">
-                        <path 
-                          d="M 0 10 Q 10 0, 20 10 T 40 10" 
-                          className="chain-cord-path"
-                        />
-                        <circle cx="20" cy="10" r="3" className="chain-node-dot" />
-                      </svg>
-                    </div>
+                    <DroppableConnector
+                      id={`connector-${index}`}
+                      index={index}
+                      isPlaying={isPlaying}
+                      isPatternRepeatOn={isPatternRepeatOn}
+                      activeId={activeId}
+                    />
                   )}
                 </React.Fragment>
               ))}
+              <DroppableEndZone activeId={activeId} count={patternChain.length} />
             </SortableContext>
           </div>
         </div>

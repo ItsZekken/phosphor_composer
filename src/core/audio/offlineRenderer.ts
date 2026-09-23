@@ -165,6 +165,7 @@ export async function renderSessionToAudioBuffer(
       } else {
         const synthSettings: SynthSettings = normalizeSynthSettings(ch?.synthSettings || { waveType: defaultWave });
         const analogSynth = new PhosphorAnalogSynth(channelId, synthSettings, chNode.volumeNode);
+        enforceStereo(analogSynth.outputNode);
         instrument = analogSynth;
       }
 
