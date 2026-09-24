@@ -85,6 +85,12 @@ interface SynthParams {
   release: number;
   // Glide / Portamento
   glide: number;
+  // LFO MODULATION
+  lfoEnabled: boolean;
+  lfoWave: 'sine' | 'triangle' | 'square' | 'sawtooth' | 'random';
+  lfoRate: number;
+  lfoDepth: number;
+  lfoTarget: 'cutoff' | 'pitch' | 'amp';
   // Master
   gain: number;
   pan: number;
@@ -107,6 +113,8 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
   private maxVoices = 32;
   private ageCounter = 0;
   private currentSample = 0;
+  private lfoPhase = 0;
+  private lfoRandVal = 0;
 
   private params: SynthParams = {
     osc1Wave: 'triangle',
@@ -137,6 +145,11 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     sustain: 0.65,
     release: 0.6,
     glide: 0.0,
+    lfoEnabled: false,
+    lfoWave: 'sine',
+    lfoRate: 2.5,
+    lfoDepth: 0.25,
+    lfoTarget: 'cutoff',
     gain: 0.7,
     pan: 0.0
   };
@@ -372,10 +385,64 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     const gainR = this.params.gain * (pan >= 0 ? 1 : 1 + pan);
     const activeCount = activeIndices.length;
 
+    // LFO Setup
+    const isLfoActive = Boolean(this.params.lfoEnabled && (this.params.lfoDepth ?? 0) > 0.001);
+    const lfoRate = Math.max(0.1, Math.min(20, this.params.lfoRate ?? 2.5));
+    const lfoDepth = Math.max(0, Math.min(1, this.params.lfoDepth ?? 0.25));
+    const lfoTarget = this.params.lfoTarget || 'cutoff';
+    const lfoWave = this.params.lfoWave || 'sine';
+    const lfoStep = lfoRate * dtBase;
+
     for (let s = 0; s < blockSize; s++) {
       this.currentSample++;
       let sampleSumL = 0;
       let sampleSumR = 0;
+
+      // 0. LFO Sample Calculation
+      let lfoVal = 0;
+      if (isLfoActive) {
+        const prevPhase = this.lfoPhase;
+        this.lfoPhase = (this.lfoPhase + lfoStep) % 1.0;
+        if (this.lfoPhase < prevPhase) {
+          this.lfoRandVal = Math.random() * 2.0 - 1.0;
+        }
+
+        switch (lfoWave) {
+          case 'triangle':
+            lfoVal = 2.0 * Math.abs(2.0 * this.lfoPhase - 1.0) - 1.0;
+            break;
+          case 'sawtooth':
+            lfoVal = 1.0 - 2.0 * this.lfoPhase;
+            break;
+          case 'square':
+            lfoVal = this.lfoPhase < 0.5 ? 1.0 : -1.0;
+            break;
+          case 'random':
+            lfoVal = this.lfoRandVal;
+            break;
+          case 'sine':
+          default:
+            lfoVal = Math.sin(this.lfoPhase * 2.0 * Math.PI);
+            break;
+        }
+      }
+
+      // Modulación de tono (Pitch Vibrato)
+      const lfoPitchMult = (isLfoActive && lfoTarget === 'pitch')
+        ? (1.0 + lfoVal * lfoDepth * 0.086)
+        : 1.0;
+
+      // Modulación de filtro VCF (Cutoff) actualizada cada 4 muestras
+      if (this.params.filterEnabled && isLfoActive && lfoTarget === 'cutoff') {
+        if ((s & 3) === 0) {
+          const modFactor = Math.pow(2.0, lfoVal * lfoDepth * 3.5);
+          const modCutoff = Math.max(20, Math.min(sr * 0.49, this.params.filterFreq * modFactor));
+          const g = Math.tan((Math.PI * modCutoff) / sr);
+          a1 = 1.0 / (1.0 + g * (g + k));
+          a2 = g * a1;
+          a3 = g * a2;
+        }
+      }
 
       for (let i = 0; i < activeCount; i++) {
         const voice = this.voices[activeIndices[i]];
@@ -442,20 +509,20 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
         }
 
         // 3. OSC 1
-        const dt1 = voice.frequency * osc1PitchFactor * dtBase;
+        const dt1 = voice.frequency * osc1PitchFactor * lfoPitchMult * dtBase;
         voice.phase1 = (voice.phase1 + dt1) % 1.0;
         let voiceSample = this.sampleOsc(this.params.osc1Wave, voice.phase1, dt1) * this.params.osc1Vol;
 
         // OSC 2
         if (this.params.osc2Enabled && this.params.osc2Vol > 0.0001) {
-          const dt2 = voice.frequency * osc2PitchFactor * dtBase;
+          const dt2 = voice.frequency * osc2PitchFactor * lfoPitchMult * dtBase;
           voice.phase2 = (voice.phase2 + dt2) % 1.0;
           voiceSample += this.sampleOsc(this.params.osc2Wave, voice.phase2, dt2) * this.params.osc2Vol;
         }
 
         // Sub-Oscilador multiforma
         if (this.params.subEnabled && this.params.subVol > 0.0001) {
-          const dtSub = voice.frequency * subPitchFactor * dtBase;
+          const dtSub = voice.frequency * subPitchFactor * lfoPitchMult * dtBase;
           voice.phaseSub = (voice.phaseSub + dtSub) % 1.0;
           voiceSample += this.sampleOsc(this.params.subWave || 'sine', voice.phaseSub, dtSub) * this.params.subVol;
         }
@@ -499,9 +566,14 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
         sampleSumR += amp;
       }
 
-      outL[s] = sampleSumL * gainL;
+      // Modulación de Amplitud (Tremolo)
+      const lfoAmpGain = (isLfoActive && lfoTarget === 'amp')
+        ? Math.max(0, 1.0 - lfoDepth * 0.5 * (1.0 - lfoVal))
+        : 1.0;
+
+      outL[s] = sampleSumL * gainL * lfoAmpGain;
       if (outR !== outL) {
-        outR[s] = sampleSumR * gainR;
+        outR[s] = sampleSumR * gainR * lfoAmpGain;
       }
     }
 

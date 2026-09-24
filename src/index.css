@@ -7703,6 +7703,28 @@ input[type="range"]::-webkit-slider-thumb:hover {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
 }
 
+/* ================= CENTRO DE GUARDADO Y EXPORTACIÓN ================= */
+.save-export-card:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 216, 117, 0.5) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6), 0 0 16px rgba(255, 216, 117, 0.14) !important;
+}
+
+.save-export-card:hover:not(:disabled) .card-arrow {
+  color: #ffd875 !important;
+  transform: translateX(3px);
+}
+
+.save-export-card:active:not(:disabled) {
+  transform: translateY(0) scale(0.99);
+}
+
+.save-export-close-btn:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  color: #fff !important;
+}
+
 /* ============================================================
    RESPONSIVE MÓVIL: PÁGINA CON SCROLL VERTICAL Y HEADER STICKY
    ============================================================ */

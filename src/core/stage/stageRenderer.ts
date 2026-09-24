@@ -149,7 +149,8 @@ function renderBackgroundVisualizer(
 
     for (let i = 0; i < waveform.length; i++) {
       const v = waveform[i];
-      const y = centerY + v * (height * 0.35);
+      // Escala balanceada con saturación suave analógica
+      const y = centerY + Math.tanh(v * 1.15) * (height * 0.18);
       if (i === 0) {
         bgCtx.moveTo(x, y);
       } else {
@@ -177,7 +178,7 @@ function renderBackgroundVisualizer(
     const padding = 3;
     const barWidth = (width / numBars) - padding;
 
-    const gradient = bgCtx.createLinearGradient(0, height, 0, height * 0.2);
+    const gradient = bgCtx.createLinearGradient(0, height, 0, height * 0.4);
     gradient.addColorStop(0, 'rgba(80, 114, 168, 0.15)');
     gradient.addColorStop(0.5, 'rgba(90, 158, 122, 0.35)');
     gradient.addColorStop(0.85, 'rgba(176, 144, 64, 0.45)');
@@ -185,8 +186,8 @@ function renderBackgroundVisualizer(
 
     for (let i = 0; i < numBars; i++) {
       const sampleIdx = Math.floor((i / numBars) * (waveform.length - 1));
-      const val = Math.abs(waveform[sampleIdx]) * 1.6;
-      const barHeight = Math.min(height * 0.6, val * (height * 0.55));
+      const val = Math.abs(waveform[sampleIdx]) * 0.95;
+      const barHeight = Math.min(height * 0.35, val * (height * 0.30));
       const x = i * (barWidth + padding);
       const y = height - barHeight;
 
@@ -194,17 +195,17 @@ function renderBackgroundVisualizer(
       bgCtx.fillRect(x, y, barWidth, barHeight);
     }
   } else {
-    // Lissajous
+    // Lissajous / Phase Scope
     const centerX = width / 2;
     const centerY = height * 0.46;
-    const radius = Math.min(width, height) * 0.32;
+    const radius = Math.min(width, height) * 0.24;
 
     bgCtx.beginPath();
     const len = waveform.length;
     for (let i = 0; i < len; i++) {
       const angle = (i / len) * Math.PI * 2;
-      const waveOffset = waveform[i] * (radius * 0.45);
-      const r = radius + waveOffset;
+      const waveOffset = Math.tanh(waveform[i] * 1.15) * (radius * 0.26);
+      const r = Math.max(8, radius + waveOffset);
 
       const px = centerX + Math.cos(angle) * r;
       const py = centerY + Math.sin(angle) * r;

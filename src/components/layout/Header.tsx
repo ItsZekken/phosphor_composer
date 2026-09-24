@@ -14,6 +14,7 @@ import { ExportProgressModal } from '../ui/ExportProgressModal';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { PhosphorLogo } from '../ui/PhosphorLogo';
 import { StageExportModal } from '../visualizer/StageExportModal';
+import { SaveExportModal } from './SaveExportModal';
 
 const BeatDisplay = () => {
   const spanRef = useRef<HTMLDivElement>(null);
@@ -167,20 +168,13 @@ export const Header = () => {
     }
   };
 
-  const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const cancelExportRef = useRef<(() => void) | null>(null);
   const [exportElapsed, setExportElapsed] = useState(0);
   const [exportTotal, setExportTotal] = useState(0);
 
-  useEffect(() => {
-    if (!exportDropdownOpen) return;
-    const closeDropdown = () => setExportDropdownOpen(false);
-    window.addEventListener('click', closeDropdown);
-    return () => window.removeEventListener('click', closeDropdown);
-  }, [exportDropdownOpen]);
-
   const handleExportNormal = () => {
-    setExportDropdownOpen(false);
+    setIsSaveModalOpen(false);
     const state = useSongStore.getState();
     const hasChords = Boolean(state.chordBlocks && state.chordBlocks.length > 0);
     const hasTracks = Boolean(state.tracks && state.tracks.some(t => t.notes && t.notes.length > 0));
@@ -216,7 +210,7 @@ export const Header = () => {
   };
 
   const handleExportProject = async () => {
-    setExportDropdownOpen(false);
+    setIsSaveModalOpen(false);
     const state = useSongStore.getState();
     const hasAudioClips = Boolean(state.audioClips && state.audioClips.length > 0);
     const hasDrums = Boolean(state.drumChannels && state.drumChannels.some(ch => ch.patterns && ch.patterns.some(p => p.some(s => s?.isActive)))) || Boolean(state.patternChain && state.patternChain.length > 0);
@@ -243,7 +237,7 @@ export const Header = () => {
   };
 
   const handleExportJson = () => {
-    setExportDropdownOpen(false);
+    setIsSaveModalOpen(false);
     const state = useSongStore.getState();
     const hasAudioClips = Boolean(state.audioClips && state.audioClips.length > 0);
     const hasDrums = Boolean(state.drumChannels && state.drumChannels.some(ch => ch.patterns && ch.patterns.some(p => p.some(s => s?.isActive)))) || Boolean(state.patternChain && state.patternChain.length > 0);
@@ -267,7 +261,7 @@ export const Header = () => {
   };
 
   const handleExportAudio = async () => {
-    setExportDropdownOpen(false);
+    setIsSaveModalOpen(false);
     const state = useSongStore.getState();
     const hasAudioClips = Boolean(state.audioClips && state.audioClips.length > 0);
     const hasDrums = Boolean(state.drumChannels && state.drumChannels.some(ch => ch.patterns && ch.patterns.some(p => p.some(s => s?.isActive)))) || Boolean(state.patternChain && state.patternChain.length > 0);
@@ -305,7 +299,7 @@ export const Header = () => {
   };
 
   const handleExportCompressedAudio = async () => {
-    setExportDropdownOpen(false);
+    setIsSaveModalOpen(false);
     const state = useSongStore.getState();
     const hasAudioClips = Boolean(state.audioClips && state.audioClips.length > 0);
     const hasDrums = Boolean(state.drumChannels && state.drumChannels.some(ch => ch.patterns && ch.patterns.some(p => p.some(s => s?.isActive)))) || Boolean(state.patternChain && state.patternChain.length > 0);
@@ -608,49 +602,14 @@ export const Header = () => {
           <FolderOpen size={16} />
         </label>
 
-        <div className="export-dropdown-container" style={{ position: 'relative' }}>
-          <button
-            className="action-btn export"
-            disabled={isAudioLoading || isExporting}
-            onClick={(e) => {
-              e.stopPropagation();
-              setExportDropdownOpen(!exportDropdownOpen);
-            }}
-            title={isExporting ? 'Exportando audio...' : 'Exportar'}
-          >
-            <Save size={16} />
-          </button>
-          {exportDropdownOpen && (
-            <div className="export-dropdown-menu">
-              <button className="export-dropdown-item" onClick={handleExportProject}>
-                Guardar Proyecto (.phos)
-              </button>
-              <button className="export-dropdown-item" onClick={handleExportJson}>
-                Exportar solo JSON (.json)
-              </button>
-              <button className="export-dropdown-item" onClick={handleExportNormal}>
-                Exportar MIDI Multicanal (.mid)
-              </button>
-              <div style={{ height: '1px', background: 'rgba(255,255,255,0.08)', margin: '4px 0' }} />
-              <button className="export-dropdown-item" onClick={handleExportAudio}>
-                Exportar Audio (.wav)
-              </button>
-              <button className="export-dropdown-item" onClick={handleExportCompressedAudio}>
-                Exportar Audio Comprimido (.mp3)
-              </button>
-              <div style={{ height: '1px', background: 'rgba(255,255,255,0.08)', margin: '4px 0' }} />
-              <button
-                className="export-dropdown-item"
-                onClick={() => {
-                  setExportDropdownOpen(false);
-                  setIsStageVideoModalOpen(true);
-                }}
-              >
-                Exportar Video del Stage (.mp4)
-              </button>
-            </div>
-          )}
-        </div>
+        <button
+          className={`action-btn export ${isSaveModalOpen ? 'active' : ''}`}
+          disabled={isAudioLoading || isExporting}
+          onClick={() => setIsSaveModalOpen(true)}
+          title={isExporting ? 'Exportando audio...' : 'Guardar / Exportar (Proyecto, Audio, MIDI, Video)'}
+        >
+          <Save size={16} />
+        </button>
 
         <button className="action-btn clear" disabled={isAudioLoading} onClick={handleClear} title="Limpiar composición">
           <Trash2 size={16} />
@@ -708,6 +667,18 @@ export const Header = () => {
     <StageExportModal
       isOpen={isStageVideoModalOpen}
       onClose={() => setIsStageVideoModalOpen(false)}
+    />
+
+    <SaveExportModal
+      isOpen={isSaveModalOpen}
+      onClose={() => setIsSaveModalOpen(false)}
+      onExportProject={handleExportProject}
+      onExportJson={handleExportJson}
+      onExportMidi={handleExportNormal}
+      onExportAudio={handleExportAudio}
+      onExportCompressedAudio={handleExportCompressedAudio}
+      onOpenStageVideo={() => setIsStageVideoModalOpen(true)}
+      isExporting={isExporting}
     />
   </>  
   );

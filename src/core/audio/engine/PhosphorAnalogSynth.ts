@@ -566,12 +566,20 @@ export class PhosphorAnalogSynth {
           this.cleanupLfoConnections();
           this.currentLfoTarget = 'pitch';
         }
+        if (!this.vibratoNode) {
+          this.rebuildAudioGraph();
+        }
         if (this.vibratoNode) {
           this.vibratoNode.frequency.rampTo(rate, 0.02);
           this.vibratoNode.depth.value = depth * 0.9;
           this.vibratoNode.type = waveType as any;
         }
         return;
+      }
+
+      // Si teníamos vibratoNode activo y cambiamos a otro target, remover vibrato del grafo
+      if (this.vibratoNode) {
+        this.rebuildAudioGraph();
       }
 
       // 2. Modulación de VCF (Cutoff) o Amp (Tremolo) mediante Tone.LFO
