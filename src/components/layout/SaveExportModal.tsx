@@ -3,12 +3,10 @@ import {
   X,
   Package,
   FileCode,
+  Sliders,
   Disc,
   Music,
-  Sliders,
-  Video,
-  ArrowRight,
-  HardDrive
+  Video
 } from 'lucide-react';
 
 export interface SaveExportModalProps {
@@ -45,90 +43,81 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
 
   if (!isOpen) return null;
 
-  const exportOptions = [
+  const sections = [
     {
-      id: 'project',
-      category: 'PROYECTO INTEGRAL',
-      ext: '.PHOS',
-      title: 'Proyecto Completo',
-      desc: 'Sesión íntegra, notas, pistas grabadas y configuración',
-      icon: Package,
-      color: '#ffd875',
-      glow: 'rgba(255, 216, 117, 0.25)',
-      action: () => {
-        onClose();
-        onExportProject();
-      }
+      title: 'PROYECTO',
+      items: [
+        {
+          label: 'Phosphor',
+          ext: '.phos',
+          icon: Package,
+          color: '#ffd875',
+          action: () => {
+            onClose();
+            onExportProject();
+          }
+        },
+        {
+          label: 'JSON',
+          ext: '.json',
+          icon: FileCode,
+          color: '#4ade80',
+          action: () => {
+            onClose();
+            onExportJson();
+          }
+        },
+        {
+          label: 'MIDI',
+          ext: '.mid',
+          icon: Sliders,
+          color: '#fb923c',
+          action: () => {
+            onClose();
+            onExportMidi();
+          }
+        }
+      ]
     },
     {
-      id: 'json',
-      category: 'PROYECTO INTEGRAL',
-      ext: '.JSON',
-      title: 'Estructura JSON',
-      desc: 'Datos ligeros de acordes, melodías y secuenciador',
-      icon: FileCode,
-      color: '#4ade80',
-      glow: 'rgba(74, 222, 128, 0.25)',
-      action: () => {
-        onClose();
-        onExportJson();
-      }
+      title: 'AUDIO',
+      items: [
+        {
+          label: 'WAV',
+          ext: '.wav',
+          icon: Disc,
+          color: '#38bdf8',
+          action: () => {
+            onClose();
+            onExportAudio();
+          }
+        },
+        {
+          label: 'MP3',
+          ext: '.mp3',
+          icon: Music,
+          color: '#c084fc',
+          action: () => {
+            onClose();
+            onExportCompressedAudio();
+          }
+        }
+      ]
     },
     {
-      id: 'wav',
-      category: 'AUDIO MASTER',
-      ext: '.WAV',
-      title: 'Master de Estudio',
-      desc: 'Audio estéreo sin pérdida (PCM 24-bit 44.1 kHz)',
-      icon: Disc,
-      color: '#38bdf8',
-      glow: 'rgba(56, 189, 248, 0.25)',
-      action: () => {
-        onClose();
-        onExportAudio();
-      }
-    },
-    {
-      id: 'mp3',
-      category: 'AUDIO MASTER',
-      ext: '.MP3',
-      title: 'Audio Comprimido',
-      desc: 'Exportación ligera codificada a 320 kbps',
-      icon: Music,
-      color: '#c084fc',
-      glow: 'rgba(192, 132, 252, 0.25)',
-      action: () => {
-        onClose();
-        onExportCompressedAudio();
-      }
-    },
-    {
-      id: 'midi',
-      category: 'MULTITRACK & VIDEO',
-      ext: '.MID',
-      title: 'MIDI Multicanal',
-      desc: 'Pistas separadas compatibles con cualquier DAW',
-      icon: Sliders,
-      color: '#fb923c',
-      glow: 'rgba(251, 146, 60, 0.25)',
-      action: () => {
-        onClose();
-        onExportMidi();
-      }
-    },
-    {
-      id: 'video',
-      category: 'MULTITRACK & VIDEO',
-      ext: '.MP4',
-      title: 'Video Stage CRT',
-      desc: 'Visualizador cinemático 1080p con telemetría en vivo',
-      icon: Video,
-      color: '#f43f5e',
-      glow: 'rgba(244, 63, 94, 0.25)',
-      action: () => {
-        onClose();
-        onOpenStageVideo();
-      }
+      title: 'VIDEO',
+      items: [
+        {
+          label: 'Stage',
+          ext: '.mp4',
+          icon: Video,
+          color: '#f43f5e',
+          action: () => {
+            onClose();
+            onOpenStageVideo();
+          }
+        }
+      ]
     }
   ];
 
@@ -143,93 +132,48 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(6, 4, 10, 0.82)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
+        backgroundColor: 'rgba(6, 4, 10, 0.78)',
+        backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
         padding: '16px'
       }}
     >
       <div
-        className="save-export-modal"
+        className="save-export-panel"
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: '680px',
+          width: '560px',
           maxWidth: '100%',
-          backgroundColor: '#15111e',
-          border: '1px solid rgba(132, 112, 204, 0.28)',
-          borderRadius: '12px',
-          boxShadow: '0 20px 50px rgba(0, 0, 0, 0.8), 0 0 30px rgba(132, 112, 204, 0.12)',
+          backgroundColor: '#130f1c',
+          border: '1px solid rgba(132, 112, 204, 0.22)',
+          borderRadius: '8px',
+          boxShadow: '0 20px 50px rgba(0, 0, 0, 0.85), 0 0 20px rgba(132, 112, 204, 0.1)',
           display: 'flex',
           flexDirection: 'column',
-          overflow: 'hidden',
-          animation: 'modalSlideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
+          overflow: 'hidden'
         }}
       >
-        {/* Cabecera del Centro de Guardado */}
+        {/* Cabecera minimalista */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '16px 20px',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-            backgroundColor: 'rgba(255, 255, 255, 0.02)'
+            padding: '12px 16px',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.07)'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div
-              style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '8px',
-                backgroundColor: 'rgba(255, 216, 117, 0.12)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#ffd875'
-              }}
-            >
-              <HardDrive size={18} />
-            </div>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span
-                  style={{
-                    fontFamily: "'Outfit', system-ui, sans-serif",
-                    fontWeight: 700,
-                    fontSize: '0.95rem',
-                    color: '#f3f0ff',
-                    letterSpacing: '0.04em'
-                  }}
-                >
-                  CENTRO DE EXPORTACIÓN
-                </span>
-                <span
-                  style={{
-                    fontFamily: "'Share Tech Mono', monospace",
-                    fontSize: '0.62rem',
-                    color: '#4ade80',
-                    backgroundColor: 'rgba(74, 222, 128, 0.12)',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    border: '1px solid rgba(74, 222, 128, 0.3)'
-                  }}
-                >
-                  6 FORMATOS
-                </span>
-              </div>
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: '0.72rem',
-                  color: 'var(--text-secondary, #9ca3af)',
-                  fontFamily: "'Outfit', system-ui, sans-serif"
-                }}
-              >
-                Guarda tu proyecto o exporta stems, audio estéreo y video
-              </p>
-            </div>
-          </div>
+          <span
+            style={{
+              fontFamily: "'Share Tech Mono', monospace",
+              fontSize: '0.82rem',
+              fontWeight: 700,
+              letterSpacing: '0.12em',
+              color: 'var(--reposo, #ffd875)'
+            }}
+          >
+            EXPORTAR
+          </span>
 
           <button
             onClick={onClose}
@@ -239,144 +183,100 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
               border: 'none',
               color: 'var(--text-secondary, #9ca3af)',
               cursor: 'pointer',
-              padding: '6px',
-              borderRadius: '6px',
+              padding: '4px',
+              borderRadius: '4px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition: 'all 0.15s ease'
+              transition: 'color 0.15s ease'
             }}
-            title="Cerrar (Esc)"
           >
-            <X size={18} />
+            <X size={16} />
           </button>
         </div>
 
-        {/* Cuadrícula de Opciones de Exportación */}
+        {/* Secciones: PROYECTO, AUDIO, VIDEO */}
         <div
+          className="save-export-grid"
           style={{
-            padding: '20px',
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gridTemplateColumns: 'repeat(3, 1fr)',
             gap: '12px',
-            maxHeight: '75vh',
-            overflowY: 'auto'
+            padding: '16px'
           }}
         >
-          {exportOptions.map((opt) => {
-            const Icon = opt.icon;
-            return (
-              <button
-                key={opt.id}
-                disabled={isExporting}
-                onClick={opt.action}
-                className="save-export-card"
+          {sections.map((sec) => (
+            <div
+              key={sec.title}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px'
+              }}
+            >
+              <div
                 style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '14px',
-                  padding: '14px',
-                  backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  borderRadius: '10px',
-                  cursor: isExporting ? 'not-allowed' : 'pointer',
-                  textAlign: 'left',
-                  transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
-                  position: 'relative',
-                  overflow: 'hidden'
+                  fontFamily: "'Share Tech Mono', monospace",
+                  fontSize: '0.64rem',
+                  letterSpacing: '0.14em',
+                  color: 'rgba(255, 255, 255, 0.45)',
+                  marginBottom: '2px',
+                  paddingLeft: '2px'
                 }}
               >
-                {/* Icono con halo del color del formato */}
-                <div
-                  style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '8px',
-                    backgroundColor: `rgba(255, 255, 255, 0.04)`,
-                    border: `1px solid ${opt.color}33`,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: opt.color,
-                    flexShrink: 0,
-                    boxShadow: `0 0 12px ${opt.glow}`
-                  }}
-                >
-                  <Icon size={20} />
-                </div>
+                {sec.title}
+              </div>
 
-                {/* Contenido Textual Mínimo */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
+              {sec.items.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.ext}
+                    disabled={isExporting}
+                    onClick={item.action}
+                    className="save-export-item-btn"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '9px 10px',
+                      borderRadius: '5px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.025)',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      cursor: isExporting ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.15s ease',
+                      outline: 'none'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Icon size={14} style={{ color: item.color }} />
+                      <span
+                        style={{
+                          fontFamily: "'Outfit', system-ui, sans-serif",
+                          fontWeight: 600,
+                          fontSize: '0.80rem',
+                          color: '#f3f0ff'
+                        }}
+                      >
+                        {item.label}
+                      </span>
+                    </div>
+
                     <span
                       style={{
                         fontFamily: "'Share Tech Mono', monospace",
-                        fontSize: '0.70rem',
-                        fontWeight: 700,
-                        color: opt.color,
-                        letterSpacing: '0.08em'
+                        fontSize: '0.65rem',
+                        color: item.color,
+                        letterSpacing: '0.04em'
                       }}
                     >
-                      {opt.ext}
+                      {item.ext}
                     </span>
-                    <span
-                      style={{
-                        fontFamily: "'Outfit', system-ui, sans-serif",
-                        fontWeight: 700,
-                        fontSize: '0.85rem',
-                        color: '#f3f0ff',
-                        letterSpacing: '0.01em'
-                      }}
-                    >
-                      {opt.title}
-                    </span>
-                  </div>
-
-                  <p
-                    style={{
-                      margin: 0,
-                      fontSize: '0.72rem',
-                      lineHeight: '1.25',
-                      color: 'var(--text-secondary, #9ca3af)',
-                      fontFamily: "'Outfit', system-ui, sans-serif"
-                    }}
-                  >
-                    {opt.desc}
-                  </p>
-                </div>
-
-                {/* Flecha indicadora */}
-                <div
-                  className="card-arrow"
-                  style={{
-                    color: 'rgba(255, 255, 255, 0.25)',
-                    alignSelf: 'center',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  <ArrowRight size={15} />
-                </div>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Barra Inferior Analógica */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '10px 20px',
-            backgroundColor: 'rgba(0, 0, 0, 0.25)',
-            borderTop: '1px solid rgba(255, 255, 255, 0.05)',
-            fontSize: '0.68rem',
-            fontFamily: "'Share Tech Mono', monospace",
-            color: 'rgba(255, 255, 255, 0.4)'
-          }}
-        >
-          <span>PHOSPHOR AUDIO ENGINE v2.0</span>
-          <span>[ESC] CERRAR</span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
       </div>
     </div>
