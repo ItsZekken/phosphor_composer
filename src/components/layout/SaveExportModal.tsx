@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Package,
@@ -6,8 +6,14 @@ import {
   Sliders,
   Disc,
   Music,
-  Video
+  Video,
+  ArrowLeft,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
+import { toneEngine } from '../../audio/toneEngine';
+import { useSongStore } from '../../store/songStore';
+import type { VisualizerMode } from '../visualizer/StageTelemetryHUD';
 
 export interface SaveExportModalProps {
   isOpen: boolean;
@@ -17,7 +23,6 @@ export interface SaveExportModalProps {
   onExportMidi: () => void;
   onExportAudio: () => void;
   onExportCompressedAudio: () => void;
-  onOpenStageVideo: () => void;
   isExporting?: boolean;
 }
 
@@ -29,19 +34,107 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
   onExportMidi,
   onExportAudio,
   onExportCompressedAudio,
-  onOpenStageVideo,
   isExporting = false
 }) => {
+  const isCrtGlobal = useSongStore((state) => state.isCrtEnabled);
+
+  // Vistas internas del modal: 'formats' (menú principal) | 'video' (configuración y render de video)
+  const [currentView, setCurrentView] = useState<'formats' | 'video'>('formats');
+
+  // Ajustes de video
+  const [resolution, setResolution] = useState<'1080p' | '720p'>('1080p');
+  const [visualizerMode, setVisualizerMode] = useState<VisualizerMode>('oscilloscope');
+  const [isCrtEnabled, setIsCrtEnabled] = useState<boolean>(isCrtGlobal);
+
+  // Estado de exportación de video
+  const [isVideoExporting, setIsVideoExporting] = useState(false);
+  const [videoProgress, setVideoProgress] = useState(0);
+  const [videoPhase, setVideoPhase] = useState('');
+  const [videoElapsed, setVideoElapsed] = useState(0);
+  const [videoError, setVideoError] = useState<string | null>(null);
+
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Reiniciar a la vista de formatos al abrir el modal
+  useEffect(() => {
+    if (isOpen) {
+      setCurrentView('formats');
+      setIsCrtEnabled(isCrtGlobal);
+      setVideoError(null);
+    }
+  }, [isOpen, isCrtGlobal]);
+
+  // Cerrar con Escape
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !isVideoExporting) {
+        if (currentView === 'video') {
+          setCurrentView('formats');
+        } else {
+          onClose();
+        }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, currentView, isVideoExporting]);
 
   if (!isOpen) return null;
+
+  const handleStartVideoExport = async () => {
+    setIsVideoExporting(true);
+    setVideoProgress(0);
+    setVideoPhase('Iniciando...');
+    setVideoError(null);
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    try {
+      const blob = await toneEngine.exportStageVideo({
+        resolution,
+        visualizerMode,
+        isCrtEnabled,
+        signal: abortController.signal,
+        onProgress: (p, phase, elapsedMs) => {
+          setVideoProgress(p);
+          setVideoPhase(phase);
+          setVideoElapsed(Math.round(elapsedMs / 1000));
+        }
+      });
+
+      downloadVideoBlob(blob);
+      setIsVideoExporting(false);
+      onClose();
+    } catch (err: any) {
+      if (abortController.signal.aborted) {
+        setVideoPhase('Exportación cancelada.');
+      } else {
+        setVideoError(err?.message || 'Error al exportar video.');
+      }
+      setIsVideoExporting(false);
+    } finally {
+      abortControllerRef.current = null;
+    }
+  };
+
+  const handleCancelVideoExport = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+  };
+
+  const downloadVideoBlob = (blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Phosphor_Stage_${resolution}_${Date.now()}.mp4`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
 
   const sections = [
     {
@@ -113,8 +206,7 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
           icon: Video,
           color: '#f43f5e',
           action: () => {
-            onClose();
-            onOpenStageVideo();
+            setCurrentView('video');
           }
         }
       ]
@@ -124,7 +216,9 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
   return (
     <div
       className="save-export-overlay"
-      onClick={onClose}
+      onClick={() => {
+        if (!isVideoExporting) onClose();
+      }}
       style={{
         position: 'fixed',
         inset: 0,
@@ -153,7 +247,7 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
           overflow: 'hidden'
         }}
       >
-        {/* Cabecera minimalista */}
+        {/* Cabecera minimalista con botón de volver si estamos en vista de video */}
         <div
           style={{
             display: 'flex',
@@ -163,26 +257,48 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
             borderBottom: '1px solid rgba(255, 255, 255, 0.07)'
           }}
         >
-          <span
-            style={{
-              fontFamily: "'Share Tech Mono', monospace",
-              fontSize: '0.82rem',
-              fontWeight: 700,
-              letterSpacing: '0.12em',
-              color: 'var(--reposo, #ffd875)'
-            }}
-          >
-            EXPORTAR
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {currentView === 'video' && (
+              <button
+                disabled={isVideoExporting}
+                onClick={() => setCurrentView('formats')}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-secondary, #9ca3af)',
+                  cursor: isVideoExporting ? 'not-allowed' : 'pointer',
+                  padding: '2px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                title="Volver"
+              >
+                <ArrowLeft size={16} />
+              </button>
+            )}
+            <span
+              style={{
+                fontFamily: "'Share Tech Mono', monospace",
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                letterSpacing: '0.12em',
+                color: currentView === 'video' ? '#f43f5e' : 'var(--reposo, #ffd875)'
+              }}
+            >
+              {currentView === 'video' ? 'EXPORTAR VIDEO (.MP4)' : 'EXPORTAR'}
+            </span>
+          </div>
 
           <button
             onClick={onClose}
+            disabled={isVideoExporting}
             className="save-export-close-btn"
             style={{
               background: 'transparent',
               border: 'none',
               color: 'var(--text-secondary, #9ca3af)',
-              cursor: 'pointer',
+              cursor: isVideoExporting ? 'not-allowed' : 'pointer',
               padding: '4px',
               borderRadius: '4px',
               display: 'flex',
@@ -195,89 +311,328 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
           </button>
         </div>
 
-        {/* Secciones: PROYECTO, AUDIO, VIDEO */}
-        <div
-          className="save-export-grid"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: '12px',
-            padding: '16px'
-          }}
-        >
-          {sections.map((sec) => (
-            <div
-              key={sec.title}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '6px'
-              }}
-            >
+        {/* VISTA 1: MENÚ PRINCIPAL DE FORMATOS */}
+        {currentView === 'formats' && (
+          <div
+            className="save-export-grid"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: '12px',
+              padding: '16px'
+            }}
+          >
+            {sections.map((sec) => (
               <div
+                key={sec.title}
                 style={{
-                  fontFamily: "'Share Tech Mono', monospace",
-                  fontSize: '0.64rem',
-                  letterSpacing: '0.14em',
-                  color: 'rgba(255, 255, 255, 0.45)',
-                  marginBottom: '2px',
-                  paddingLeft: '2px'
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px'
                 }}
               >
-                {sec.title}
-              </div>
+                <div
+                  style={{
+                    fontFamily: "'Share Tech Mono', monospace",
+                    fontSize: '0.64rem',
+                    letterSpacing: '0.14em',
+                    color: 'rgba(255, 255, 255, 0.45)',
+                    marginBottom: '2px',
+                    paddingLeft: '2px'
+                  }}
+                >
+                  {sec.title}
+                </div>
 
-              {sec.items.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button
-                    key={item.ext}
-                    disabled={isExporting}
-                    onClick={item.action}
-                    className="save-export-item-btn"
+                {sec.items.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.ext}
+                      disabled={isExporting}
+                      onClick={item.action}
+                      className="save-export-item-btn"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '9px 10px',
+                        borderRadius: '5px',
+                        backgroundColor: 'rgba(255, 255, 255, 0.025)',
+                        border: '1px solid rgba(255, 255, 255, 0.07)',
+                        cursor: isExporting ? 'not-allowed' : 'pointer',
+                        transition: 'all 0.15s ease',
+                        outline: 'none'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Icon size={14} style={{ color: item.color }} />
+                        <span
+                          style={{
+                            fontFamily: "'Outfit', system-ui, sans-serif",
+                            fontWeight: 600,
+                            fontSize: '0.80rem',
+                            color: '#f3f0ff'
+                          }}
+                        >
+                          {item.label}
+                        </span>
+                      </div>
+
+                      <span
+                        style={{
+                          fontFamily: "'Share Tech Mono', monospace",
+                          fontSize: '0.65rem',
+                          color: item.color,
+                          letterSpacing: '0.04em'
+                        }}
+                      >
+                        {item.ext}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* VISTA 2: MENÚ DE CONFIGURACIÓN Y RENDER DE VIDEO */}
+        {currentView === 'video' && (
+          <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            {!isVideoExporting && (
+              <>
+                {/* 1. Resolución */}
+                <div>
+                  <div
+                    style={{
+                      fontFamily: "'Share Tech Mono', monospace",
+                      fontSize: '0.64rem',
+                      letterSpacing: '0.14em',
+                      color: 'rgba(255, 255, 255, 0.45)',
+                      marginBottom: '6px'
+                    }}
+                  >
+                    RESOLUCIÓN
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    {(['1080p', '720p'] as const).map((res) => {
+                      const isSelected = resolution === res;
+                      return (
+                        <button
+                          key={res}
+                          type="button"
+                          onClick={() => setResolution(res)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '8px 12px',
+                            borderRadius: '5px',
+                            border: isSelected ? '1px solid #f43f5e' : '1px solid rgba(255, 255, 255, 0.08)',
+                            background: isSelected ? 'rgba(244, 63, 94, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                            color: isSelected ? '#ffffff' : 'var(--text-secondary)',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <span style={{ fontFamily: "'Outfit', sans-serif", fontWeight: 600, fontSize: '0.80rem' }}>
+                            {res === '1080p' ? '1080p Full HD' : '720p HD'}
+                          </span>
+                          <span style={{ fontFamily: "'Share Tech Mono', monospace", fontSize: '0.65rem', opacity: 0.7 }}>
+                            {res === '1080p' ? '1920×1080' : '1280×720'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 2. Visualizador */}
+                <div>
+                  <div
+                    style={{
+                      fontFamily: "'Share Tech Mono', monospace",
+                      fontSize: '0.64rem',
+                      letterSpacing: '0.14em',
+                      color: 'rgba(255, 255, 255, 0.45)',
+                      marginBottom: '6px'
+                    }}
+                  >
+                    VISUALIZADOR
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                    {(['oscilloscope', 'spectrum', 'lissajous'] as const).map((m) => {
+                      const isSelected = visualizerMode === m;
+                      const label = m === 'oscilloscope' ? 'Osciloscopio' : m === 'spectrum' ? 'Espectro' : 'Lissajous';
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setVisualizerMode(m)}
+                          style={{
+                            padding: '7px 8px',
+                            fontSize: '0.76rem',
+                            fontFamily: "'Outfit', sans-serif",
+                            fontWeight: isSelected ? 600 : 400,
+                            borderRadius: '5px',
+                            border: isSelected ? '1px solid #f43f5e' : '1px solid rgba(255, 255, 255, 0.08)',
+                            background: isSelected ? 'rgba(244, 63, 94, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                            color: isSelected ? '#ffffff' : 'var(--text-secondary)',
+                            cursor: 'pointer',
+                            textAlign: 'center',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 3. CRT Scanlines Toggle */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 10px',
+                    borderRadius: '5px',
+                    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                    border: '1px solid rgba(255, 255, 255, 0.06)'
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "'Share Tech Mono', monospace",
+                      fontSize: '0.68rem',
+                      letterSpacing: '0.08em',
+                      color: 'rgba(255, 255, 255, 0.7)'
+                    }}
+                  >
+                    SCANLINES CRT
+                  </span>
+                  <label className="switch" style={{ margin: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={isCrtEnabled}
+                      onChange={(e) => setIsCrtEnabled(e.target.checked)}
+                    />
+                    <span className="slider-toggle" />
+                  </label>
+                </div>
+
+                {/* Mensaje de error si falla */}
+                {videoError && (
+                  <div
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '9px 10px',
-                      borderRadius: '5px',
-                      backgroundColor: 'rgba(255, 255, 255, 0.025)',
-                      border: '1px solid rgba(255, 255, 255, 0.07)',
-                      cursor: isExporting ? 'not-allowed' : 'pointer',
-                      transition: 'all 0.15s ease',
-                      outline: 'none'
+                      gap: '8px',
+                      padding: '8px 10px',
+                      borderRadius: '4px',
+                      background: 'rgba(224, 108, 117, 0.12)',
+                      border: '1px solid rgba(224, 108, 117, 0.3)',
+                      color: '#e06c75',
+                      fontSize: '0.72rem'
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Icon size={14} style={{ color: item.color }} />
-                      <span
-                        style={{
-                          fontFamily: "'Outfit', system-ui, sans-serif",
-                          fontWeight: 600,
-                          fontSize: '0.80rem',
-                          color: '#f3f0ff'
-                        }}
-                      >
-                        {item.label}
-                      </span>
-                    </div>
+                    <AlertCircle size={14} />
+                    <span>{videoError}</span>
+                  </div>
+                )}
 
-                    <span
-                      style={{
-                        fontFamily: "'Share Tech Mono', monospace",
-                        fontSize: '0.65rem',
-                        color: item.color,
-                        letterSpacing: '0.04em'
-                      }}
-                    >
-                      {item.ext}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </div>
+                {/* Botón de Iniciar Exportación */}
+                <button
+                  type="button"
+                  onClick={handleStartVideoExport}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    padding: '10px 14px',
+                    borderRadius: '5px',
+                    border: '1px solid #f43f5e',
+                    background: '#f43f5e',
+                    color: '#ffffff',
+                    fontFamily: "'Outfit', sans-serif",
+                    fontWeight: 700,
+                    fontSize: '0.84rem',
+                    cursor: 'pointer',
+                    marginTop: '2px',
+                    boxShadow: '0 2px 10px rgba(244, 63, 94, 0.25)',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <Video size={16} />
+                  Exportar Video (.mp4)
+                </button>
+              </>
+            )}
+
+            {/* Progreso de renderizado de video */}
+            {isVideoExporting && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '10px 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: '#f3f0ff' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#f43f5e' }}>
+                    <Loader2 size={13} className="animate-spin" />
+                    {videoPhase || 'Renderizando fotogramas...'}
+                  </span>
+                  <span style={{ fontFamily: "'Share Tech Mono', monospace", fontWeight: 'bold' }}>
+                    {Math.round(videoProgress * 100)}%
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    width: '100%',
+                    height: '6px',
+                    background: 'rgba(255, 255, 255, 0.06)',
+                    borderRadius: '3px',
+                    overflow: 'hidden',
+                    border: '1px solid rgba(255, 255, 255, 0.1)'
+                  }}
+                >
+                  <div
+                    style={{
+                      height: '100%',
+                      background: '#f43f5e',
+                      width: `${Math.min(100, Math.max(3, videoProgress * 100))}%`,
+                      transition: 'width 0.2s ease'
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: 'var(--text-secondary)' }}>
+                  <span>{videoElapsed}s</span>
+                  <span>1080p 30 FPS • H.264</span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleCancelVideoExport}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    marginTop: '6px',
+                    borderRadius: '4px',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    background: 'transparent',
+                    color: 'var(--text-secondary)',
+                    fontFamily: "'Share Tech Mono', monospace",
+                    fontSize: '0.70rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  CANCELAR
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

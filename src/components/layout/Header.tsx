@@ -13,7 +13,6 @@ import { exportSessionToJson, exportProjectToPhosBundle, importProjectFromPhosBu
 import { ExportProgressModal } from '../ui/ExportProgressModal';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { PhosphorLogo } from '../ui/PhosphorLogo';
-import { StageExportModal } from '../visualizer/StageExportModal';
 import { SaveExportModal } from './SaveExportModal';
 
 const BeatDisplay = () => {
@@ -111,7 +110,6 @@ export const Header = () => {
   const liveBpm = useSongStore((state) => state.liveBpm);
   const [bpmInput, setBpmInput] = useState(String(bpm));
   const [confirmModalConfig, setConfirmModalConfig] = useState<{isOpen: boolean}>({isOpen: false});
-  const [isStageVideoModalOpen, setIsStageVideoModalOpen] = useState(false);
 
   // Sincronizar el indicador de BPM en vivo: muestra liveBpm durante reproducción y base bpm en reposo
   useEffect(() => {
@@ -664,11 +662,6 @@ export const Header = () => {
       onCancel={() => setConfirmModalConfig({ isOpen: false })}
     />
 
-    <StageExportModal
-      isOpen={isStageVideoModalOpen}
-      onClose={() => setIsStageVideoModalOpen(false)}
-    />
-
     <SaveExportModal
       isOpen={isSaveModalOpen}
       onClose={() => setIsSaveModalOpen(false)}
@@ -677,7 +670,6 @@ export const Header = () => {
       onExportMidi={handleExportNormal}
       onExportAudio={handleExportAudio}
       onExportCompressedAudio={handleExportCompressedAudio}
-      onOpenStageVideo={() => setIsStageVideoModalOpen(true)}
       isExporting={isExporting}
     />
   </>  
