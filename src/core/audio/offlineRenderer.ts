@@ -35,6 +35,7 @@ export async function renderSessionToAudioBuffer(
 ): Promise<AudioBuffer> {
   const scheduled = scheduleSessionTimeline(session, customPatterns);
   const totalDurationSeconds = Math.max(2, scheduled.totalDurationSeconds);
+  const sampleRate = options.sampleRate || 44100;
 
   if (options.onProgress) {
     options.onProgress(0, totalDurationSeconds);
@@ -310,7 +311,7 @@ export async function renderSessionToAudioBuffer(
       }
     }
 
-  }, totalDurationSeconds);
+  }, totalDurationSeconds, 2, sampleRate);
 
   if (options.onProgress) {
     options.onProgress(totalDurationSeconds, totalDurationSeconds);
@@ -330,7 +331,10 @@ export async function renderSessionToWav(
   if (options.onPhase) {
     options.onPhase('RENDERIZANDO AUDIO...');
   }
-  const audioBuffer = await renderSessionToAudioBuffer(session, customPatterns, options);
+  const audioBuffer = await renderSessionToAudioBuffer(session, customPatterns, {
+    ...options,
+    sampleRate: options.sampleRate || 44100
+  });
 
   if (options.onPhase) {
     options.onPhase('CODIFICANDO WAV...');
@@ -354,7 +358,10 @@ export async function renderSessionToCompressed(
   if (options.onPhase) {
     options.onPhase('RENDERIZANDO AUDIO...');
   }
-  const audioBuffer = await renderSessionToAudioBuffer(session, customPatterns, options);
+  const audioBuffer = await renderSessionToAudioBuffer(session, customPatterns, {
+    ...options,
+    sampleRate: options.sampleRate || 44100
+  });
 
   if (options.onPhase) {
     options.onPhase('COMPRIMIENDO MP3...');

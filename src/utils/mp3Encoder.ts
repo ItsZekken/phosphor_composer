@@ -98,6 +98,32 @@ function getNormalizedAudioBuffer(buffer: AudioBuffer, targetPeakDb = -0.3): Aud
 }
 
 /**
+ * Asegura que el AudioBuffer tenga una tasa de muestreo estándar compatible con MP3 (44.1 kHz o 48 kHz).
+ * Si la tarjeta de sonido del usuario opera a 96 kHz o 88.2 kHz, resamplea offline a 44.1 kHz en milisegundos.
+ */
+async function ensureMp3CompatibleBuffer(buffer: AudioBuffer): Promise<AudioBuffer> {
+  const supportedRates = [44100, 48000, 32000, 24000, 22050, 16000];
+  if (supportedRates.includes(buffer.sampleRate)) {
+    return buffer;
+  }
+
+  const targetRate = 44100;
+  const numChannels = Math.min(buffer.numberOfChannels, 2);
+  const targetLength = Math.max(1, Math.round(buffer.duration * targetRate));
+
+  if (typeof OfflineAudioContext !== 'undefined') {
+    const offlineCtx = new OfflineAudioContext(numChannels, targetLength, targetRate);
+    const source = offlineCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(offlineCtx.destination);
+    source.start(0);
+    return await offlineCtx.startRendering();
+  }
+
+  return buffer;
+}
+
+/**
  * Convierte un AudioBuffer decodificado en un Blob de audio MP3 acelerado por WebAssembly (Wasm LAME).
  * Si Wasm no está disponible, delega en segundo plano a Web Worker.
  */
@@ -108,6 +134,14 @@ export async function audioBufferToMp3BlobAsync(
   const bitrate = options.bitrate || 256;
   const normalize = options.normalize !== false;
   const targetPeakDb = options.targetPeakDb ?? -0.3;
+
+  // Garantizar tasa de muestreo compatible con especificación MP3
+  let processBuffer = buffer;
+  try {
+    processBuffer = await ensureMp3CompatibleBuffer(buffer);
+  } catch (resampleErr) {
+    console.warn('[mp3Encoder] Error resampleando buffer para MP3:', resampleErr);
+  }
 
   // 1. Ruta de Ultra-Alta Velocidad: Mediabunny Wasm LAME
   try {
@@ -129,7 +163,7 @@ export async function audioBufferToMp3BlobAsync(
     options.onPhase?.('COMPRIMIENDO MP3...');
     options.onProgress?.(0.2);
 
-    const inputBuffer = normalize ? getNormalizedAudioBuffer(buffer, targetPeakDb) : buffer;
+    const inputBuffer = normalize ? getNormalizedAudioBuffer(processBuffer, targetPeakDb) : processBuffer;
     await audioSource.add(inputBuffer);
     audioSource.close();
     options.onProgress?.(0.85);
@@ -151,7 +185,7 @@ export async function audioBufferToMp3BlobAsync(
   }
 
   // 2. Ruta de Respaldo: Web Worker con LAME JS
-  return audioBufferToMp3WithWorker(buffer, options);
+  return audioBufferToMp3WithWorker(processBuffer, options);
 }
 
 /**
