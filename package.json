@@ -18,6 +18,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@mediabunny/aac-encoder": "^1.55.5",
+    "@mediabunny/mp3-encoder": "^1.55.5",
     "@tonejs/midi": "^2.0.28",
     "@tonejs/piano": "^0.2.1",
     "events": "^3.3.0",

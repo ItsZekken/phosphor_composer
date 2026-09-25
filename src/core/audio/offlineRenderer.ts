@@ -230,8 +230,19 @@ export async function renderSessionToAudioBuffer(
       } catch (_) {}
     });
 
-    // 8. Programar Eventos de Batería (Cálculo de ganancia y velocidad idéntico a playback)
+    // 8. Programar Eventos de Batería (Optimizado: Reutilización de panners y fuentes ligeras)
     const drumBuffers = options.drumBuffers;
+    const drumChannelPanners = new Map<string, Tone.Panner>();
+
+    const getDrumPanner = (channelId: string, panVal: number) => {
+      let p = drumChannelPanners.get(channelId);
+      if (!p) {
+        p = new Tone.Panner(Math.max(-1, Math.min(1, panVal || 0))).connect(drumsNode.volumeNode);
+        enforceStereo(p);
+        drumChannelPanners.set(channelId, p);
+      }
+      return p;
+    };
 
     scheduled.drumEvents.forEach((evt) => {
       try {
@@ -239,15 +250,11 @@ export async function renderSessionToAudioBuffer(
         const cachedBuffer = drumBuffers ? drumBuffers.get(sampleUrl) : null;
 
         if (cachedBuffer && cachedBuffer.loaded) {
-          // Misma fórmula de ganancia que en playback: (evt.volume / 100) * evt.velocity en decibeles
-          const volDb = Tone.gainToDb((evt.volume / 100) * evt.velocity);
-          const panner = new Tone.Panner(Math.max(-1, Math.min(1, evt.pan || 0))).connect(drumsNode.volumeNode);
-          const volume = new Tone.Volume(volDb).connect(panner);
-          enforceStereo(volume);
-          enforceStereo(panner);
-
-          const player = new Tone.Player(cachedBuffer).connect(volume);
-          player.start(evt.timeSeconds);
+          const panner = getDrumPanner(evt.channelId, evt.pan || 0);
+          const gainFactor = (evt.volume / 100) * evt.velocity;
+          const source = new Tone.ToneBufferSource(cachedBuffer);
+          source.connect(panner);
+          source.start(evt.timeSeconds, 0, undefined, gainFactor);
         } else {
           // Fallback a síntesis percusiva calibrada
           const urlLower = (sampleUrl || '').toLowerCase();

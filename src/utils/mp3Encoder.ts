@@ -8,6 +8,14 @@
  * - True Peak Normalization integrada a -0.3 dBFS para prevenir distorsión inter-sample.
  */
 
+import {
+  Output,
+  Mp3OutputFormat,
+  BufferTarget,
+  AudioBufferSource,
+  canEncodeAudio
+} from 'mediabunny';
+import { registerMp3Encoder } from '@mediabunny/mp3-encoder';
 import { Mp3Encoder } from '@breezystack/lamejs';
 
 export interface Mp3EncoderOptions {
@@ -30,11 +38,126 @@ export interface Mp3WorkerEncodeOptions extends Mp3EncoderOptions {
   onPhase?: (phase: string) => void;
 }
 
+let isMp3EncoderRegistered = false;
+
+async function ensureMp3Encoder(): Promise<void> {
+  if (isMp3EncoderRegistered) return;
+  try {
+    const canNative = await canEncodeAudio('mp3');
+    if (!canNative) {
+      registerMp3Encoder();
+    }
+    isMp3EncoderRegistered = true;
+  } catch (_) {
+    try {
+      registerMp3Encoder();
+      isMp3EncoderRegistered = true;
+    } catch (e) {
+      console.warn('[mp3Encoder] Error registrando Wasm MP3 Encoder:', e);
+    }
+  }
+}
+
 /**
- * Convierte un AudioBuffer decodificado en un Blob de audio MP3 de forma asíncrona en un Web Worker.
- * No bloquea el hilo principal y emite eventos de progreso fluidos.
+ * Aplica True Peak Normalization a -0.3 dBFS creando una copia escalada del AudioBuffer si es necesario.
+ */
+function getNormalizedAudioBuffer(buffer: AudioBuffer, targetPeakDb = -0.3): AudioBuffer {
+  const numChannels = buffer.numberOfChannels;
+  const numSamples = buffer.length;
+  let maxPeak = 0;
+
+  for (let ch = 0; ch < numChannels; ch++) {
+    const data = buffer.getChannelData(ch);
+    for (let i = 0; i < numSamples; i++) {
+      const abs = Math.abs(data[i]);
+      if (abs > maxPeak) maxPeak = abs;
+    }
+  }
+
+  const targetLinear = Math.pow(10, targetPeakDb / 20);
+  if (maxPeak <= 0.0001 || maxPeak <= targetLinear) {
+    return buffer;
+  }
+
+  const scaleFactor = targetLinear / maxPeak;
+  const scaledBuffer = new AudioBuffer({
+    length: numSamples,
+    numberOfChannels: numChannels,
+    sampleRate: buffer.sampleRate
+  });
+
+  for (let ch = 0; ch < numChannels; ch++) {
+    const src = buffer.getChannelData(ch);
+    const dest = scaledBuffer.getChannelData(ch);
+    for (let i = 0; i < numSamples; i++) {
+      dest[i] = src[i] * scaleFactor;
+    }
+  }
+
+  return scaledBuffer;
+}
+
+/**
+ * Convierte un AudioBuffer decodificado en un Blob de audio MP3 acelerado por WebAssembly (Wasm LAME).
+ * Si Wasm no está disponible, delega en segundo plano a Web Worker.
  */
 export async function audioBufferToMp3BlobAsync(
+  buffer: AudioBuffer,
+  options: Mp3WorkerEncodeOptions = {}
+): Promise<Mp3EncodeResult> {
+  const bitrate = options.bitrate || 256;
+  const normalize = options.normalize !== false;
+  const targetPeakDb = options.targetPeakDb ?? -0.3;
+
+  // 1. Ruta de Ultra-Alta Velocidad: Mediabunny Wasm LAME
+  try {
+    await ensureMp3Encoder();
+
+    const target = new BufferTarget();
+    const output = new Output({
+      format: new Mp3OutputFormat(),
+      target
+    });
+
+    const audioSource = new AudioBufferSource({
+      codec: 'mp3',
+      bitrate: bitrate * 1000
+    });
+    output.addAudioTrack(audioSource);
+
+    await output.start();
+    options.onPhase?.('COMPRIMIENDO MP3...');
+    options.onProgress?.(0.2);
+
+    const inputBuffer = normalize ? getNormalizedAudioBuffer(buffer, targetPeakDb) : buffer;
+    await audioSource.add(inputBuffer);
+    audioSource.close();
+    options.onProgress?.(0.85);
+
+    await output.finalize();
+    options.onProgress?.(1.0);
+    options.onPhase?.('FINALIZANDO...');
+
+    const finalBuffer = target.buffer;
+    if (finalBuffer && finalBuffer.byteLength > 0) {
+      return {
+        blob: new Blob([finalBuffer], { type: 'audio/mp3' }),
+        extension: 'mp3',
+        mimeType: 'audio/mp3'
+      };
+    }
+  } catch (wasmErr) {
+    console.warn('[mp3Encoder] Mediabunny Wasm falló, ejecutando fallback en Web Worker:', wasmErr);
+  }
+
+  // 2. Ruta de Respaldo: Web Worker con LAME JS
+  return audioBufferToMp3WithWorker(buffer, options);
+}
+
+/**
+ * Fallback asíncrono en Web Worker dedicado con LAME JS.
+ */
+export async function audioBufferToMp3WithWorker(
   buffer: AudioBuffer,
   options: Mp3WorkerEncodeOptions = {}
 ): Promise<Mp3EncodeResult> {
