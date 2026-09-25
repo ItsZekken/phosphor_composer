@@ -27,6 +27,7 @@ export interface Mp3EncodeResult {
 
 export interface Mp3WorkerEncodeOptions extends Mp3EncoderOptions {
   onProgress?: (progress: number) => void;
+  onPhase?: (phase: string) => void;
 }
 
 /**
@@ -56,8 +57,15 @@ export async function audioBufferToMp3BlobAsync(
           if (options.onProgress) {
             options.onProgress(e.data.progress);
           }
+          if (options.onPhase) {
+            const pct = Math.round(e.data.progress * 100);
+            options.onPhase(pct > 0 && pct < 100 ? `COMPRIMIENDO MP3 (${pct}%)...` : 'COMPRIMIENDO MP3...');
+          }
         } else if (e.data.type === 'complete') {
           worker.terminate();
+          if (options.onPhase) {
+            options.onPhase('FINALIZANDO...');
+          }
           resolve({
             blob: e.data.blob,
             extension: 'mp3',

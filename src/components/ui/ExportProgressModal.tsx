@@ -1,7 +1,10 @@
 import React, { useEffect, useRef } from 'react';
 import { PhosphorLogo } from './PhosphorLogo';
+import { useSongStore } from '../../store/songStore';
 
 interface ExportProgressModalProps {
+  /** Frase corta de estado actual */
+  phase?: string;
   /** Progreso de 0.0 a 1.0 (opcional para mantener compatibilidad) */
   progress?: number;
   /** Segundos transcurridos */
@@ -12,7 +15,12 @@ interface ExportProgressModalProps {
   onCancel: () => void;
 }
 
-export const ExportProgressModal: React.FC<ExportProgressModalProps> = ({ onCancel }) => {
+export const ExportProgressModal: React.FC<ExportProgressModalProps> = ({
+  phase: propPhase,
+  onCancel
+}) => {
+  const storePhase = useSongStore((state) => state.exportPhase);
+  const phase = propPhase || storePhase || 'EXPORTANDO...';
   const cancelRef = useRef(onCancel);
   cancelRef.current = onCancel;
 
@@ -82,18 +90,18 @@ export const ExportProgressModal: React.FC<ExportProgressModalProps> = ({ onCanc
           />
         </div>
 
-        {/* Texto de Exportando */}
+        {/* Frase corta de estado actual */}
         <span
           style={{
             fontFamily: "'Share Tech Mono', monospace",
-            fontSize: '15px',
+            fontSize: '14px',
             letterSpacing: '0.22em',
             textTransform: 'uppercase',
             color: '#00e5ff',
             textShadow: '0 0 12px rgba(0, 229, 255, 0.6)'
           }}
         >
-          EXPORTANDO...
+          {phase}
         </span>
       </div>
     </div>

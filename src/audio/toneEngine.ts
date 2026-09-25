@@ -854,6 +854,7 @@ class ToneEngine {
     const state = useSongStore.getState();
     state.setIsExporting(true);
     state.setExportProgress(0);
+    state.setExportPhase('RENDERIZANDO AUDIO...');
 
     let cancelled = false;
 
@@ -865,6 +866,9 @@ class ToneEngine {
           drumBuffers,
           normalize: true,
           targetPeakDb: -0.3,
+          onPhase: (phase) => {
+            if (!cancelled) useSongStore.getState().setExportPhase(phase);
+          },
           onProgress: (elapsed, total) => {
             if (cancelled) return;
             const progress = total > 0 ? Math.min(1, elapsed / total) : 1;
@@ -874,13 +878,16 @@ class ToneEngine {
         });
 
         if (cancelled) return;
+        useSongStore.getState().setExportPhase('FINALIZANDO...');
         useSongStore.getState().setIsExporting(false);
         useSongStore.getState().setExportProgress(1);
+        useSongStore.getState().setExportPhase('');
         onComplete(wavBlob);
       } catch (err) {
         if (cancelled) return;
         useSongStore.getState().setIsExporting(false);
         useSongStore.getState().setExportProgress(0);
+        useSongStore.getState().setExportPhase('');
         onError(err instanceof Error ? err : new Error(String(err)));
       }
     })();
@@ -889,6 +896,7 @@ class ToneEngine {
       cancelled = true;
       useSongStore.getState().setIsExporting(false);
       useSongStore.getState().setExportProgress(0);
+      useSongStore.getState().setExportPhase('');
     };
   }
 
@@ -900,6 +908,7 @@ class ToneEngine {
     const state = useSongStore.getState();
     state.setIsExporting(true);
     state.setExportProgress(0);
+    state.setExportPhase('RENDERIZANDO AUDIO...');
 
     let cancelled = false;
 
@@ -911,6 +920,9 @@ class ToneEngine {
           drumBuffers,
           normalize: true,
           targetPeakDb: -0.3,
+          onPhase: (phase) => {
+            if (!cancelled) useSongStore.getState().setExportPhase(phase);
+          },
           onProgress: (elapsed, total) => {
             if (cancelled) return;
             const progress = total > 0 ? Math.min(1, elapsed / total) : 1;
@@ -920,13 +932,16 @@ class ToneEngine {
         });
 
         if (cancelled) return;
+        useSongStore.getState().setExportPhase('FINALIZANDO...');
         useSongStore.getState().setIsExporting(false);
         useSongStore.getState().setExportProgress(1);
+        useSongStore.getState().setExportPhase('');
         onComplete(compressedResult);
       } catch (err) {
         if (cancelled) return;
         useSongStore.getState().setIsExporting(false);
         useSongStore.getState().setExportProgress(0);
+        useSongStore.getState().setExportPhase('');
         onError(err instanceof Error ? err : new Error(String(err)));
       }
     })();
@@ -935,6 +950,7 @@ class ToneEngine {
       cancelled = true;
       useSongStore.getState().setIsExporting(false);
       useSongStore.getState().setExportProgress(0);
+      useSongStore.getState().setExportPhase('');
     };
   }
 

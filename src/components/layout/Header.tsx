@@ -75,6 +75,7 @@ export const Header = () => {
     setMixerOpen,
     isExporting,
     exportProgress,
+    exportPhase,
     customPatterns
   } = useSongStore(useShallow(state => ({
     bpm: state.bpm,
@@ -103,6 +104,7 @@ export const Header = () => {
     setMixerOpen: state.setMixerOpen,
     isExporting: state.isExporting,
     exportProgress: state.exportProgress,
+    exportPhase: state.exportPhase,
     customPatterns: state.customPatterns
   })));
 
@@ -641,6 +643,7 @@ export const Header = () => {
     {/* Modal de progreso de export de audio */}
     {isExporting && (
       <ExportProgressModal
+        phase={exportPhase}
         progress={exportProgress}
         elapsed={exportElapsed}
         total={exportTotal}

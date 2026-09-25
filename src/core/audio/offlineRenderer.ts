@@ -320,8 +320,14 @@ export async function renderSessionToWav(
   customPatterns: PatternDef[] = [],
   options: OfflineRenderOptions = {}
 ): Promise<Blob> {
+  if (options.onPhase) {
+    options.onPhase('RENDERIZANDO AUDIO...');
+  }
   const audioBuffer = await renderSessionToAudioBuffer(session, customPatterns, options);
 
+  if (options.onPhase) {
+    options.onPhase('CODIFICANDO WAV...');
+  }
   const wavArrayBuffer = audioBufferToWav(audioBuffer, {
     normalize: options.normalize !== false,
     targetPeakDb: options.targetPeakDb ?? -0.3
@@ -338,7 +344,14 @@ export async function renderSessionToCompressed(
   customPatterns: PatternDef[] = [],
   options: OfflineRenderOptions = {}
 ): Promise<Mp3EncodeResult> {
+  if (options.onPhase) {
+    options.onPhase('RENDERIZANDO AUDIO...');
+  }
   const audioBuffer = await renderSessionToAudioBuffer(session, customPatterns, options);
+
+  if (options.onPhase) {
+    options.onPhase('COMPRIMIENDO MP3...');
+  }
   return audioBufferToMp3BlobAsync(audioBuffer, {
     bitrate: 256,
     normalize: options.normalize !== false,
@@ -347,6 +360,7 @@ export async function renderSessionToCompressed(
       if (options.onProgress) {
         options.onProgress(p, 1);
       }
-    }
+    },
+    onPhase: options.onPhase
   });
 }

@@ -22,6 +22,7 @@ export const initialTransportState: TransportState = {
   isEngineReady: false,
   isExporting: false,
   exportProgress: 0,
+  exportPhase: '',
 };
 
 export const createTransportSlice: SliceCreator<TransportState & TransportActions> = (set, get) => ({
@@ -107,4 +108,5 @@ export const createTransportSlice: SliceCreator<TransportState & TransportAction
   setIsEngineReady: (isEngineReady) => set({ isEngineReady }),
   setIsExporting: (isExporting) => set({ isExporting }),
   setExportProgress: (exportProgress) => set({ exportProgress }),
+  setExportPhase: (exportPhase) => set({ exportPhase }),
 });

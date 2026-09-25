@@ -46,6 +46,7 @@ export interface TransportState {
   isEngineReady: boolean;
   isExporting: boolean;
   exportProgress: number;
+  exportPhase: string;
 }
 
 export interface TransportActions {
@@ -72,6 +73,7 @@ export interface TransportActions {
   setIsEngineReady: (ready: boolean) => void;
   setIsExporting: (exporting: boolean) => void;
   setExportProgress: (progress: number) => void;
+  setExportPhase: (phase: string) => void;
 }
 
 export interface HarmonyState {
