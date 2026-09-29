@@ -9,7 +9,8 @@ import {
   Video,
   ArrowLeft,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  Smartphone
 } from 'lucide-react';
 import { toneEngine } from '../../audio/toneEngine';
 import { useSongStore } from '../../store/songStore';
@@ -21,8 +22,8 @@ export interface SaveExportModalProps {
   onExportProject: () => void;
   onExportJson: () => void;
   onExportMidi: () => void;
-  onExportAudio: () => void;
-  onExportCompressedAudio: () => void;
+  onExportAudio: (realtime?: boolean) => void;
+  onExportCompressedAudio: (format: 'mp3' | 'm4a', realtime?: boolean) => void;
   isExporting?: boolean;
 }
 
@@ -40,6 +41,7 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
 
   // Vistas internas del modal: 'formats' (menú principal) | 'video' (configuración y render de video)
   const [currentView, setCurrentView] = useState<'formats' | 'video'>('formats');
+  const [realtimeExport, setRealtimeExport] = useState(true); // Default a true para evitar tiempos offline muy largos
 
   // Ajustes de video
   const [resolution, setResolution] = useState<'1080p' | '720p'>('1080p');
@@ -182,7 +184,7 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
           color: '#38bdf8',
           action: () => {
             onClose();
-            onExportAudio();
+            onExportAudio(realtimeExport);
           }
         },
         {
@@ -192,7 +194,17 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
           color: '#c084fc',
           action: () => {
             onClose();
-            onExportCompressedAudio();
+            onExportCompressedAudio('mp3', realtimeExport);
+          }
+        },
+        {
+          label: 'M4A',
+          ext: '.m4a',
+          icon: Smartphone,
+          color: '#f472b6',
+          action: () => {
+            onClose();
+            onExportCompressedAudio('m4a', realtimeExport);
           }
         }
       ]
@@ -313,88 +325,156 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
 
         {/* VISTA 1: MENÚ PRINCIPAL DE FORMATOS */}
         {currentView === 'formats' && (
-          <div
-            className="save-export-grid"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: '12px',
-              padding: '16px'
-            }}
-          >
-            {sections.map((sec) => (
+          <>
+            <div
+              className="save-export-grid"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '12px',
+                padding: '16px'
+              }}
+            >
+              {sections.map((sec) => (
+                <div
+                  key={sec.title}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px'
+                  }}
+                >
+                  <div
+                    style={{
+                      fontFamily: "'Share Tech Mono', monospace",
+                      fontSize: '0.64rem',
+                      letterSpacing: '0.14em',
+                      color: 'rgba(255, 255, 255, 0.45)',
+                      marginBottom: '2px',
+                      paddingLeft: '2px'
+                    }}
+                  >
+                    {sec.title}
+                  </div>
+
+                  {sec.items.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <button
+                        key={item.ext}
+                        disabled={isExporting}
+                        onClick={item.action}
+                        className="save-export-item-btn"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '9px 10px',
+                          borderRadius: '5px',
+                          backgroundColor: 'rgba(255, 255, 255, 0.025)',
+                          border: '1px solid rgba(255, 255, 255, 0.07)',
+                          cursor: isExporting ? 'not-allowed' : 'pointer',
+                          transition: 'all 0.15s ease',
+                          outline: 'none'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <Icon size={14} style={{ color: item.color }} />
+                          <span
+                            style={{
+                              fontFamily: "'Outfit', system-ui, sans-serif",
+                              fontWeight: 600,
+                              fontSize: '0.80rem',
+                              color: '#f3f0ff'
+                            }}
+                          >
+                            {item.label}
+                          </span>
+                        </div>
+
+                        <span
+                          style={{
+                            fontFamily: "'Share Tech Mono', monospace",
+                            fontSize: '0.65rem',
+                            color: item.color,
+                            letterSpacing: '0.04em'
+                          }}
+                        >
+                          {item.ext}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+
+            {/* Toggle de Modo de Renderizado (Offline vs Tiempo Real) para AUDIO */}
+            <div
+              style={{
+                margin: '0 16px 16px 16px',
+                padding: '10px 12px',
+                borderRadius: '6px',
+                backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                cursor: 'pointer',
+                userSelect: 'none'
+              }}
+              onClick={() => setRealtimeExport(!realtimeExport)}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <span
+                  style={{
+                    fontFamily: "'Outfit', system-ui, sans-serif",
+                    fontWeight: 600,
+                    fontSize: '0.78rem',
+                    color: '#f3f0ff'
+                  }}
+                >
+                  Exportar en Tiempo Real (1x)
+                </span>
+                <span
+                  style={{
+                    fontFamily: "'Share Tech Mono', monospace",
+                    fontSize: '0.62rem',
+                    color: 'rgba(255, 255, 255, 0.5)',
+                  }}
+                >
+                  {realtimeExport 
+                    ? 'Graba la salida principal mientras reproduce.'
+                    : 'Renderizado offline ultra-preciso (MUY lento).'}
+                </span>
+              </div>
+              
               <div
-                key={sec.title}
                 style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '6px'
+                  width: '32px',
+                  height: '18px',
+                  borderRadius: '10px',
+                  backgroundColor: realtimeExport ? '#10b981' : 'rgba(255, 255, 255, 0.2)',
+                  position: 'relative',
+                  transition: 'all 0.2s ease',
+                  flexShrink: 0
                 }}
               >
                 <div
                   style={{
-                    fontFamily: "'Share Tech Mono', monospace",
-                    fontSize: '0.64rem',
-                    letterSpacing: '0.14em',
-                    color: 'rgba(255, 255, 255, 0.45)',
-                    marginBottom: '2px',
-                    paddingLeft: '2px'
+                    width: '14px',
+                    height: '14px',
+                    borderRadius: '50%',
+                    backgroundColor: '#fff',
+                    position: 'absolute',
+                    top: '2px',
+                    left: realtimeExport ? '16px' : '2px',
+                    transition: 'all 0.2s ease'
                   }}
-                >
-                  {sec.title}
-                </div>
-
-                {sec.items.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <button
-                      key={item.ext}
-                      disabled={isExporting}
-                      onClick={item.action}
-                      className="save-export-item-btn"
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '9px 10px',
-                        borderRadius: '5px',
-                        backgroundColor: 'rgba(255, 255, 255, 0.025)',
-                        border: '1px solid rgba(255, 255, 255, 0.07)',
-                        cursor: isExporting ? 'not-allowed' : 'pointer',
-                        transition: 'all 0.15s ease',
-                        outline: 'none'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <Icon size={14} style={{ color: item.color }} />
-                        <span
-                          style={{
-                            fontFamily: "'Outfit', system-ui, sans-serif",
-                            fontWeight: 600,
-                            fontSize: '0.80rem',
-                            color: '#f3f0ff'
-                          }}
-                        >
-                          {item.label}
-                        </span>
-                      </div>
-
-                      <span
-                        style={{
-                          fontFamily: "'Share Tech Mono', monospace",
-                          fontSize: '0.65rem',
-                          color: item.color,
-                          letterSpacing: '0.04em'
-                        }}
-                      >
-                        {item.ext}
-                      </span>
-                    </button>
-                  );
-                })}
+                />
               </div>
-            ))}
-          </div>
+            </div>
+          </>
         )}
 
         {/* VISTA 2: MENÚ DE CONFIGURACIÓN Y RENDER DE VIDEO */}

@@ -69,6 +69,7 @@ export const StageCanvas: React.FC<StageCanvasProps> = React.memo(({ mode }) => 
           patternChain: store.patternChain,
           isPatternRepeatOn: store.isPatternRepeatOn,
           currentDrumPatternEdit: store.currentDrumPatternEdit ?? 0,
+          patternLengths: store.patternLengths,
           chordBlocks: store.chordBlocks,
           visualizerMode: mode,
           isCrtEnabled: store.isCrtEnabled,

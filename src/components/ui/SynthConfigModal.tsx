@@ -24,7 +24,10 @@ import {
   Save,
   Download,
   Upload,
-  Zap
+  Zap,
+  Copy,
+  ClipboardPaste,
+  Check
 } from 'lucide-react';
 import { toneEngine } from '../../audio/toneEngine';
 import { RotaryKnob } from './RotaryKnob';
@@ -47,8 +50,48 @@ import type {
   FilterConfig,
   ADSRConfig,
   LFOConfig,
-  SynthFXConfig
+  SynthFXConfig,
+  SynthEQConfig
 } from '../../utils/typeDefinitions';
+
+interface EqCurveResult {
+  y1: number;
+  y2: number;
+  y3: number;
+  y4: number;
+  path: string;
+  fillPath: string;
+}
+
+const getEqCurveCoordinates = (low: number, lowMid: number, highMid: number, high: number, enabled: boolean): EqCurveResult => {
+  if (!enabled) {
+    return {
+      y1: 35,
+      y2: 35,
+      y3: 35,
+      y4: 35,
+      path: 'M 0 35 L 220 35',
+      fillPath: 'M 0 35 L 220 35 L 220 70 L 0 70 Z'
+    };
+  }
+  const getY = (db: number) => Math.max(9, Math.min(61, 35 - (db / 12) * 26));
+  const y1 = getY(low);
+  const y2 = getY(lowMid);
+  const y3 = getY(highMid);
+  const y4 = getY(high);
+  const path = `M 0 ${y1.toFixed(1)} C 15 ${y1.toFixed(1)}, 20 ${y1.toFixed(1)}, 30 ${y1.toFixed(1)} C 50 ${y1.toFixed(1)}, 62 ${y2.toFixed(1)}, 82 ${y2.toFixed(1)} C 105 ${y2.toFixed(1)}, 118 ${y3.toFixed(1)}, 138 ${y3.toFixed(1)} C 160 ${y3.toFixed(1)}, 175 ${y4.toFixed(1)}, 190 ${y4.toFixed(1)} L 220 ${y4.toFixed(1)}`;
+  const fillPath = `${path} L 220 70 L 0 70 Z`;
+  return { y1, y2, y3, y4, path, fillPath };
+};
+
+const DELAY_DIVISIONS = [
+  { id: '16n', label: '1/16' },
+  { id: '8n', label: '1/8' },
+  { id: '8n.', label: '1/8 D' },
+  { id: '4n', label: '1/4' },
+  { id: '4n.', label: '1/4 D' },
+  { id: '2n', label: '1/2' }
+] as const;
 
 export const SynthConfigModal: React.FC = () => {
   const isSynthModalOpen = useSongStore((state) => state.isSynthModalOpen);
@@ -77,6 +120,11 @@ const SynthConfigModalContent: React.FC = () => {
   const [userPresets, setUserPresets] = useState<SynthPresetDef[]>(() => getUserPresets());
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [savePresetName, setSavePresetName] = useState('');
+  const [copiedNotice, setCopiedNotice] = useState(false);
+
+  const synthClipboard = useSongStore((state) => state.synthClipboard);
+  const copySynthSettings = useSongStore((state) => state.copySynthSettings);
+  const pasteSynthSettings = useSongStore((state) => state.pasteSynthSettings);
 
   const synthSettings: SynthSettings = useMemo(() => {
     return normalizeSynthSettings(targetChannel?.synthSettings);
@@ -276,12 +324,20 @@ const SynthConfigModalContent: React.FC = () => {
           Q: partial.Q !== undefined ? partial.Q : base.Q,
           rolloff: partial.rolloff !== undefined ? partial.rolloff : base.rolloff,
           drive: partial.drive !== undefined ? partial.drive : base.drive,
+          driveType: partial.driveType !== undefined ? partial.driveType : (base.driveType || 'tube'),
           envAmount: partial.envAmount !== undefined ? partial.envAmount : base.envAmount,
           keyTracking: partial.keyTracking !== undefined ? partial.keyTracking : base.keyTracking
         }
       });
     },
     [synthSettings.filter, updateSettings]
+  );
+
+  const updateMasterGain = useCallback(
+    (gain: number) => {
+      updateSettings({ masterGain: Math.max(0, Math.min(2.0, gain)) });
+    },
+    [updateSettings]
   );
 
   const updateAmpEnv = useCallback(
@@ -360,12 +416,33 @@ const SynthConfigModalContent: React.FC = () => {
             enabled: partial.enabled !== undefined ? partial.enabled : base.enabled,
             time: partial.time !== undefined ? partial.time : base.time,
             feedback: partial.feedback !== undefined ? partial.feedback : base.feedback,
-            mix: partial.mix !== undefined ? partial.mix : base.mix
+            mix: partial.mix !== undefined ? partial.mix : base.mix,
+            sync: partial.sync !== undefined ? partial.sync : (base.sync ?? true),
+            damping: partial.damping !== undefined ? partial.damping : (base.damping ?? 0.2)
           }
         }
       });
     },
     [synthSettings.fx, updateSettings]
+  );
+
+  const updateEQ = useCallback(
+    (partial: Partial<SynthEQConfig>) => {
+      const baseEq: SynthEQConfig = synthSettings.eq || {
+        enabled: false,
+        low: 0,
+        lowMid: 0,
+        highMid: 0,
+        high: 0
+      };
+      updateSettings({
+        eq: {
+          ...baseEq,
+          ...partial
+        }
+      });
+    },
+    [synthSettings.eq, updateSettings]
   );
 
   const updateReverb = useCallback(
@@ -385,6 +462,16 @@ const SynthConfigModalContent: React.FC = () => {
     },
     [synthSettings.fx, updateSettings]
   );
+
+  const handleCopySettings = () => {
+    copySynthSettings(targetChannelId);
+    setCopiedNotice(true);
+    setTimeout(() => setCopiedNotice(false), 1200);
+  };
+
+  const handlePasteSettings = () => {
+    pasteSynthSettings(targetChannelId);
+  };
 
   // Probar nota tónica de la escala actual en octava 4
   const handleTestTone = () => {
@@ -487,9 +574,43 @@ const SynthConfigModalContent: React.FC = () => {
     window.addEventListener('mouseup', onMouseUp);
   }, [synthSettings.filter.enabled, handleFilterSvgInteraction]);
 
+  // Interacción gráfica con el ecualizador paramétrico
+  const [activeEqDragBand, setActiveEqDragBand] = useState<'low' | 'lowMid' | 'highMid' | 'high' | null>(null);
+  const eqSvgRef = useRef<SVGSVGElement | null>(null);
+
+  const handleEqNodeMouseDown = useCallback(
+    (bandKey: 'low' | 'lowMid' | 'highMid' | 'high', e: React.MouseEvent) => {
+      if (!synthSettings.eq?.enabled) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setActiveEqDragBand(bandKey);
+
+      const svg = eqSvgRef.current;
+      if (!svg) return;
+
+      const onMouseMove = (moveEvent: MouseEvent) => {
+        const rect = svg.getBoundingClientRect();
+        const relativeY = moveEvent.clientY - rect.top;
+        const clampedSvgY = Math.max(9, Math.min(61, (relativeY / rect.height) * 70));
+        const newGain = parseFloat((((35 - clampedSvgY) / 26) * 12).toFixed(1));
+        updateEQ({ [bandKey]: Math.max(-12, Math.min(12, newGain)) });
+      };
+
+      const onMouseUp = () => {
+        setActiveEqDragBand(null);
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+      };
+
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    },
+    [synthSettings.eq?.enabled, updateEQ]
+  );
+
   // Coordenadas para la curva del filtro SVG
   const svgWidth = 320;
-  const svgHeight = 90;
+  const svgHeight = 64;
   const cutoffNorm = Math.max(0, Math.min(1, Math.log(synthSettings.filter.frequency / 20) / Math.log(1000)));
   const nodeX = cutoffNorm * svgWidth;
   const qNorm = Math.max(0, Math.min(1, (synthSettings.filter.Q - 0.5) / 15.5));
@@ -499,7 +620,7 @@ const SynthConfigModalContent: React.FC = () => {
   const currentEnv = activeEnvTab === 'amp' ? synthSettings.envelope : (synthSettings.filterEnv || synthSettings.envelope);
   const totalEnvTime = currentEnv.attack + currentEnv.decay + currentEnv.release + 0.5;
   const envSvgWidth = 320;
-  const envSvgHeight = 70;
+  const envSvgHeight = 64;
   const pA_X = (currentEnv.attack / totalEnvTime) * (envSvgWidth * 0.85);
   const pA_Y = 10;
   const pD_X = pA_X + (currentEnv.decay / totalEnvTime) * (envSvgWidth * 0.85);
@@ -530,6 +651,12 @@ const SynthConfigModalContent: React.FC = () => {
     );
     return found ? found.id : 'CUSTOM';
   }, [allPresets, synthSettings.presetName]);
+
+  const currentDelayDivIndex = useMemo(() => {
+    const rawTime = synthSettings.fx?.delay?.time;
+    const idx = DELAY_DIVISIONS.findIndex((d) => d.id === rawTime);
+    return idx >= 0 ? idx : 1; // default to 1/8
+  }, [synthSettings.fx?.delay?.time]);
 
   return (
     <div className="synth-modal-overlay" onClick={() => setSynthModalOpen(false)}>
@@ -638,6 +765,24 @@ const SynthConfigModalContent: React.FC = () => {
               <Upload size={11} />
               <span>IMPORTAR</span>
             </button>
+            <button
+              className={`synth-action-btn ${copiedNotice ? 'synth-copied-btn' : ''}`}
+              onClick={handleCopySettings}
+              title="Copiar configuración del sintetizador al portapapeles"
+            >
+              {copiedNotice ? <Check size={11} style={{ color: '#00e5ff' }} /> : <Copy size={11} />}
+              <span>{copiedNotice ? 'COPIADO' : 'COPIAR'}</span>
+            </button>
+            <button
+              className="synth-action-btn"
+              onClick={handlePasteSettings}
+              disabled={!synthClipboard}
+              title={synthClipboard ? `Pegar parche: ${synthClipboard.presetName || 'Preset'}` : "Portapapeles de sintetizador vacío"}
+              style={{ opacity: synthClipboard ? 1 : 0.45 }}
+            >
+              <ClipboardPaste size={11} />
+              <span>PEGAR</span>
+            </button>
           </div>
 
           <div className="synth-header-right">
@@ -668,51 +813,22 @@ const SynthConfigModalContent: React.FC = () => {
           </div>
         </div>
 
-        {/* ================= OSCILOSCOPIO AISLADO POR CANAL ================= */}
-        <div className="synth-scope-section">
-          <div className="synth-scope-topbar">
-            <div className="scope-title-badge">
-              <Radio size={12} />
-              <span>CANAL // {targetChannel.id.toUpperCase()}</span>
-            </div>
-            <div className="scope-mode-tabs">
-              <button
-                className={`scope-mode-btn ${scopeMode === 'wave' ? 'active' : ''}`}
-                onClick={() => setScopeMode('wave')}
-                title="Osciloscopio Forma de Onda"
-              >
-                <Waves size={11} /> OSC
-              </button>
-              <button
-                className={`scope-mode-btn ${scopeMode === 'fft' ? 'active' : ''}`}
-                onClick={() => setScopeMode('fft')}
-                title="Espectro de Frecuencias FFT"
-              >
-                <Activity size={11} /> FFT
-              </button>
-            </div>
-          </div>
-          <canvas
-            ref={scopeCanvasRef}
-            width={740}
-            height={68}
-            className="synth-scope-canvas"
-          />
-        </div>
-
         {/* ================= RACK DE MÓDULOS ANALÓGICOS ================= */}
         <div className="synth-modal-rack">
           {/* ---------------- MÓDULO 1: OSCILADORES Y MIXER ---------------- */}
           <div className="synth-rack-module module-oscillators">
             <div className="module-title">
-              <span><Layers size={13} /> I. OSC / MIXER</span>
-              <span className="module-tag">ANALOG MULTI-VOICE</span>
+              <span><Layers size={13} /> OSCILLATORS</span>
+              <span className="module-tag">DUAL + SUB</span>
             </div>
             <div className="module-content">
               {/* OSC 1 */}
               <div className="osc-block">
                 <div className="osc-header">
-                  <span className="osc-label">OSC 1</span>
+                  <div className="osc-title-wrap">
+                    <span className="led-indicator on" title="Oscilador Principal"></span>
+                    <span className="osc-label">OSC 1</span>
+                  </div>
                   <div className="oct-semi-selector">
                     <span className="param-tag">OCT</span>
                     {[-2, -1, 0, 1, 2].map((oct) => (
@@ -750,7 +866,7 @@ const SynthConfigModalContent: React.FC = () => {
                     max={50}
                     step={1}
                     defaultValue={0}
-                    size={34}
+                    size={32}
                     onChange={(v) => updateOsc1({ detune: v })}
                   />
                   <RotaryKnob
@@ -761,7 +877,7 @@ const SynthConfigModalContent: React.FC = () => {
                     max={12}
                     step={1}
                     defaultValue={0}
-                    size={34}
+                    size={32}
                     onChange={(v) => updateOsc1({ semi: v })}
                   />
                   <RotaryKnob
@@ -772,7 +888,7 @@ const SynthConfigModalContent: React.FC = () => {
                     max={100}
                     step={1}
                     defaultValue={80}
-                    size={36}
+                    size={34}
                     accentColor="#00e5ff"
                     onChange={(v) => updateOsc1({ volume: v / 100 })}
                   />
@@ -780,7 +896,7 @@ const SynthConfigModalContent: React.FC = () => {
               </div>
 
               {/* OSC 2 */}
-              <div className="osc-block" style={{ marginTop: '10px' }}>
+              <div className="osc-block" style={{ marginTop: '8px' }}>
                 <div className="osc-header">
                   <label className="switch-led-container">
                     <span className={`led-indicator ${synthSettings.osc2?.enabled ? 'on' : ''}`}></span>
@@ -791,9 +907,9 @@ const SynthConfigModalContent: React.FC = () => {
                       style={{ display: 'none' }}
                       id="osc2-power"
                     />
-                    <label htmlFor="osc2-power" className="osc-label clickable">
-                      OSC 2 {synthSettings.osc2?.enabled ? 'ON' : 'OFF'}
-                    </label>
+                    <span className="osc-label clickable">
+                      OSC 2
+                    </span>
                   </label>
 
                   <div className="oct-semi-selector">
@@ -869,46 +985,53 @@ const SynthConfigModalContent: React.FC = () => {
 
               {/* SUB OSC & NOISE & GLIDE */}
               <div className="sub-noise-row">
+                {/* SUB */}
                 <div className="sub-box">
-                  <label className="switch-led-container">
-                    <span className={`led-indicator ${synthSettings.subOsc?.enabled ? 'on' : ''}`}></span>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(synthSettings.subOsc?.enabled)}
-                      onChange={(e) => updateSubOsc({ enabled: e.target.checked })}
-                      style={{ display: 'none' }}
-                      id="sub-toggle"
-                    />
-                    <label htmlFor="sub-toggle" className="field-label clickable">
-                      SUB {synthSettings.subOsc?.octave || -1}OCT
+                  <div className="sub-header-wrap">
+                    <label className="switch-led-container">
+                      <span className={`led-indicator ${synthSettings.subOsc?.enabled ? 'on' : ''}`}></span>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(synthSettings.subOsc?.enabled)}
+                        onChange={(e) => updateSubOsc({ enabled: e.target.checked })}
+                        style={{ display: 'none' }}
+                        id="sub-toggle"
+                      />
+                      <span className="sub-label clickable">SUB</span>
                     </label>
-                  </label>
-                  <div style={{ display: 'flex', gap: '3px', margin: '2px 0' }}>
-                    {([-1, -2] as const).map((oct) => (
-                      <button
-                        key={oct}
-                        disabled={!synthSettings.subOsc?.enabled}
-                        className={`step-btn ${synthSettings.subOsc?.octave === oct ? 'active' : ''}`}
-                        style={{ fontSize: '0.62rem', padding: '1px 4px', height: '18px', minWidth: '22px' }}
-                        onClick={() => updateSubOsc({ octave: oct })}
-                      >
-                        {oct}
-                      </button>
-                    ))}
-                    {(['sine', 'square'] as const).map((w) => (
-                      <button
-                        key={w}
-                        disabled={!synthSettings.subOsc?.enabled}
-                        className={`step-btn ${synthSettings.subOsc?.waveType === w ? 'active' : ''}`}
-                        style={{ fontSize: '0.62rem', padding: '1px 4px', height: '18px', minWidth: '22px' }}
-                        onClick={() => updateSubOsc({ waveType: w })}
-                      >
-                        {w === 'sine' ? '~' : '|_|'}
-                      </button>
-                    ))}
                   </div>
+
+                  <div className="sub-selectors-row">
+                    <div className="sub-btn-group" title="Octava (-1 / -2)">
+                      {([-1, -2] as const).map((oct) => (
+                        <button
+                          key={oct}
+                          type="button"
+                          disabled={!synthSettings.subOsc?.enabled}
+                          className={`sub-micro-btn ${synthSettings.subOsc?.octave === oct ? 'active' : ''}`}
+                          onClick={() => updateSubOsc({ octave: oct })}
+                        >
+                          {oct}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="sub-btn-group" title="Forma de onda (Sin / Cuadrada)">
+                      {(['sine', 'square'] as const).map((w) => (
+                        <button
+                          key={w}
+                          type="button"
+                          disabled={!synthSettings.subOsc?.enabled}
+                          className={`sub-micro-btn ${synthSettings.subOsc?.waveType === w ? 'active' : ''}`}
+                          onClick={() => updateSubOsc({ waveType: w })}
+                        >
+                          {w === 'sine' ? '~' : '⊓'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <RotaryKnob
-                    label="SUB"
+                    label="LEVEL"
                     unit="%"
                     disabled={!synthSettings.subOsc?.enabled}
                     value={Math.round((synthSettings.subOsc?.volume ?? 0) * 100)}
@@ -922,35 +1045,40 @@ const SynthConfigModalContent: React.FC = () => {
                   />
                 </div>
 
+                {/* NOISE */}
                 <div className="sub-box">
-                  <label className="switch-led-container">
-                    <span className={`led-indicator ${synthSettings.noise?.enabled ? 'on' : ''}`}></span>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(synthSettings.noise?.enabled)}
-                      onChange={(e) => updateNoise({ enabled: e.target.checked })}
-                      style={{ display: 'none' }}
-                      id="noise-toggle"
-                    />
-                    <label htmlFor="noise-toggle" className="field-label clickable">
-                      NOISE
+                  <div className="sub-header-wrap">
+                    <label className="switch-led-container">
+                      <span className={`led-indicator ${synthSettings.noise?.enabled ? 'on' : ''}`}></span>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(synthSettings.noise?.enabled)}
+                        onChange={(e) => updateNoise({ enabled: e.target.checked })}
+                        style={{ display: 'none' }}
+                        id="noise-toggle"
+                      />
+                      <span className="sub-label clickable">NOISE</span>
                     </label>
-                  </label>
-                  <div style={{ display: 'flex', gap: '3px', margin: '2px 0' }}>
-                    {(['white', 'pink'] as const).map((nt) => (
-                      <button
-                        key={nt}
-                        disabled={!synthSettings.noise?.enabled}
-                        className={`step-btn ${synthSettings.noise?.type === nt ? 'active' : ''}`}
-                        style={{ fontSize: '0.62rem', padding: '1px 5px', height: '18px' }}
-                        onClick={() => updateNoise({ type: nt })}
-                      >
-                        {nt === 'white' ? 'WHT' : 'PNK'}
-                      </button>
-                    ))}
                   </div>
+
+                  <div className="sub-selectors-row">
+                    <div className="sub-btn-group full-width" title="Color de Ruido">
+                      {(['white', 'pink'] as const).map((nt) => (
+                        <button
+                          key={nt}
+                          type="button"
+                          disabled={!synthSettings.noise?.enabled}
+                          className={`sub-micro-btn ${synthSettings.noise?.type === nt ? 'active' : ''}`}
+                          onClick={() => updateNoise({ type: nt })}
+                        >
+                          {nt === 'white' ? 'WHT' : 'PNK'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <RotaryKnob
-                    label="NOISE"
+                    label="LEVEL"
                     unit="%"
                     disabled={!synthSettings.noise?.enabled}
                     value={Math.round((synthSettings.noise?.volume ?? 0) * 100)}
@@ -964,10 +1092,29 @@ const SynthConfigModalContent: React.FC = () => {
                   />
                 </div>
 
+                {/* GLIDE */}
                 <div className="sub-box">
-                  <span className="field-label">GLIDE</span>
+                  <div className="sub-header-wrap">
+                    <div className="sub-header-static">
+                      <span className={`led-indicator ${(synthSettings.glide ?? 0) > 0 ? 'on' : ''}`} style={{ backgroundColor: (synthSettings.glide ?? 0) > 0 ? '#fbbf24' : undefined, borderColor: (synthSettings.glide ?? 0) > 0 ? '#fbbf24' : undefined, boxShadow: (synthSettings.glide ?? 0) > 0 ? '0 0 7px #fbbf24' : undefined }}></span>
+                      <span className="sub-label">GLIDE</span>
+                    </div>
+                  </div>
+
+                  <div className="sub-selectors-row">
+                    <div className="sub-btn-group full-width" title="Modo Portamento">
+                      <button
+                        type="button"
+                        className={`sub-micro-btn ${(synthSettings.glide ?? 0) > 0 ? 'active' : ''}`}
+                        style={{ cursor: 'default' }}
+                      >
+                        PORTA
+                      </button>
+                    </div>
+                  </div>
+
                   <RotaryKnob
-                    label="PORTA"
+                    label="TIME"
                     unit="s"
                     value={parseFloat((synthSettings.glide ?? 0).toFixed(2))}
                     min={0}
@@ -983,10 +1130,10 @@ const SynthConfigModalContent: React.FC = () => {
             </div>
           </div>
 
-          {/* ---------------- MÓDULO 2: FILTRO VCF ANALÓGICO ---------------- */}
+          {/* ---------------- MÓDULO 2: FILTRO VCF Y SATURACIÓN DRIVE ---------------- */}
           <div className="synth-rack-module module-filter">
             <div className="module-title">
-              <span><Flame size={13} /> II. FILTRO VCF</span>
+              <span><Flame size={13} /> VCF & SATURATION</span>
               <label className="switch-led-container">
                 <span className={`led-indicator ${synthSettings.filter.enabled ? 'on' : ''}`}></span>
                 <input
@@ -997,7 +1144,7 @@ const SynthConfigModalContent: React.FC = () => {
                   id="filter-toggle"
                 />
                 <label htmlFor="filter-toggle" className="bypass-label">
-                  {synthSettings.filter.enabled ? 'VCF ON' : 'BYPASS'}
+                  {synthSettings.filter.enabled ? 'ON' : 'BYPASS'}
                 </label>
               </label>
             </div>
@@ -1005,8 +1152,12 @@ const SynthConfigModalContent: React.FC = () => {
               {/* Gráfico Interactivo de Respuesta en Frecuencia */}
               <div className="filter-graph-wrapper">
                 <div className="graph-header">
-                  <span>RESPUESTA EN FRECUENCIA</span>
-                  <span>{synthSettings.filter.frequency} Hz // Q: {synthSettings.filter.Q.toFixed(1)}</span>
+                  <span className="graph-hud-tag">FREQ RESPONSE</span>
+                  <span className="graph-hud-val">
+                    {synthSettings.filter.frequency >= 1000
+                      ? `${(synthSettings.filter.frequency / 1000).toFixed(1)}k`
+                      : synthSettings.filter.frequency}Hz · Q {synthSettings.filter.Q.toFixed(1)}
+                  </span>
                 </div>
                 <svg
                   ref={filterSvgRef}
@@ -1039,8 +1190,8 @@ const SynthConfigModalContent: React.FC = () => {
               {/* Selector de Tipo y Rolloff */}
               <div className="filter-type-grid">
                 {[
-                  { id: 'lowpass', label: 'LP 12dB', rolloff: -12 },
-                  { id: 'lowpass-24', label: 'LP 24dB', type: 'lowpass', rolloff: -24 },
+                  { id: 'lowpass', label: 'LP 12', rolloff: -12 },
+                  { id: 'lowpass-24', label: 'LP 24', type: 'lowpass', rolloff: -24 },
                   { id: 'highpass', label: 'HP', rolloff: -12 },
                   { id: 'bandpass', label: 'BP', rolloff: -12 },
                   { id: 'notch', label: 'NOTCH', rolloff: -12 }
@@ -1068,8 +1219,8 @@ const SynthConfigModalContent: React.FC = () => {
                 })}
               </div>
 
-              {/* Perillas del Filtro */}
-              <div className="filter-knobs-grid">
+              {/* Perillas del Filtro: Cutoff, Reso, Env Mod, Key Track */}
+              <div className="filter-knobs-row">
                 <RotaryKnob
                   label="CUTOFF"
                   unit="Hz"
@@ -1080,19 +1231,19 @@ const SynthConfigModalContent: React.FC = () => {
                   max={20000}
                   step={10}
                   defaultValue={6500}
-                  size={42}
+                  size={38}
                   accentColor="#a855f7"
                   onChange={(v) => updateFilter({ frequency: v })}
                 />
                 <RotaryKnob
-                  label="RESO (Q)"
+                  label="RESO"
                   disabled={!synthSettings.filter.enabled}
                   value={synthSettings.filter.Q}
                   min={0.1}
                   max={20}
                   step={0.1}
                   defaultValue={1.5}
-                  size={42}
+                  size={38}
                   accentColor="#a855f7"
                   onChange={(v) => updateFilter({ Q: v })}
                 />
@@ -1105,22 +1256,9 @@ const SynthConfigModalContent: React.FC = () => {
                   max={100}
                   step={1}
                   defaultValue={0}
-                  size={36}
+                  size={32}
                   accentColor="#ec4899"
                   onChange={(v) => updateFilter({ envAmount: v / 100 })}
-                />
-                <RotaryKnob
-                  label="DRIVE"
-                  unit="%"
-                  disabled={!synthSettings.filter.enabled}
-                  value={Math.round((synthSettings.filter.drive ?? 0.1) * 100)}
-                  min={0}
-                  max={100}
-                  step={1}
-                  defaultValue={0}
-                  size={36}
-                  accentColor="#f97316"
-                  onChange={(v) => updateFilter({ drive: v / 100 })}
                 />
                 <RotaryKnob
                   label="KEY TRK"
@@ -1131,30 +1269,81 @@ const SynthConfigModalContent: React.FC = () => {
                   max={100}
                   step={1}
                   defaultValue={50}
-                  size={36}
+                  size={32}
                   accentColor="#eab308"
                   onChange={(v) => updateFilter({ keyTracking: v / 100 })}
                 />
               </div>
+
+              {/* BAHÍA DEDICADA DE SATURACIÓN / DRIVE */}
+              <div className="synth-drive-bay">
+                <div className="bay-header">
+                  <span className="bay-title">
+                    <Flame size={12} color="#f97316" /> DRIVE & SATURATION
+                  </span>
+                  <span className={`bay-status-led ${(synthSettings.filter.drive ?? 0) > 0 ? 'active' : ''}`} />
+                </div>
+                <div className="drive-bay-content">
+                  <div className="drive-knob-wrap">
+                    <RotaryKnob
+                      label="DRIVE"
+                      unit="%"
+                      disabled={!synthSettings.filter.enabled}
+                      value={Math.round((synthSettings.filter.drive ?? 0.1) * 100)}
+                      min={0}
+                      max={100}
+                      step={1}
+                      defaultValue={0}
+                      size={38}
+                      accentColor="#f97316"
+                      onChange={(v) => updateFilter({ drive: v / 100 })}
+                    />
+                  </div>
+                  <div className="drive-modes-grid">
+                    {[
+                      { id: 'warm', label: 'WARM', hint: 'Soft-Clip' },
+                      { id: 'tube', label: 'TUBE', hint: 'Triode' },
+                      { id: 'tape', label: 'TAPE', hint: 'Tape Sat' },
+                      { id: 'fuzz', label: 'FUZZ', hint: 'Diode' }
+                    ].map((mode) => {
+                      const isActive = (synthSettings.filter.driveType || 'tube') === mode.id;
+                      return (
+                        <button
+                          key={mode.id}
+                          type="button"
+                          disabled={!synthSettings.filter.enabled}
+                          className={`drive-mode-card ${isActive ? 'active' : ''}`}
+                          onClick={() => updateFilter({ driveType: mode.id as any })}
+                          title={`Saturación ${mode.label} (${mode.hint})`}
+                        >
+                          <span className="mode-led" />
+                          <span className="mode-label">{mode.label}</span>
+                          <span className="mode-hint">{mode.hint}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* ---------------- MÓDULO 3: DOBLE ENVOLVENTE ADSR ---------------- */}
+          {/* ---------------- MÓDULO 3: DOBLE ENVOLVENTE ADSR Y PHOSPHOR MONITOR ---------------- */}
           <div className="synth-rack-module module-envelope">
             <div className="module-title">
-              <span><Clock size={13} /> III. ENVOLVENTES</span>
+              <span><Activity size={13} /> ENVELOPES & MONITOR</span>
               <div className="env-subtab-pills">
                 <button
                   className={`env-tab-btn ${activeEnvTab === 'amp' ? 'active' : ''}`}
                   onClick={() => setActiveEnvTab('amp')}
                 >
-                  AMP ADSR
+                  AMP
                 </button>
                 <button
                   className={`env-tab-btn ${activeEnvTab === 'filter' ? 'active' : ''}`}
                   onClick={() => setActiveEnvTab('filter')}
                 >
-                  FILTER ADSR
+                  FILTER
                 </button>
               </div>
             </div>
@@ -1189,7 +1378,7 @@ const SynthConfigModalContent: React.FC = () => {
                   max={4.0}
                   step={0.01}
                   defaultValue={activeEnvTab === 'amp' ? 0.04 : 0.02}
-                  size={42}
+                  size={34}
                   accentColor={activeEnvTab === 'amp' ? '#00e5ff' : '#ec4899'}
                   onChange={(v) => {
                     if (activeEnvTab === 'amp') {
@@ -1207,7 +1396,7 @@ const SynthConfigModalContent: React.FC = () => {
                   max={4.0}
                   step={0.01}
                   defaultValue={activeEnvTab === 'amp' ? 0.25 : 0.35}
-                  size={42}
+                  size={34}
                   accentColor={activeEnvTab === 'amp' ? '#00e5ff' : '#ec4899'}
                   onChange={(v) => {
                     if (activeEnvTab === 'amp') {
@@ -1225,7 +1414,7 @@ const SynthConfigModalContent: React.FC = () => {
                   max={100}
                   step={1}
                   defaultValue={activeEnvTab === 'amp' ? 65 : 30}
-                  size={42}
+                  size={34}
                   accentColor={activeEnvTab === 'amp' ? '#00e5ff' : '#ec4899'}
                   onChange={(v) => {
                     if (activeEnvTab === 'amp') {
@@ -1243,7 +1432,7 @@ const SynthConfigModalContent: React.FC = () => {
                   max={8.0}
                   step={0.01}
                   defaultValue={0.6}
-                  size={42}
+                  size={34}
                   accentColor={activeEnvTab === 'amp' ? '#00e5ff' : '#ec4899'}
                   onChange={(v) => {
                     if (activeEnvTab === 'amp') {
@@ -1254,13 +1443,46 @@ const SynthConfigModalContent: React.FC = () => {
                   }}
                 />
               </div>
+
+              {/* PHOSPHOR CRT MONITOR OSC / FFT */}
+              <div className="synth-monitor-bay">
+                <div className="bay-header">
+                  <span className="bay-title">
+                    <Radio size={11} color="#00e5ff" /> MONITOR // {targetChannel.id.toUpperCase()}
+                  </span>
+                  <div className="scope-mode-tabs">
+                    <button
+                      type="button"
+                      className={`scope-mode-btn ${scopeMode === 'wave' ? 'active' : ''}`}
+                      onClick={() => setScopeMode('wave')}
+                      title="Osciloscopio"
+                    >
+                      <Waves size={10} /> OSC
+                    </button>
+                    <button
+                      type="button"
+                      className={`scope-mode-btn ${scopeMode === 'fft' ? 'active' : ''}`}
+                      onClick={() => setScopeMode('fft')}
+                      title="Espectro FFT"
+                    >
+                      <Activity size={10} /> FFT
+                    </button>
+                  </div>
+                </div>
+                <canvas
+                  ref={scopeCanvasRef}
+                  width={340}
+                  height={64}
+                  className="synth-scope-canvas"
+                />
+              </div>
             </div>
           </div>
         </div>
 
-        {/* ================= SECCIÓN INFERIOR: LFO Y RACK FX ================= */}
+        {/* ================= SECCIÓN INFERIOR: LFO, RACK FX Y ECUALIZADOR GRÁFICO ================= */}
         <div className="synth-bottom-dock">
-          {/* LFO */}
+          {/* 1. LFO MODULATOR */}
           <div className="dock-module dock-lfo">
             <div className="dock-module-header">
               <label className="switch-led-container">
@@ -1273,7 +1495,7 @@ const SynthConfigModalContent: React.FC = () => {
                   id="lfo-toggle"
                 />
                 <label htmlFor="lfo-toggle" className="field-label clickable font-bold">
-                  <Compass size={12} /> LFO MODULATOR
+                  <Compass size={12} /> LFO
                 </label>
               </label>
               <div className="lfo-target-row">
@@ -1299,9 +1521,9 @@ const SynthConfigModalContent: React.FC = () => {
                 unit="Hz"
                 disabled={!synthSettings.lfo?.enabled}
                 value={synthSettings.lfo?.rate ?? 2.5}
-                min={0.1}
-                max={20}
-                step={0.1}
+                min={0.05}
+                max={30.0}
+                step={0.01}
                 defaultValue={2.5}
                 size={34}
                 accentColor="#38bdf8"
@@ -1323,7 +1545,7 @@ const SynthConfigModalContent: React.FC = () => {
             </div>
           </div>
 
-          {/* CHORUS */}
+          {/* 2. CHORUS */}
           <div className="dock-module dock-fx">
             <div className="dock-module-header">
               <label className="switch-led-container">
@@ -1346,9 +1568,9 @@ const SynthConfigModalContent: React.FC = () => {
                 unit="Hz"
                 disabled={!synthSettings.fx?.chorus?.enabled}
                 value={synthSettings.fx?.chorus?.rate ?? 1.5}
-                min={0.5}
-                max={8.0}
-                step={0.1}
+                min={0.1}
+                max={10.0}
+                step={0.01}
                 defaultValue={1.5}
                 size={34}
                 accentColor="#a855f7"
@@ -1370,8 +1592,8 @@ const SynthConfigModalContent: React.FC = () => {
             </div>
           </div>
 
-          {/* DELAY */}
-          <div className="dock-module dock-fx">
+          {/* 3. DELAY CON OLED RIBBON Y TIMING PRO */}
+          <div className="dock-module dock-fx dock-delay">
             <div className="dock-module-header">
               <label className="switch-led-container">
                 <span className={`led-indicator ${synthSettings.fx?.delay?.enabled ? 'on' : ''}`}></span>
@@ -1386,8 +1608,101 @@ const SynthConfigModalContent: React.FC = () => {
                   <Clock size={12} /> DELAY
                 </label>
               </label>
+              <div className="delay-sync-toggle">
+                <button
+                  type="button"
+                  disabled={!synthSettings.fx?.delay?.enabled}
+                  className={`target-pill ${(synthSettings.fx?.delay?.sync ?? true) ? 'active' : ''}`}
+                  onClick={() => updateDelay({ sync: true })}
+                  title="Sincronizado al tempo musical"
+                >
+                  SYNC
+                </button>
+                <button
+                  type="button"
+                  disabled={!synthSettings.fx?.delay?.enabled}
+                  className={`target-pill ${!(synthSettings.fx?.delay?.sync ?? true) ? 'active' : ''}`}
+                  onClick={() => updateDelay({ sync: false, time: typeof synthSettings.fx?.delay?.time === 'number' ? synthSettings.fx.delay.time : 0.25 })}
+                  title="Tiempo libre en milisegundos"
+                >
+                  FREE
+                </button>
+              </div>
             </div>
+
+            {/* Ribbon OLED de Tiempo */}
+            <div className="delay-time-ribbon">
+              {(synthSettings.fx?.delay?.sync ?? true) ? (
+                <div className="delay-oled-container">
+                  <button
+                    type="button"
+                    disabled={!synthSettings.fx?.delay?.enabled || currentDelayDivIndex <= 0}
+                    className="delay-stepper-btn"
+                    onClick={() => {
+                      const prev = DELAY_DIVISIONS[Math.max(0, currentDelayDivIndex - 1)];
+                      updateDelay({ time: prev.id, sync: true });
+                    }}
+                    title="Subdivisión anterior"
+                  >
+                    ◀
+                  </button>
+                  <div
+                    className="delay-oled-badge"
+                    onClick={() => {
+                      const next = DELAY_DIVISIONS[(currentDelayDivIndex + 1) % DELAY_DIVISIONS.length];
+                      updateDelay({ time: next.id, sync: true });
+                    }}
+                    title="Clic para ciclar subdivisión rítmica"
+                  >
+                    <span className="delay-oled-note">♪</span>
+                    <span className="delay-oled-text">{DELAY_DIVISIONS[currentDelayDivIndex]?.label || '1/8'}</span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!synthSettings.fx?.delay?.enabled || currentDelayDivIndex >= DELAY_DIVISIONS.length - 1}
+                    className="delay-stepper-btn"
+                    onClick={() => {
+                      const next = DELAY_DIVISIONS[Math.min(DELAY_DIVISIONS.length - 1, currentDelayDivIndex + 1)];
+                      updateDelay({ time: next.id, sync: true });
+                    }}
+                    title="Subdivisión siguiente"
+                  >
+                    ▶
+                  </button>
+                </div>
+              ) : (
+                <div className="delay-free-badge">
+                  <span className="delay-free-icon">⏱</span>
+                  <span className="delay-free-text">
+                    {Math.round((typeof synthSettings.fx?.delay?.time === 'number' ? synthSettings.fx.delay.time : 0.25) * 1000)} ms
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* 4 Knobs de Precisión de Delay */}
             <div className="dock-knob-row">
+              <RotaryKnob
+                label="TIME"
+                disabled={!synthSettings.fx?.delay?.enabled}
+                value={(synthSettings.fx?.delay?.sync ?? true) ? currentDelayDivIndex : (typeof synthSettings.fx?.delay?.time === 'number' ? synthSettings.fx.delay.time : 0.25)}
+                min={(synthSettings.fx?.delay?.sync ?? true) ? 0 : 0.05}
+                max={(synthSettings.fx?.delay?.sync ?? true) ? 5 : 1.2}
+                step={(synthSettings.fx?.delay?.sync ?? true) ? 1 : 0.01}
+                defaultValue={(synthSettings.fx?.delay?.sync ?? true) ? 1 : 0.25}
+                displayValue={(synthSettings.fx?.delay?.sync ?? true) ? DELAY_DIVISIONS[currentDelayDivIndex]?.label : undefined}
+                unit={(synthSettings.fx?.delay?.sync ?? true) ? '' : 's'}
+                size={30}
+                accentColor="#10b981"
+                onChange={(v) => {
+                  if (synthSettings.fx?.delay?.sync ?? true) {
+                    const idx = Math.max(0, Math.min(5, Math.round(v)));
+                    updateDelay({ time: DELAY_DIVISIONS[idx]?.id || '8n', sync: true });
+                  } else {
+                    updateDelay({ time: v, sync: false });
+                  }
+                }}
+              />
               <RotaryKnob
                 label="FDBK"
                 unit="%"
@@ -1397,9 +1712,22 @@ const SynthConfigModalContent: React.FC = () => {
                 max={85}
                 step={1}
                 defaultValue={25}
-                size={34}
+                size={30}
                 accentColor="#10b981"
                 onChange={(v) => updateDelay({ feedback: v / 100 })}
+              />
+              <RotaryKnob
+                label="DAMP"
+                unit="%"
+                disabled={!synthSettings.fx?.delay?.enabled}
+                value={Math.round((synthSettings.fx?.delay?.damping ?? 0.2) * 100)}
+                min={0}
+                max={100}
+                step={1}
+                defaultValue={20}
+                size={30}
+                accentColor="#10b981"
+                onChange={(v) => updateDelay({ damping: v / 100 })}
               />
               <RotaryKnob
                 label="MIX"
@@ -1410,14 +1738,14 @@ const SynthConfigModalContent: React.FC = () => {
                 max={100}
                 step={1}
                 defaultValue={20}
-                size={34}
+                size={30}
                 accentColor="#10b981"
                 onChange={(v) => updateDelay({ mix: v / 100 })}
               />
             </div>
           </div>
 
-          {/* REVERB */}
+          {/* 4. REVERB */}
           <div className="dock-module dock-fx">
             <div className="dock-module-header">
               <label className="switch-led-container">
@@ -1463,12 +1791,250 @@ const SynthConfigModalContent: React.FC = () => {
               />
             </div>
           </div>
+
+          {/* 5. ECUALIZADOR PARAMÉTRICO GRÁFICO PRO VST */}
+          <div className="dock-module dock-eq">
+            <div className="dock-module-header">
+              <label className="switch-led-container">
+                <span className={`led-indicator ${synthSettings.eq?.enabled ? 'on' : ''}`}></span>
+                <input
+                  type="checkbox"
+                  checked={Boolean(synthSettings.eq?.enabled)}
+                  onChange={(e) => updateEQ({ enabled: e.target.checked })}
+                  style={{ display: 'none' }}
+                  id="eq-toggle"
+                />
+                <label htmlFor="eq-toggle" className="field-label clickable font-bold">
+                  <Sliders size={12} /> EQ
+                </label>
+              </label>
+              <button
+                type="button"
+                className="eq-flat-btn"
+                disabled={!synthSettings.eq?.enabled}
+                onClick={() => updateEQ({ low: 0, lowMid: 0, highMid: 0, high: 0 })}
+                title="Restablecer todas las bandas a 0 dB (Flat)"
+              >
+                FLAT
+              </button>
+            </div>
+
+            {/* Display de Espectro Paramétrico Interactivo */}
+            <div className={`eq-spectrum-display ${synthSettings.eq?.enabled ? '' : 'disabled'}`}>
+              {(() => {
+                const eqCurve = getEqCurveCoordinates(
+                  synthSettings.eq?.low ?? 0,
+                  synthSettings.eq?.lowMid ?? 0,
+                  synthSettings.eq?.highMid ?? 0,
+                  synthSettings.eq?.high ?? 0,
+                  synthSettings.eq?.enabled ?? false
+                );
+                const nodes = [
+                  { key: 'low' as const, x: 30, y: eqCurve.y1, label: 'L', name: 'LOW 100Hz', color: '#00e5ff', val: synthSettings.eq?.low ?? 0 },
+                  { key: 'lowMid' as const, x: 82, y: eqCurve.y2, label: 'LM', name: 'MID 500Hz', color: '#10b981', val: synthSettings.eq?.lowMid ?? 0 },
+                  { key: 'highMid' as const, x: 138, y: eqCurve.y3, label: 'HM', name: 'MID 2.8kHz', color: '#a855f7', val: synthSettings.eq?.highMid ?? 0 },
+                  { key: 'high' as const, x: 190, y: eqCurve.y4, label: 'H', name: 'HIGH 10kHz', color: '#f43f5e', val: synthSettings.eq?.high ?? 0 }
+                ];
+
+                return (
+                  <svg
+                    ref={eqSvgRef}
+                    viewBox="0 0 220 70"
+                    className="eq-svg-spectrum"
+                  >
+                    <defs>
+                      <linearGradient id="eqSpectrumGlow" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#00e5ff" stopOpacity="0.28" />
+                        <stop offset="60%" stopColor="#10b981" stopOpacity="0.10" />
+                        <stop offset="100%" stopColor="#0a0f0d" stopOpacity="0.0" />
+                      </linearGradient>
+                    </defs>
+
+                    {/* Guías de dB de fondo */}
+                    <line x1="0" y1="9" x2="220" y2="9" stroke="rgba(255, 255, 255, 0.05)" strokeWidth="0.8" />
+                    <line x1="0" y1="35" x2="220" y2="35" stroke="rgba(0, 229, 255, 0.25)" strokeWidth="1" strokeDasharray="3 3" />
+                    <line x1="0" y1="61" x2="220" y2="61" stroke="rgba(255, 255, 255, 0.05)" strokeWidth="0.8" />
+
+                    {/* Guías de Frecuencia */}
+                    <line x1="30" y1="0" x2="30" y2="70" stroke="rgba(255, 255, 255, 0.04)" strokeWidth="0.8" />
+                    <line x1="82" y1="0" x2="82" y2="70" stroke="rgba(255, 255, 255, 0.04)" strokeWidth="0.8" />
+                    <line x1="138" y1="0" x2="138" y2="70" stroke="rgba(255, 255, 255, 0.04)" strokeWidth="0.8" />
+                    <line x1="190" y1="0" x2="190" y2="70" stroke="rgba(255, 255, 255, 0.04)" strokeWidth="0.8" />
+
+                    {/* Etiquetas de frecuencia de fondo */}
+                    <text x="30" y="67" textAnchor="middle" fill="#44554c" fontSize="6" fontFamily="Share Tech Mono">100</text>
+                    <text x="82" y="67" textAnchor="middle" fill="#44554c" fontSize="6" fontFamily="Share Tech Mono">500</text>
+                    <text x="138" y="67" textAnchor="middle" fill="#44554c" fontSize="6" fontFamily="Share Tech Mono">2.8k</text>
+                    <text x="190" y="67" textAnchor="middle" fill="#44554c" fontSize="6" fontFamily="Share Tech Mono">10k</text>
+
+                    {/* Relleno de Espectro Translúcido */}
+                    {synthSettings.eq?.enabled && (
+                      <path d={eqCurve.fillPath} fill="url(#eqSpectrumGlow)" />
+                    )}
+
+                    {/* Curva Paramétrica */}
+                    <path
+                      d={eqCurve.path}
+                      fill="none"
+                      stroke={synthSettings.eq?.enabled ? '#00e5ff' : 'rgba(255, 255, 255, 0.2)'}
+                      strokeWidth="2"
+                      style={{
+                        filter: synthSettings.eq?.enabled ? 'drop-shadow(0 0 5px rgba(0, 229, 255, 0.6))' : 'none'
+                      }}
+                    />
+
+                    {/* Pucks de Nodos Interactivos Arrastrables */}
+                    {synthSettings.eq?.enabled &&
+                      nodes.map((node) => {
+                        const isDragging = activeEqDragBand === node.key;
+                        const formattedVal = node.val > 0 ? `+${node.val.toFixed(1)}` : node.val.toFixed(1);
+                        return (
+                          <g
+                            key={node.key}
+                            className={`eq-node-group ${isDragging ? 'dragging' : ''}`}
+                            onMouseDown={(e) => handleEqNodeMouseDown(node.key, e)}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              updateEQ({ [node.key]: 0 });
+                            }}
+                          >
+                            {/* Halo brillante */}
+                            <circle
+                              cx={node.x}
+                              cy={node.y}
+                              r={isDragging ? 9 : 7}
+                              fill="none"
+                              stroke={node.color}
+                              strokeWidth={isDragging ? 2 : 1}
+                              opacity={isDragging ? 0.9 : 0.4}
+                              className="eq-node-halo"
+                            />
+                            {/* Centro del nodo */}
+                            <circle
+                              cx={node.x}
+                              cy={node.y}
+                              r={4}
+                              fill={node.color}
+                              stroke="#fff"
+                              strokeWidth="1.2"
+                              style={{
+                                filter: `drop-shadow(0 0 6px ${node.color})`,
+                                cursor: 'ns-resize'
+                              }}
+                            />
+                            {/* Tooltip de Ganancia en Arrastre */}
+                            {isDragging && (
+                              <g>
+                                <rect
+                                  x={node.x - 18}
+                                  y={Math.max(2, node.y - 18)}
+                                  width={36}
+                                  height={11}
+                                  rx={2}
+                                  fill="#070a08"
+                                  stroke={node.color}
+                                  strokeWidth="0.8"
+                                />
+                                <text
+                                  x={node.x}
+                                  y={Math.max(2, node.y - 18) + 8}
+                                  textAnchor="middle"
+                                  fill="#fff"
+                                  fontSize="6.5"
+                                  fontWeight="bold"
+                                  fontFamily="Share Tech Mono"
+                                >
+                                  {formattedVal}dB
+                                </text>
+                              </g>
+                            )}
+                          </g>
+                        );
+                      })}
+                  </svg>
+                );
+              })()}
+            </div>
+
+            {/* 4 Precision Knobs de Ganancia por Banda */}
+            <div className="eq-knobs-dock">
+              {[
+                { key: 'low' as const, label: 'LOW', freq: '100', color: '#00e5ff' },
+                { key: 'lowMid' as const, label: 'L-MID', freq: '500', color: '#10b981' },
+                { key: 'highMid' as const, label: 'H-MID', freq: '2.8K', color: '#a855f7' },
+                { key: 'high' as const, label: 'HIGH', freq: '10K', color: '#f43f5e' }
+              ].map((band) => {
+                const val = (synthSettings.eq as any)?.[band.key] ?? 0;
+                const formattedVal = val > 0 ? `+${val.toFixed(1)}` : val.toFixed(1);
+                return (
+                  <div key={band.key} className="eq-band-col">
+                    <RotaryKnob
+                      label={band.label}
+                      unit="dB"
+                      disabled={!synthSettings.eq?.enabled}
+                      value={val}
+                      min={-12}
+                      max={12}
+                      step={0.5}
+                      defaultValue={0}
+                      size={28}
+                      accentColor={band.color}
+                      onChange={(v) => updateEQ({ [band.key]: v })}
+                    />
+                    <span className="eq-freq-badge" style={{ color: band.color }}>
+                      {formattedVal}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 6. MASTER OUTPUT */}
+          <div className="dock-module dock-master">
+            <div className="dock-module-header">
+              <span className="field-label font-bold">
+                <Volume2 size={12} color="#00e5ff" /> MASTER
+              </span>
+              <span className="master-db-readout">
+                {(() => {
+                  const g = synthSettings.masterGain ?? 1.0;
+                  if (g <= 0.001) return '-inf dB';
+                  const db = 20 * Math.log10(g);
+                  return `${db >= 0 ? '+' : ''}${db.toFixed(1)} dB`;
+                })()}
+              </span>
+            </div>
+
+            <div className="dock-master-content">
+              <RotaryKnob
+                label="GAIN"
+                unit="%"
+                value={Math.round((synthSettings.masterGain ?? 1.0) * 100)}
+                min={0}
+                max={200}
+                step={1}
+                defaultValue={100}
+                size={44}
+                accentColor="#00e5ff"
+                onChange={(v) => updateMasterGain(v / 100)}
+              />
+            </div>
+          </div>
         </div>
 
         {/* ================= FOOTER ================= */}
         <div className="synth-modal-footer">
-          <Sliders size={12} style={{ marginRight: '6px' }} />
-          <span>PHOSPHOR ANALOG SYNTHESIS MODEL V15 // 64-BIT DSP AUDIO ENGINE</span>
+          <div className="footer-status-pill">
+            <span className="status-dot"></span>
+            <span>DSP 64-BIT</span>
+          </div>
+          <div className="footer-status-pill">
+            <span>STEREO</span>
+          </div>
+          <div className="footer-status-pill">
+            <span>16 VOICES</span>
+          </div>
         </div>
       </div>
     </div>

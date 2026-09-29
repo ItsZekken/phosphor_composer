@@ -260,7 +260,7 @@ export const Header = () => {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   };
 
-  const handleExportAudio = async () => {
+  const handleExportAudio = async (realtime?: boolean) => {
     setIsSaveModalOpen(false);
     const state = useSongStore.getState();
     const hasAudioClips = Boolean(state.audioClips && state.audioClips.length > 0);
@@ -274,6 +274,7 @@ export const Header = () => {
     setExportTotal(0);
 
     const cancelFn = toneEngine.exportToWav(
+      realtime,
       (elapsed, total) => {
         setExportElapsed(elapsed);
         setExportTotal(total);
@@ -298,7 +299,7 @@ export const Header = () => {
     cancelExportRef.current = cancelFn;
   };
 
-  const handleExportCompressedAudio = async () => {
+  const handleExportCompressedAudio = async (format: 'mp3' | 'm4a', realtime?: boolean) => {
     setIsSaveModalOpen(false);
     const state = useSongStore.getState();
     const hasAudioClips = Boolean(state.audioClips && state.audioClips.length > 0);
@@ -312,6 +313,8 @@ export const Header = () => {
     setExportTotal(0);
 
     const cancelFn = toneEngine.exportToCompressed(
+      format,
+      realtime,
       (elapsed, total) => {
         setExportElapsed(elapsed);
         setExportTotal(total);
@@ -408,7 +411,8 @@ export const Header = () => {
               drumChannels: result.drumChannels,
               patternChain: result.patternChain,
               isPatternRepeatOn: result.isPatternRepeatOn,
-              activeDrumKitId: result.activeDrumKitId
+              activeDrumKitId: result.activeDrumKitId,
+              patternLengths: result.patternLengths
             });
             setIsAutoKey(true);
             setKey(result.key as any);

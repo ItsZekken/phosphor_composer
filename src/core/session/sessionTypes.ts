@@ -50,6 +50,7 @@ export interface DrumSessionState {
   isPatternRepeatOn: boolean;
   activeDrumKitId: string;
   drumChannels: DrumChannel[];
+  patternLengths?: number[];
   currentDrumPatternEdit?: number;
   drumTimelineViewport?: { scrollLeft: number; zoomLevel: number };
 }

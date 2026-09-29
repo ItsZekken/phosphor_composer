@@ -155,10 +155,12 @@ export interface TrackActions {
 export interface DrumState {
   drumChannels: DrumChannel[];
   activeDrumKitId: string;
+  patternLengths: number[];
   userDrumPatternEdit: number;
   currentDrumPatternEdit: number;
   isLiveFollowLocked: boolean;
   clipboardPattern: DrumStep[][] | null;
+  clipboardPatternLength?: number | null;
   patternChain: PatternChainItem[];
   selectedChainIds: string[];
   chainClipboard: PatternChainItem[];
@@ -171,6 +173,7 @@ export interface DrumActions {
   selectDrumKit: (kitId: string) => void;
   setCurrentDrumPatternEdit: (pattern: number) => void;
   setCurrentDrumPatternEditLive: (pattern: number) => void;
+  setDrumPatternLength: (patternIndex: number, length: number) => void;
   addDrumChannel: (channel: DrumChannel) => void;
   updateDrumChannel: (id: string, updates: Partial<DrumChannel>) => void;
   removeDrumChannel: (id: string) => void;
@@ -232,6 +235,7 @@ export interface UIState {
   isSynthModalOpen: boolean;
   editingChannelId: string | null;
   synthSettings: SynthSettings;
+  synthClipboard: SynthSettings | null;
   isCrtEnabled: boolean;
   isSettingsOpen: boolean;
   crtParams: CRTParams;
@@ -249,6 +253,8 @@ export interface UIActions {
   openSynthConfigForChannel: (channelId: string) => void;
   setChannelSynthSettings: (channelId: string, settings: SynthSettings) => void;
   setSynthSettings: (settings: Partial<SynthSettings>) => void;
+  copySynthSettings: (channelId?: string) => void;
+  pasteSynthSettings: (channelId?: string) => boolean;
   setCrtEnabled: (enabled: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   setCrtParams: (params: Partial<CRTParams>) => void;

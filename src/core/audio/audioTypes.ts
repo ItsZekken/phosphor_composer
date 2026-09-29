@@ -12,6 +12,7 @@ export interface OfflineRenderOptions {
   normalize?: boolean;
   targetPeakDb?: number;
   drumBuffers?: Map<string, any>;
+  realtime?: boolean;
 }
 
 export interface ScheduledChordEvent {

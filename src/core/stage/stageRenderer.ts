@@ -38,6 +38,7 @@ export interface StageRenderFrameParams {
   patternChain: PatternChainItem[];
   isPatternRepeatOn: boolean;
   currentDrumPatternEdit: number;
+  patternLengths?: number[];
   chordBlocks: ChordBlock[];
   visualizerMode: 'oscilloscope' | 'spectrum' | 'lissajous';
   isCrtEnabled: boolean;
@@ -108,7 +109,8 @@ export function renderStageFrame(
     isPatternRepeatOn,
     currentDrumPatternEdit,
     beat,
-    isPlaying
+    isPlaying,
+    params.patternLengths
   );
 
   // 4. CAPA 3: Cinta de Progresión Armónica Flotante (en la parte superior del Stage)
@@ -150,7 +152,7 @@ function renderBackgroundVisualizer(
     for (let i = 0; i < waveform.length; i++) {
       const v = waveform[i];
       // Escala balanceada con saturación suave analógica
-      const y = centerY + Math.tanh(v * 1.15) * (height * 0.18);
+      const y = centerY + Math.tanh(v * 0.9) * (height * 0.15);
       if (i === 0) {
         bgCtx.moveTo(x, y);
       } else {
@@ -186,8 +188,8 @@ function renderBackgroundVisualizer(
 
     for (let i = 0; i < numBars; i++) {
       const sampleIdx = Math.floor((i / numBars) * (waveform.length - 1));
-      const val = Math.abs(waveform[sampleIdx]) * 0.95;
-      const barHeight = Math.min(height * 0.35, val * (height * 0.30));
+      const val = Math.abs(waveform[sampleIdx]) * 0.8;
+      const barHeight = Math.min(height * 0.35, val * (height * 0.24));
       const x = i * (barWidth + padding);
       const y = height - barHeight;
 
@@ -204,7 +206,7 @@ function renderBackgroundVisualizer(
     const len = waveform.length;
     for (let i = 0; i < len; i++) {
       const angle = (i / len) * Math.PI * 2;
-      const waveOffset = Math.tanh(waveform[i] * 1.15) * (radius * 0.26);
+      const waveOffset = Math.tanh(waveform[i] * 0.9) * (radius * 0.2);
       const r = Math.max(8, radius + waveOffset);
 
       const px = centerX + Math.cos(angle) * r;
@@ -236,40 +238,42 @@ function renderDrumSwitchesDeck(
   isPatternRepeatOn: boolean,
   currentDrumPatternEdit: number,
   beat: number,
-  isPlaying: boolean
+  isPlaying: boolean,
+  patternLengths?: number[]
 ) {
   if (!drumChannels || drumChannels.length === 0) return;
 
   let activePatternIdx = currentDrumPatternEdit;
-  const globalStep = beat * 4;
-  let wrappedStep = globalStep % 16;
-  if (wrappedStep < 0) wrappedStep += 16;
+  let beatInMeasure = ((beat % 4) + 4) % 4;
 
   if (!isPatternRepeatOn && patternChain && patternChain.length > 0) {
     const flatChain = flattenPatternChain(patternChain);
-    const totalChainSteps = flatChain.length * 16;
-    if (totalChainSteps > 0) {
-      const chainPos = ((globalStep % totalChainSteps) + totalChainSteps) % totalChainSteps;
-      const flatIdx = Math.floor(chainPos / 16);
+    const totalChainBeats = flatChain.length * 4;
+    if (totalChainBeats > 0) {
+      const chainPos = ((beat % totalChainBeats) + totalChainBeats) % totalChainBeats;
+      const flatIdx = Math.floor(chainPos / 4);
       const step = flatChain[flatIdx];
       if (step) {
         activePatternIdx = step.patternIndex;
-        wrappedStep = chainPos % 16;
+        beatInMeasure = chainPos % 4;
       }
     }
   }
 
   const isSilencedPattern = activePatternIdx === -1;
   const activeChannels = drumChannels.slice(0, 6);
+  const patternLen = !isSilencedPattern ? (patternLengths?.[activePatternIdx] || 16) : 16;
+  const wrappedStep = (beatInMeasure / 4) * patternLen;
 
   const deckMaxWidth = Math.min(1050, width * 0.78);
   const rowHeight = 30;
   const gapY = 5;
   const baseGapX = 5;
-  const quarterGap = 10;
-  const totalQuarterExtra = 3 * quarterGap;
-  const pillWidth = Math.min(20, (deckMaxWidth - (15 * baseGapX) - totalQuarterExtra) / 16);
-  const totalDeckWidth = 16 * pillWidth + 15 * baseGapX + totalQuarterExtra;
+  const hasQuarters = patternLen % 4 === 0 && patternLen >= 8;
+  const quarterGap = hasQuarters ? 10 : 0;
+  const totalQuarterExtra = hasQuarters ? 3 * quarterGap : 0;
+  const pillWidth = Math.min(20, (deckMaxWidth - ((patternLen - 1) * baseGapX) - totalQuarterExtra) / patternLen);
+  const totalDeckWidth = patternLen * pillWidth + (patternLen - 1) * baseGapX + totalQuarterExtra;
   const startX = (width - totalDeckWidth) / 2;
   const startY = 56;
 
@@ -285,10 +289,10 @@ function renderDrumSwitchesDeck(
 
     let currentX = startX;
 
-    for (let s = 0; s < 16; s++) {
+    for (let s = 0; s < patternLen; s++) {
       if (s > 0) {
         currentX += baseGapX;
-        if (s % 4 === 0) {
+        if (hasQuarters && s % (patternLen / 4) === 0) {
           currentX += quarterGap;
         }
       }
@@ -299,7 +303,7 @@ function renderDrumSwitchesDeck(
       // Distancia de reproducción desde que se disparó el paso s
       let stepDist = wrappedStep - s;
       if (stepDist < 0) {
-        stepDist += 16;
+        stepDist += patternLen;
       }
 
       // Envolvente analógica: fade-in (~30ms) y fade-out exponencial (~120ms)
@@ -357,14 +361,14 @@ function renderDrumSwitchesDeck(
   const cursorRowY = startY + activeChannels.length * (rowHeight + gapY) + 4;
   let cursorX = startX;
 
-  for (let s = 0; s < 16; s++) {
+  for (let s = 0; s < patternLen; s++) {
     if (s > 0) {
       cursorX += baseGapX;
-      if (s % 4 === 0) cursorX += quarterGap;
+      if (hasQuarters && s % (patternLen / 4) === 0) cursorX += quarterGap;
     }
 
     let cursorDist = wrappedStep - s;
-    if (cursorDist < 0) cursorDist += 16;
+    if (cursorDist < 0) cursorDist += patternLen;
 
     if (isPlaying && cursorDist < 1.0) {
       const cursorAlpha = Math.pow(1 - cursorDist, 1.8);

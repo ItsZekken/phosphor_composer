@@ -117,9 +117,11 @@ export function scheduleSessionTimeline(
       flatChain.forEach((step, measureIdx) => {
         const patternIdx = step.patternIndex;
         const measureStartBeat = measureIdx * 4;
+        const patternLen = session.drums.patternLengths?.[patternIdx] || 16;
+        const stepDuration = 4 / patternLen;
 
-        for (let stepIdx = 0; stepIdx < 16; stepIdx++) {
-          const stepBeat = measureStartBeat + (stepIdx * 0.25);
+        for (let stepIdx = 0; stepIdx < patternLen; stepIdx++) {
+          const stepBeat = measureStartBeat + (stepIdx * stepDuration);
           const timeSeconds = tempoMap.beatToSeconds(stepBeat);
 
           drumChannels.forEach(ch => {
@@ -142,14 +144,16 @@ export function scheduleSessionTimeline(
         }
       });
     } else {
-      // Bucle de 1 compás (16 pasos) hasta alcanzar maxBeat
+      // Bucle de 1 compás (pasos dinámicos según el patrón activo) hasta alcanzar maxBeat
       const patternIdx = session.drums.currentDrumPatternEdit || 0;
       const totalMeasures = Math.max(1, Math.ceil(maxBeat / 4));
+      const patternLen = session.drums.patternLengths?.[patternIdx] || 16;
+      const stepDuration = 4 / patternLen;
 
       for (let m = 0; m < totalMeasures; m++) {
         const measureStartBeat = m * 4;
-        for (let stepIdx = 0; stepIdx < 16; stepIdx++) {
-          const stepBeat = measureStartBeat + (stepIdx * 0.25);
+        for (let stepIdx = 0; stepIdx < patternLen; stepIdx++) {
+          const stepBeat = measureStartBeat + (stepIdx * stepDuration);
           const timeSeconds = tempoMap.beatToSeconds(stepBeat);
 
           drumChannels.forEach(ch => {

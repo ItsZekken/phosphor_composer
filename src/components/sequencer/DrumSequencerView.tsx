@@ -27,6 +27,8 @@ export const DrumSequencerView: React.FC = () => {
     removeDrumPattern,
     clearDrumPattern,
     clipboardPattern,
+    patternLengths,
+    setDrumPatternLength,
     isPatternRepeatOn,
     setPatternRepeatOn,
     addDrumChannel,
@@ -44,6 +46,8 @@ export const DrumSequencerView: React.FC = () => {
     removeDrumPattern: state.removeDrumPattern,
     clearDrumPattern: state.clearDrumPattern,
     clipboardPattern: state.clipboardPattern,
+    patternLengths: state.patternLengths,
+    setDrumPatternLength: state.setDrumPatternLength,
     isPatternRepeatOn: state.isPatternRepeatOn,
     setPatternRepeatOn: state.setPatternRepeatOn,
     addDrumChannel: state.addDrumChannel,
@@ -55,6 +59,28 @@ export const DrumSequencerView: React.FC = () => {
   const [patternContextMenu, setPatternContextMenu] = useState<{ x: number; y: number; index: number } | null>(null);
 
   const totalPatterns = drumChannels[0]?.patterns?.length || 8;
+  const currentPatternLength = (patternLengths && patternLengths[currentDrumPatternEdit]) || 16;
+
+  const PRESET_STEP_COUNTS = [
+    { value: '8', label: '8 (1/8)' },
+    { value: '10', label: '10 (10:4)' },
+    { value: '12', label: '12 (12/8)' },
+    { value: '14', label: '14 (7:4)' },
+    { value: '15', label: '15 (15:4)' },
+    { value: '16', label: '16 (1/16)' },
+    { value: '18', label: '18 (18:4)' },
+    { value: '20', label: '20 (5:4)' },
+    { value: '24', label: '24 (6:4)' },
+    { value: '28', label: '28 (28:4)' },
+    { value: '32', label: '32 (1/32)' }
+  ];
+
+  const stepOptions = PRESET_STEP_COUNTS.some(opt => opt.value === String(currentPatternLength))
+    ? PRESET_STEP_COUNTS
+    : [
+        { value: String(currentPatternLength), label: `${currentPatternLength} (${currentPatternLength}:4)` },
+        ...PRESET_STEP_COUNTS
+      ].sort((a, b) => Number(a.value) - Number(b.value));
 
   const handleToggleExpand = (id: string) => {
     setExpandedChannelId(prev => (prev === id ? null : id));
@@ -190,7 +216,43 @@ export const DrumSequencerView: React.FC = () => {
             </button>
           </div>
         }
-        right={null}
+        right={
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '0.68rem', fontFamily: "'Share Tech Mono', monospace", color: 'var(--text-secondary)' }}>
+              PASOS:
+            </span>
+            <div style={{ display: 'inline-flex', alignItems: 'center', background: 'rgba(0,0,0,0.3)', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.08)', padding: '2px' }}>
+              <button
+                className="physical-btn"
+                style={{ width: '22px', height: '22px', padding: 0, fontSize: '0.75rem', lineHeight: '1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                onClick={() => setDrumPatternLength(currentDrumPatternEdit, Math.max(4, currentPatternLength - 1))}
+                title="Reducir pasos (-1)"
+                disabled={currentPatternLength <= 4}
+              >
+                -
+              </button>
+
+              <div style={{ width: '96px', margin: '0 2px' }}>
+                <CustomSelect
+                  value={String(currentPatternLength)}
+                  onChange={(val) => setDrumPatternLength(currentDrumPatternEdit, Number(val))}
+                  options={stepOptions}
+                  style={{ width: '100%', height: '22px', fontSize: '0.72rem' }}
+                />
+              </div>
+
+              <button
+                className="physical-btn"
+                style={{ width: '22px', height: '22px', padding: 0, fontSize: '0.75rem', lineHeight: '1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                onClick={() => setDrumPatternLength(currentDrumPatternEdit, Math.min(32, currentPatternLength + 1))}
+                title="Aumentar pasos (+1)"
+                disabled={currentPatternLength >= 32}
+              >
+                +
+              </button>
+            </div>
+          </div>
+        }
       />
 
       {/* Menú Contextual de Patrón */}

@@ -69,6 +69,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
       filterFreq: 6500,
       filterQ: 1.5,
       filterDrive: 0.1,
+      filterDriveType: 'tube',
       attack: 0.04,
       decay: 0.25,
       sustain: 0.65,
@@ -80,9 +81,28 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
       lfoRate: 2.5,
       lfoDepth: 0.25,
       lfoTarget: 'cutoff',
+      eqEnabled: false,
+      eqLow: 0,
+      eqLowMid: 0,
+      eqHighMid: 0,
+      eqHigh: 0,
       gain: 0.7,
       pan: 0.0
     };
+
+    this.eqB0 = new Float32Array(4);
+    this.eqB1 = new Float32Array(4);
+    this.eqB2 = new Float32Array(4);
+    this.eqA1 = new Float32Array(4);
+    this.eqA2 = new Float32Array(4);
+    this.eqBypass = [true, true, true, true];
+    this.eqAllBypassed = true;
+    this.eqL1 = new Float32Array(4);
+    this.eqL2 = new Float32Array(4);
+    this.eqR1 = new Float32Array(4);
+    this.eqR2 = new Float32Array(4);
+
+    this.updateEqCoefficients();
 
     for (let i = 0; i < this.maxVoices; i++) {
       this.voices.push({
@@ -124,6 +144,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
         case 'setParams':
           if (data.params) {
             Object.assign(this.params, data.params);
+            this.updateEqCoefficients();
             if (!this.params.noiseEnabled || this.params.noiseVol <= 0.0001) {
               for (let i = 0; i < this.maxVoices; i++) {
                 this.voices[i].b0 = 0;
@@ -135,6 +156,85 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
           break;
       }
     };
+  }
+
+  updateEqCoefficients() {
+    if (!this.params.eqEnabled) {
+      this.eqAllBypassed = true;
+      return;
+    }
+
+    const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
+    const bands = [
+      { type: 'lowshelf', f0: 100, Q: 1.0, gainDb: this.params.eqLow ?? 0 },
+      { type: 'peaking', f0: 500, Q: 1.0, gainDb: this.params.eqLowMid ?? 0 },
+      { type: 'peaking', f0: 2800, Q: 1.0, gainDb: this.params.eqHighMid ?? 0 },
+      { type: 'highshelf', f0: 10000, Q: 1.0, gainDb: this.params.eqHigh ?? 0 }
+    ];
+
+    let anyActive = false;
+    for (let i = 0; i < 4; i++) {
+      const b = bands[i];
+      if (Math.abs(b.gainDb) < 0.05) {
+        this.eqB0[i] = 1;
+        this.eqB1[i] = 0;
+        this.eqB2[i] = 0;
+        this.eqA1[i] = 0;
+        this.eqA2[i] = 0;
+        this.eqBypass[i] = true;
+      } else {
+        anyActive = true;
+        this.eqBypass[i] = false;
+        const A = Math.pow(10, b.gainDb / 40);
+        const w0 = (2 * Math.PI * Math.max(10, Math.min(sr * 0.49, b.f0))) / sr;
+        const cosW = Math.cos(w0);
+        const sinW = Math.sin(w0);
+
+        let b0 = 1, b1 = 0, b2 = 0, a0 = 1, a1 = 0, a2 = 0;
+
+        if (b.type === 'peaking') {
+          const alpha = sinW / (2 * b.Q);
+          b0 = 1 + alpha * A;
+          b1 = -2 * cosW;
+          b2 = 1 - alpha * A;
+          a0 = 1 + alpha / A;
+          a1 = -2 * cosW;
+          a2 = 1 - alpha / A;
+        } else if (b.type === 'lowshelf') {
+          const alpha = (sinW / 2) * Math.SQRT2;
+          const aPlus1 = A + 1;
+          const aMinus1 = A - 1;
+          const twoSqrtAlpha = 2 * Math.sqrt(A) * alpha;
+
+          b0 = A * (aPlus1 - aMinus1 * cosW + twoSqrtAlpha);
+          b1 = 2 * A * (aMinus1 - aPlus1 * cosW);
+          b2 = A * (aPlus1 - aMinus1 * cosW - twoSqrtAlpha);
+          a0 = aPlus1 + aMinus1 * cosW + twoSqrtAlpha;
+          a1 = -2 * (aMinus1 + aPlus1 * cosW);
+          a2 = aPlus1 + aMinus1 * cosW - twoSqrtAlpha;
+        } else if (b.type === 'highshelf') {
+          const alpha = (sinW / 2) * Math.SQRT2;
+          const aPlus1 = A + 1;
+          const aMinus1 = A - 1;
+          const twoSqrtAlpha = 2 * Math.sqrt(A) * alpha;
+
+          b0 = A * (aPlus1 + aMinus1 * cosW + twoSqrtAlpha);
+          b1 = -2 * A * (aMinus1 + aPlus1 * cosW);
+          b2 = A * (aPlus1 - aMinus1 * cosW - twoSqrtAlpha);
+          a0 = aPlus1 - aMinus1 * cosW + twoSqrtAlpha;
+          a1 = 2 * (aMinus1 - aPlus1 * cosW);
+          a2 = aPlus1 - aMinus1 * cosW - twoSqrtAlpha;
+        }
+
+        const invA0 = 1.0 / a0;
+        this.eqB0[i] = b0 * invA0;
+        this.eqB1[i] = b1 * invA0;
+        this.eqB2[i] = b2 * invA0;
+        this.eqA1[i] = a1 * invA0;
+        this.eqA2[i] = a2 * invA0;
+      }
+    }
+    this.eqAllBypassed = !anyActive;
   }
 
   noteOn(midi, velocity, durationSeconds, delaySamples) {
@@ -456,6 +556,37 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
           }
         }
 
+        if (this.params.filterDrive > 0.005) {
+          const drive = this.params.filterDrive;
+          const dType = this.params.filterDriveType || 'tube';
+          const preGain = 1.0 + drive * 2.8;
+          const s = voiceSample * preGain;
+          let sat = s;
+
+          if (dType === 'warm') {
+            if (s > 1.25) sat = 1.0;
+            else if (s < -1.25) sat = -1.0;
+            else sat = s - (s * s * s) * 0.2;
+          } else if (dType === 'tube') {
+            if (s >= 0) {
+              sat = s / (1.0 + 0.45 * s);
+            } else {
+              const neg = -s;
+              sat = -neg / (1.0 + 0.7 * neg);
+            }
+          } else if (dType === 'tape') {
+            const s2 = s * s;
+            sat = (s * (27.0 + s2)) / (27.0 + 9.0 * s2);
+          } else if (dType === 'fuzz') {
+            sat = (1.35 * s) / Math.sqrt(1.0 + s * s * 0.75);
+          }
+
+          const driveBoost = 1.0 + drive * 0.85;
+          const dryBassAnchor = 0.28 * (1.0 - drive * 0.4);
+          const wetSatMix = 1.0 - dryBassAnchor;
+          voiceSample = (sat * wetSatMix + voiceSample * dryBassAnchor) * driveBoost;
+        }
+
         const amp = voiceSample * voice.envLevel * voice.velocity;
         sampleSumL += amp;
         sampleSumR += amp;
@@ -465,9 +596,30 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
         ? Math.max(0, 1.0 - lfoDepth * 0.5 * (1.0 - lfoVal))
         : 1.0;
 
-      outL[s] = sampleSumL * gainL * lfoAmpGain;
+      let finalL = sampleSumL * gainL * lfoAmpGain;
+      let finalR = sampleSumR * gainR * lfoAmpGain;
+
+      if (this.params.eqEnabled && !this.eqAllBypassed) {
+        for (let b = 0; b < 4; b++) {
+          if (this.eqBypass[b]) continue;
+          const b0 = this.eqB0[b], b1 = this.eqB1[b], b2 = this.eqB2[b];
+          const a1 = this.eqA1[b], a2 = this.eqA2[b];
+
+          const yL = b0 * finalL + this.eqL1[b];
+          this.eqL1[b] = b1 * finalL - a1 * yL + this.eqL2[b];
+          this.eqL2[b] = b2 * finalL - a2 * yL;
+          finalL = yL;
+
+          const yR = b0 * finalR + this.eqR1[b];
+          this.eqR1[b] = b1 * finalR - a1 * yR + this.eqR2[b];
+          this.eqR2[b] = b2 * finalR - a2 * yR;
+          finalR = yR;
+        }
+      }
+
+      outL[s] = finalL;
       if (outR !== outL) {
-        outR[s] = sampleSumR * gainR * lfoAmpGain;
+        outR[s] = finalR;
       }
     }
     return true;
@@ -774,6 +926,7 @@ export class PhosphorWorkletNode {
       filterFreq: settings.filter?.enabled ? Math.max(20, Math.min(20000, settings.filter?.frequency ?? 6500)) : 20000,
       filterQ: Math.max(0.1, Math.min(20, settings.filter?.Q ?? 1.5)),
       filterDrive: Math.max(0, Math.min(1, settings.filter?.drive ?? 0.1)),
+      filterDriveType: settings.filter?.driveType || 'tube',
 
       attack: Math.max(0.001, settings.envelope?.attack ?? 0.04),
       decay: Math.max(0.001, settings.envelope?.decay ?? 0.25),
@@ -783,10 +936,17 @@ export class PhosphorWorkletNode {
       glide: settings.glide || 0.0,
       lfoEnabled: Boolean(settings.lfo?.enabled),
       lfoWave: settings.lfo?.waveType || 'sine',
-      lfoRate: Math.max(0.1, Math.min(20, settings.lfo?.rate ?? 2.5)),
+      lfoRate: Math.max(0.05, Math.min(30, settings.lfo?.rate ?? 2.5)),
       lfoDepth: Math.max(0, Math.min(1, settings.lfo?.depth ?? 0.25)),
       lfoTarget: settings.lfo?.target || 'cutoff',
-      gain: 0.7,
+
+      eqEnabled: Boolean(settings.eq?.enabled),
+      eqLow: settings.eq?.low ?? 0,
+      eqLowMid: settings.eq?.lowMid ?? 0,
+      eqHighMid: settings.eq?.highMid ?? 0,
+      eqHigh: settings.eq?.high ?? 0,
+
+      gain: 0.7 * (settings.masterGain ?? 1.0),
       pan: 0.0
     };
 

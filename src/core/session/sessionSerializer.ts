@@ -252,6 +252,11 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
       isPatternRepeatOn,
       activeDrumKitId,
       drumChannels,
+      patternLengths: Array.isArray((raw as any).patternLengths)
+        ? (raw as any).patternLengths
+        : Array.isArray((raw as any).drums?.patternLengths)
+        ? (raw as any).drums.patternLengths
+        : Array.from({ length: drumChannels[0]?.patterns?.length || 8 }).map(() => 16),
       drumTimelineViewport: (raw as any).drumTimelineViewport || (raw as any).drums?.drumTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 }
     },
     mixer: {
@@ -355,6 +360,7 @@ export function serializeSession(state: any, metadataUpdates?: Partial<SessionMe
       isPatternRepeatOn: Boolean(state.isPatternRepeatOn),
       activeDrumKitId: state.activeDrumKitId || 'kit_1',
       drumChannels: state.drumChannels || DEFAULT_DRUM_CHANNELS,
+      patternLengths: state.patternLengths || Array.from({ length: (state.drumChannels || DEFAULT_DRUM_CHANNELS)[0]?.patterns?.length || 8 }).map(() => 16),
       currentDrumPatternEdit: state.currentDrumPatternEdit,
       drumTimelineViewport: state.drumTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 }
     },

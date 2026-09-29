@@ -216,6 +216,7 @@ export async function exportStageToMp4(
       patternChain: session.drums.patternChain,
       isPatternRepeatOn: session.drums.isPatternRepeatOn,
       currentDrumPatternEdit: session.drums.currentDrumPatternEdit ?? 0,
+      patternLengths: session.drums.patternLengths,
       chordBlocks: session.harmony.chordBlocks,
       visualizerMode,
       isCrtEnabled,

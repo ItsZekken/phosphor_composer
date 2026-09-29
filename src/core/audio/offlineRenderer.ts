@@ -14,6 +14,7 @@ import type { OfflineRenderOptions } from './audioTypes';
 import { scheduleSessionTimeline } from './timelineScheduler';
 import { audioBufferToWav } from '../../utils/wavEncoder';
 import { audioBufferToMp3BlobAsync, type Mp3EncodeResult } from '../../utils/mp3Encoder';
+import { audioBufferToM4aBlobAsync } from '../../utils/m4aEncoder';
 import type { PatternDef } from '../../patterns/patternTypes';
 import type { SynthSettings } from '../../utils/typeDefinitions';
 import { PIANO_URLS, PIANO_BASE_URL, preloadPianoBuffers, getSharedPianoBuffers } from './pianoSampler';
@@ -320,21 +321,26 @@ export async function renderSessionToAudioBuffer(
   return renderedBuffer.get() as AudioBuffer;
 }
 
-/**
- * Renderiza una sesión completa de forma offline y genera un Blob WAV PCM 16-bit estéreo masterizado.
- */
+import { renderSessionRealtime } from './realtimeRenderer';
+
 export async function renderSessionToWav(
   session: SessionV2,
   customPatterns: PatternDef[] = [],
   options: OfflineRenderOptions = {}
 ): Promise<Blob> {
-  if (options.onPhase) {
-    options.onPhase('RENDERIZANDO AUDIO...');
+  let audioBuffer: AudioBuffer;
+  if (options.realtime) {
+    if (options.onPhase) options.onPhase('GRABANDO EN TIEMPO REAL...');
+    const scheduled = scheduleSessionTimeline(session, customPatterns);
+    const duration = Math.max(2, scheduled.totalDurationSeconds);
+    audioBuffer = await renderSessionRealtime(duration, options.onProgress || (() => {}));
+  } else {
+    if (options.onPhase) options.onPhase('RENDERIZANDO AUDIO...');
+    audioBuffer = await renderSessionToAudioBuffer(session, customPatterns, {
+      ...options,
+      sampleRate: options.sampleRate || 44100
+    });
   }
-  const audioBuffer = await renderSessionToAudioBuffer(session, customPatterns, {
-    ...options,
-    sampleRate: options.sampleRate || 44100
-  });
 
   if (options.onPhase) {
     options.onPhase('CODIFICANDO WAV...');
@@ -348,33 +354,52 @@ export async function renderSessionToWav(
 }
 
 /**
- * Renderiza una sesión completa y la comprime en segundo plano a formato MP3 (256 kbps CBR estéreo).
+ * Renderiza una sesión completa y la comprime en segundo plano a formato MP3/M4A.
  */
 export async function renderSessionToCompressed(
   session: SessionV2,
   customPatterns: PatternDef[] = [],
-  options: OfflineRenderOptions = {}
-): Promise<Mp3EncodeResult> {
-  if (options.onPhase) {
-    options.onPhase('RENDERIZANDO AUDIO...');
+  options: OfflineRenderOptions & { format?: 'mp3' | 'm4a' } = {}
+): Promise<Mp3EncodeResult | { blob: Blob; extension: string; mimeType: string }> {
+  let audioBuffer: AudioBuffer;
+  if (options.realtime) {
+    if (options.onPhase) options.onPhase('GRABANDO EN TIEMPO REAL...');
+    const scheduled = scheduleSessionTimeline(session, customPatterns);
+    const duration = Math.max(2, scheduled.totalDurationSeconds);
+    audioBuffer = await renderSessionRealtime(duration, options.onProgress || (() => {}));
+  } else {
+    if (options.onPhase) options.onPhase('RENDERIZANDO AUDIO...');
+    audioBuffer = await renderSessionToAudioBuffer(session, customPatterns, {
+      ...options,
+      sampleRate: options.sampleRate || 44100
+    });
   }
-  const audioBuffer = await renderSessionToAudioBuffer(session, customPatterns, {
-    ...options,
-    sampleRate: options.sampleRate || 44100
-  });
 
-  if (options.onPhase) {
-    options.onPhase('COMPRIMIENDO MP3...');
+  const isM4a = options.format === 'm4a';
+
+  if (isM4a) {
+    if (options.onPhase) options.onPhase('COMPRIMIENDO M4A...');
+    return audioBufferToM4aBlobAsync(audioBuffer, {
+      bitrate: 128,
+      onProgress: (p) => {
+        if (options.onProgress) {
+          options.onProgress(p, 1);
+        }
+      },
+      onPhase: options.onPhase
+    });
+  } else {
+    if (options.onPhase) options.onPhase('COMPRIMIENDO MP3...');
+    return audioBufferToMp3BlobAsync(audioBuffer, {
+      bitrate: 256,
+      normalize: options.normalize !== false,
+      targetPeakDb: options.targetPeakDb ?? -0.3,
+      onProgress: (p) => {
+        if (options.onProgress) {
+          options.onProgress(p, 1);
+        }
+      },
+      onPhase: options.onPhase
+    });
   }
-  return audioBufferToMp3BlobAsync(audioBuffer, {
-    bitrate: 256,
-    normalize: options.normalize !== false,
-    targetPeakDb: options.targetPeakDb ?? -0.3,
-    onProgress: (p) => {
-      if (options.onProgress) {
-        options.onProgress(p, 1);
-      }
-    },
-    onPhase: options.onPhase
-  });
 }

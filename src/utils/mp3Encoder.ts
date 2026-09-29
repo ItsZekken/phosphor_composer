@@ -159,7 +159,13 @@ export async function audioBufferToMp3BlobAsync(
     });
     output.addAudioTrack(audioSource);
 
-    await output.start();
+    // CRÍTICO: Timeout de 3s para evitar hang infinito en Vite dev mode
+    const startPromise = output.start();
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('timeout')), 3000)
+    );
+    await Promise.race([startPromise, timeoutPromise]);
+    
     options.onPhase?.('COMPRIMIENDO MP3...');
     options.onProgress?.(0.2);
 
@@ -181,7 +187,7 @@ export async function audioBufferToMp3BlobAsync(
       };
     }
   } catch (wasmErr) {
-    console.warn('[mp3Encoder] Mediabunny Wasm falló, ejecutando fallback en Web Worker:', wasmErr);
+    console.warn('[mp3Encoder] Mediabunny Wasm falló o agotó tiempo, ejecutando fallback en Web Worker:', wasmErr);
   }
 
   // 2. Ruta de Respaldo: Web Worker con LAME JS
@@ -297,20 +303,22 @@ export function audioBufferToMp3Blob(
   const leftInt16 = new Int16Array(numSamples);
   const rightInt16 = new Int16Array(numSamples);
 
+  const factor = scaleFactor * 0x7fff;
   for (let i = 0; i < numSamples; i++) {
-    const sL = Math.max(-1, Math.min(1, leftFloat[i] * scaleFactor));
-    const sR = Math.max(-1, Math.min(1, rightFloat[i] * scaleFactor));
-
-    leftInt16[i] = sL < 0 ? Math.round(sL * 0x8000) : Math.round(sL * 0x7fff);
-    rightInt16[i] = sR < 0 ? Math.round(sR * 0x8000) : Math.round(sR * 0x7fff);
+    let sL = leftFloat[i] * factor;
+    let sR = rightFloat[i] * factor;
+    if (sL > 32767) sL = 32767; else if (sL < -32768) sL = -32768;
+    if (sR > 32767) sR = 32767; else if (sR < -32768) sR = -32768;
+    leftInt16[i] = sL;
+    rightInt16[i] = sR;
   }
 
   // 4. Instanciar LAME MP3 Encoder
   const encoder = new Mp3Encoder(numChannels, sampleRate, bitrate);
   const mp3Parts: BlobPart[] = [];
 
-  // Codificar en bloques de 1152 muestras (tamaño de frame estándar MP3)
-  const blockSize = 1152;
+  // Codificar en bloques (11520 muestras = 10 frames)
+  const blockSize = 11520;
   for (let i = 0; i < numSamples; i += blockSize) {
     const leftChunk = leftInt16.subarray(i, i + blockSize);
     const rightChunk = rightInt16.subarray(i, i + blockSize);

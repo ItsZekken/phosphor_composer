@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, Settings, Copy, ClipboardPaste } from 'lucide-react';
 import type { PianoRollTrack } from '../../../utils/typeDefinitions';
 import { ContextMenuContainer } from '../../ui/ContextMenuContainer';
 import { PIANO_ROLL_COLOR_PALETTE } from '../../visualizer/hooks/useStageTimelineNotes';
+import { useSongStore } from '../../../store/songStore';
 
 interface PianoRollTrackHeaderProps {
   tracks: PianoRollTrack[];
@@ -28,6 +29,12 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
   const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
   const [editingTrackName, setEditingTrackName] = useState<string>('');
   const [colorPickerTarget, setColorPickerTarget] = useState<{ trackId: string; x: number; y: number } | null>(null);
+
+  const openSynthConfigForChannel = useSongStore((state) => state.openSynthConfigForChannel);
+  const copySynthSettings = useSongStore((state) => state.copySynthSettings);
+  const pasteSynthSettings = useSongStore((state) => state.pasteSynthSettings);
+  const synthClipboard = useSongStore((state) => state.synthClipboard);
+  const setChannelInstrument = useSongStore((state) => state.setChannelInstrument);
 
   useEffect(() => {
     if (!colorPickerTarget) return;
@@ -197,6 +204,56 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
               />
               <span>Personalizado</span>
             </label>
+          </div>
+
+          {/* Opciones de Sintetizador de la Pista */}
+          <div style={{ borderTop: '1px solid #233029', paddingTop: '6px', marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <div style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', fontWeight: 'bold', padding: '0 4px', letterSpacing: '0.05em' }}>
+              SINTETIZADOR DE PISTA
+            </div>
+            <button
+              type="button"
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.68rem', padding: '4px 6px', background: 'transparent', border: 'none', color: '#a855f7', cursor: 'pointer', textAlign: 'left', borderRadius: '3px' }}
+              onClick={() => {
+                const track = tracks.find(t => t.id === colorPickerTarget.trackId);
+                if (track) {
+                  setChannelInstrument(track.channelId, 'synth');
+                  openSynthConfigForChannel(track.channelId);
+                }
+                setColorPickerTarget(null);
+              }}
+            >
+              <Settings size={12} />
+              <span>Configurar Sintetizador...</span>
+            </button>
+            <button
+              type="button"
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.68rem', padding: '4px 6px', background: 'transparent', border: 'none', color: '#38bdf8', cursor: 'pointer', textAlign: 'left', borderRadius: '3px' }}
+              onClick={() => {
+                const track = tracks.find(t => t.id === colorPickerTarget.trackId);
+                if (track) copySynthSettings(track.channelId);
+                setColorPickerTarget(null);
+              }}
+            >
+              <Copy size={12} />
+              <span>Copiar Sonido Sintetizador</span>
+            </button>
+            <button
+              type="button"
+              disabled={!synthClipboard}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.68rem', padding: '4px 6px', background: 'transparent', border: 'none', color: synthClipboard ? '#10b981' : 'var(--text-secondary)', opacity: synthClipboard ? 1 : 0.4, cursor: synthClipboard ? 'pointer' : 'not-allowed', textAlign: 'left', borderRadius: '3px' }}
+              onClick={() => {
+                const track = tracks.find(t => t.id === colorPickerTarget.trackId);
+                if (track && synthClipboard) {
+                  setChannelInstrument(track.channelId, 'synth');
+                  pasteSynthSettings(track.channelId);
+                }
+                setColorPickerTarget(null);
+              }}
+            >
+              <ClipboardPaste size={12} />
+              <span>Pegar Sonido Sintetizador</span>
+            </button>
           </div>
         </ContextMenuContainer>
       )}

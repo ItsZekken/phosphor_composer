@@ -59,18 +59,20 @@ self.onmessage = (e: MessageEvent<Mp3WorkerEncodeRequest>) => {
     const leftInt16 = new Int16Array(numSamples);
     const rightInt16 = new Int16Array(numSamples);
 
+    const factor = scaleFactor * 0x7fff;
     for (let i = 0; i < numSamples; i++) {
-      const sL = Math.max(-1, Math.min(1, leftChannel[i] * scaleFactor));
-      const sR = Math.max(-1, Math.min(1, rightFloat[i] * scaleFactor));
-
-      leftInt16[i] = sL < 0 ? Math.round(sL * 0x8000) : Math.round(sL * 0x7fff);
-      rightInt16[i] = sR < 0 ? Math.round(sR * 0x8000) : Math.round(sR * 0x7fff);
+      let sL = leftChannel[i] * factor;
+      let sR = rightFloat[i] * factor;
+      if (sL > 32767) sL = 32767; else if (sL < -32768) sL = -32768;
+      if (sR > 32767) sR = 32767; else if (sR < -32768) sR = -32768;
+      leftInt16[i] = sL;
+      rightInt16[i] = sR;
     }
 
     // 3. Instanciación y codificación con LAME MP3 Encoder
     const encoder = new Mp3Encoder(numChannels, sampleRate, bitrate);
     const mp3Parts: BlobPart[] = [];
-    const blockSize = 1152;
+    const blockSize = 11520; // Procesar 10 frames a la vez reduce overhead
     let lastReportedProgress = 0;
 
     for (let i = 0; i < numSamples; i += blockSize) {

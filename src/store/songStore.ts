@@ -111,6 +111,7 @@ export const useSongStore = create<SongStore>()(
           isPatternRepeatOn: session.drums.isPatternRepeatOn,
           activeDrumKitId: session.drums.activeDrumKitId,
           drumChannels: session.drums.drumChannels,
+          patternLengths: session.drums.patternLengths || Array.from({ length: session.drums.drumChannels[0]?.patterns?.length || 8 }).map(() => 16),
           drumTimelineViewport: session.drums.drumTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 },
           audioTracks: (session as any).audio?.tracks || DEFAULT_AUDIO_TRACKS,
           audioClips: (session as any).audio?.clips || [],

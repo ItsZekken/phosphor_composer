@@ -35,7 +35,14 @@ const DrumActivityLed: React.FC<{ channelColor: string; activePattern: any[] }> 
   );
 });
 
-// Subcomponente aislado para la grilla de 16 pasos
+const isStepDownbeat = (stepIdx: number, total: number) => {
+  if (total <= 0) return false;
+  if (total % 4 === 0) return stepIdx % (total / 4) === 0;
+  if (total % 2 === 0) return stepIdx % (total / 2) === 0;
+  return stepIdx === 0 || (total === 15 && stepIdx % 5 === 0);
+};
+
+// Subcomponente aislado para la grilla de pasos dinámicos
 const DrumStepsRow: React.FC<{
   channelColor: string;
   activePattern: any[];
@@ -45,11 +52,12 @@ const DrumStepsRow: React.FC<{
 }> = React.memo(({ channelColor, activePattern, onStepMouseDown, onStepMouseEnter, onStopDrawing }) => {
   const isPlaying = useSongStore(s => s.isPlaying);
   const playbackStep = useSongStore(s => s.playbackStep);
+  const total = activePattern?.length || 16;
 
   return (
     <div className="drum-steps" onMouseLeave={onStopDrawing} style={{ userSelect: 'none' }}>
       {activePattern && activePattern.map((step, i) => {
-        const isDownbeat = i % 4 === 0;
+        const isDownbeat = isStepDownbeat(i, total);
         const isPlayingThisStep = isPlaying && playbackStep === i;
         return (
           <div 
@@ -79,27 +87,31 @@ const DrumVelocityRow: React.FC<{
 }> = React.memo(({ channelColor, activePattern, onVelocityMouseDown, onVelocityMouseMove, onStopDrawing }) => {
   const isPlaying = useSongStore(s => s.isPlaying);
   const playbackStep = useSongStore(s => s.playbackStep);
+  const total = activePattern?.length || 16;
 
   return (
     <div className="drum-velocity-panel">
       <div className="velocity-editor" onMouseLeave={onStopDrawing}>
-        {activePattern && activePattern.map((step, i) => (
-          <div 
-            key={i} 
-            className={`velocity-bar-container ${i % 4 === 0 ? 'downbeat-bg' : ''} ${isPlaying && playbackStep === i ? 'playback-head-vel' : ''}`}
-            onMouseDown={(e) => onVelocityMouseDown(e, i)}
-            onMouseMove={(e) => onVelocityMouseMove(e, i)}
-            onTouchStart={(e) => onVelocityMouseDown(e, i)}
-            onTouchMove={(e) => onVelocityMouseMove(e, i)}
-          >
-            {step.isActive && (
-              <div 
-                className="velocity-bar" 
-                style={{ height: `${(step.velocity ?? 0.8) * 100}%`, background: channelColor }}
-              />
-            )}
-          </div>
-        ))}
+        {activePattern && activePattern.map((step, i) => {
+          const isDownbeat = isStepDownbeat(i, total);
+          return (
+            <div 
+              key={i} 
+              className={`velocity-bar-container ${isDownbeat ? 'downbeat-bg' : ''} ${isPlaying && playbackStep === i ? 'playback-head-vel' : ''}`}
+              onMouseDown={(e) => onVelocityMouseDown(e, i)}
+              onMouseMove={(e) => onVelocityMouseMove(e, i)}
+              onTouchStart={(e) => onVelocityMouseDown(e, i)}
+              onTouchMove={(e) => onVelocityMouseMove(e, i)}
+            >
+              {step.isActive && (
+                <div 
+                  className="velocity-bar" 
+                  style={{ height: `${(step.velocity ?? 0.8) * 100}%`, background: channelColor }}
+                />
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -122,6 +134,8 @@ export const DrumChannelRow: React.FC<Props> = React.memo(({
   const updateDrumChannel = useSongStore(s => s.updateDrumChannel);
   const removeDrumChannel = useSongStore(s => s.removeDrumChannel);
   const currentDrumPatternEdit = useSongStore(s => s.currentDrumPatternEdit);
+  const patternLengths = useSongStore(s => s.patternLengths);
+  const currentPatternLength = (patternLengths && patternLengths[currentDrumPatternEdit]) || 16;
   
   // Smart Draw State
   const [isDrawing, setIsDrawing] = useState(false);
@@ -150,7 +164,8 @@ export const DrumChannelRow: React.FC<Props> = React.memo(({
     setDrawAction(newState);
     toggleDrumStep(channel.id, index, currentDrumPatternEdit, newState);
     if (newState) {
-      toneEngine.playDrumPreview(channel.id, channel.patterns[currentDrumPatternEdit][index].velocity);
+      const stepVel = channel.patterns[currentDrumPatternEdit]?.[index]?.velocity ?? 0.8;
+      toneEngine.playDrumPreview(channel.id, stepVel);
     }
   }, [channel.id, channel.patterns, currentDrumPatternEdit, toggleDrumStep]);
 
@@ -212,7 +227,10 @@ export const DrumChannelRow: React.FC<Props> = React.memo(({
   // Colores de la paleta
   const colors = ['var(--reposo)', 'var(--subdominante)', 'var(--tension)', 'var(--spicy)', 'var(--exotic)'];
   const channelColor = colors[channelIndex % colors.length];
-  const activePattern = channel.patterns[currentDrumPatternEdit];
+  const fullPattern = channel.patterns[currentDrumPatternEdit] || [];
+  const activePattern = Array.from({ length: currentPatternLength }).map((_, i) =>
+    fullPattern[i] || { isActive: false, velocity: 0.8 }
+  );
 
   // Cargar lista de muestras por categorías
   const selectGroups: SelectGroup[] = DRUM_CATEGORIES.map(cat => ({
@@ -333,15 +351,15 @@ export const DrumChannelRow: React.FC<Props> = React.memo(({
                 onClick={() => {
                   setContextMenuPos(null);
                   const pattern = channel.patterns[currentDrumPatternEdit] || [];
-                  pattern.forEach((_, stepIdx) => {
-                    const shouldBeActive = stepIdx % 4 === 0;
-                    if (pattern[stepIdx]?.isActive !== shouldBeActive) {
-                      toggleDrumStep(channel.id, stepIdx, currentDrumPatternEdit);
+                  for (let stepIdx = 0; stepIdx < currentPatternLength; stepIdx++) {
+                    const shouldBeActive = isStepDownbeat(stepIdx, currentPatternLength);
+                    if ((pattern[stepIdx]?.isActive ?? false) !== shouldBeActive) {
+                      toggleDrumStep(channel.id, stepIdx, currentDrumPatternEdit, shouldBeActive);
                     }
-                  });
+                  }
                 }}
               >
-                <Sparkles size={14} /> Rellenar cada 4 pasos
+                <Sparkles size={14} /> Rellenar pulsos principales
               </button>
 
               <button
@@ -349,11 +367,11 @@ export const DrumChannelRow: React.FC<Props> = React.memo(({
                 onClick={() => {
                   setContextMenuPos(null);
                   const pattern = channel.patterns[currentDrumPatternEdit] || [];
-                  pattern.forEach((step, stepIdx) => {
-                    if (step.isActive) {
-                      toggleDrumStep(channel.id, stepIdx, currentDrumPatternEdit);
+                  for (let stepIdx = 0; stepIdx < currentPatternLength; stepIdx++) {
+                    if (pattern[stepIdx]?.isActive) {
+                      toggleDrumStep(channel.id, stepIdx, currentDrumPatternEdit, false);
                     }
-                  });
+                  }
                 }}
               >
                 <RefreshCw size={14} /> Limpiar pasos

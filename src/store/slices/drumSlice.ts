@@ -20,10 +20,12 @@ export const DEFAULT_DRUM_CHANNELS: DrumChannel[] = [
 export const initialDrumState: DrumState = {
   drumChannels: DEFAULT_DRUM_CHANNELS,
   activeDrumKitId: 'kit_1',
+  patternLengths: [16, 16, 16, 16, 16, 16, 16, 16],
   userDrumPatternEdit: 0,
   currentDrumPatternEdit: 0,
   isLiveFollowLocked: false,
   clipboardPattern: null,
+  clipboardPatternLength: null,
   patternChain: [],
   selectedChainIds: [],
   chainClipboard: [],
@@ -64,6 +66,34 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set) => (
   })),
 
   setCurrentDrumPatternEditLive: (pattern: number) => set({ currentDrumPatternEdit: pattern }),
+
+  setDrumPatternLength: (patternIndex: number, length: number) => set((state) => {
+    const clampedLen = Math.max(4, Math.min(32, Math.round(length)));
+    const totalPatterns = state.drumChannels[0]?.patterns.length || 8;
+    const nextLengths = [...(state.patternLengths || [])];
+    while (nextLengths.length < totalPatterns) {
+      nextLengths.push(16);
+    }
+    nextLengths[patternIndex] = clampedLen;
+
+    const nextChannels = state.drumChannels.map(ch => {
+      const nextPatterns = [...ch.patterns];
+      const currentSteps = nextPatterns[patternIndex] ? [...nextPatterns[patternIndex]] : [];
+      if (currentSteps.length < clampedLen) {
+        while (currentSteps.length < clampedLen) {
+          currentSteps.push({ isActive: false, velocity: 0.8 });
+        }
+        nextPatterns[patternIndex] = currentSteps;
+        return { ...ch, patterns: nextPatterns };
+      }
+      return ch;
+    });
+
+    return {
+      drumChannels: nextChannels,
+      patternLengths: nextLengths
+    };
+  }),
 
   addDrumChannel: (channel) => set((state) => ({ drumChannels: [...state.drumChannels, channel] })),
 
@@ -149,12 +179,21 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set) => (
   }),
 
   copyDrumPattern: (sourcePatternIndex) => set((state) => {
-    const copiedData = state.drumChannels.map(ch => ch.patterns[sourcePatternIndex]);
-    return { clipboardPattern: copiedData };
+    const copiedData = state.drumChannels.map(ch => ch.patterns[sourcePatternIndex]?.map(step => ({ ...step })));
+    const copiedLength = state.patternLengths?.[sourcePatternIndex] || 16;
+    return { clipboardPattern: copiedData, clipboardPatternLength: copiedLength };
   }),
 
   pasteDrumPattern: (targetPatternIndex) => set((state) => {
     if (!state.clipboardPattern) return state;
+
+    const copiedLength = state.clipboardPatternLength || 16;
+    const totalPatterns = state.drumChannels[0]?.patterns.length || 8;
+    const nextLengths = [...(state.patternLengths || [])];
+    while (nextLengths.length < totalPatterns) {
+      nextLengths.push(16);
+    }
+    nextLengths[targetPatternIndex] = copiedLength;
 
     const nextChannels = state.drumChannels.map((ch, idx) => {
       const nextPatterns = [...ch.patterns];
@@ -165,6 +204,7 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set) => (
     });
     return {
       drumChannels: nextChannels,
+      patternLengths: nextLengths,
       userDrumPatternEdit: targetPatternIndex,
       currentDrumPatternEdit: targetPatternIndex,
       isLiveFollowLocked: state.isPlaying ? true : state.isLiveFollowLocked
@@ -180,8 +220,11 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set) => (
         return { ...ch, patterns: nextPatterns };
       });
       newIndex = (nextChannels[0]?.patterns.length ?? 1) - 1;
+      const nextLengths = [...(state.patternLengths || [])];
+      nextLengths.push(16);
       return {
         drumChannels: nextChannels,
+        patternLengths: nextLengths,
         userDrumPatternEdit: newIndex,
         currentDrumPatternEdit: newIndex,
         isLiveFollowLocked: state.isPlaying ? true : state.isLiveFollowLocked
@@ -193,15 +236,19 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set) => (
   duplicateDrumPattern: (sourceIndex) => {
     let newIndex = 0;
     set((state) => {
+      const sourceLen = state.patternLengths?.[sourceIndex] || 16;
       const nextChannels = state.drumChannels.map(ch => {
         const nextPatterns = [...ch.patterns];
-        const sourcePattern = nextPatterns[sourceIndex] || Array.from({ length: 16 }).map(() => ({ isActive: false, velocity: 0.8 }));
+        const sourcePattern = nextPatterns[sourceIndex] || Array.from({ length: sourceLen }).map(() => ({ isActive: false, velocity: 0.8 }));
         nextPatterns.push(sourcePattern.map(step => ({ ...step })));
         return { ...ch, patterns: nextPatterns };
       });
       newIndex = (nextChannels[0]?.patterns.length ?? 1) - 1;
+      const nextLengths = [...(state.patternLengths || [])];
+      nextLengths.push(sourceLen);
       return {
         drumChannels: nextChannels,
+        patternLengths: nextLengths,
         userDrumPatternEdit: newIndex,
         currentDrumPatternEdit: newIndex,
         isLiveFollowLocked: state.isPlaying ? true : state.isLiveFollowLocked
@@ -218,6 +265,8 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set) => (
       const nextPatterns = ch.patterns.filter((_, idx) => idx !== targetIndex);
       return { ...ch, patterns: nextPatterns };
     });
+
+    const nextLengths = (state.patternLengths || []).filter((_, idx) => idx !== targetIndex);
 
     const nextChain: PatternChainItem[] = state.patternChain
       .map(item => {
@@ -242,6 +291,7 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set) => (
 
     return {
       drumChannels: nextChannels,
+      patternLengths: nextLengths,
       patternChain: nextChain,
       userDrumPatternEdit: newEditIndex,
       currentDrumPatternEdit: newEditIndex,
@@ -250,10 +300,11 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set) => (
   }),
 
   clearDrumPattern: (targetIndex) => set((state) => {
+    const currentLen = state.patternLengths?.[targetIndex] || 16;
     const nextChannels = state.drumChannels.map(ch => {
       const nextPatterns = [...ch.patterns];
       if (nextPatterns[targetIndex]) {
-        nextPatterns[targetIndex] = Array.from({ length: 16 }).map(() => ({ isActive: false, velocity: 0.8 }));
+        nextPatterns[targetIndex] = Array.from({ length: currentLen }).map(() => ({ isActive: false, velocity: 0.8 }));
       }
       return { ...ch, patterns: nextPatterns };
     });

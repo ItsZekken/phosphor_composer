@@ -58,12 +58,13 @@ export const initialUIState: UIState = {
   isSynthModalOpen: false,
   editingChannelId: 'chords',
   synthSettings: { ...DEFAULT_SYNTH_SETTINGS },
+  synthClipboard: null,
   isCrtEnabled: savedSettings.isCrtEnabled === true, // Default OFF (false)
   isSettingsOpen: false,
   crtParams: { ...FIXED_CRT_PARAMS }
 };
 
-export const createUISlice: SliceCreator<UIState & UIActions> = (set) => ({
+export const createUISlice: SliceCreator<UIState & UIActions> = (set, get) => ({
   ...initialUIState,
 
   setActiveView: (activeView) => set({ activeView }),
@@ -117,6 +118,37 @@ export const createUISlice: SliceCreator<UIState & UIActions> = (set) => ({
     const newSettings = normalizeSynthSettings({ ...state.synthSettings, ...updates });
     return { synthSettings: newSettings };
   }),
+
+  copySynthSettings: (channelId) => set((state) => {
+    const targetId = channelId || state.editingChannelId || 'melody';
+    const ch = state.channels[targetId];
+    const sourceSettings = ch?.synthSettings || state.synthSettings || DEFAULT_SYNTH_SETTINGS;
+    const cloned = JSON.parse(JSON.stringify(normalizeSynthSettings(sourceSettings)));
+    return { synthClipboard: cloned };
+  }),
+
+  pasteSynthSettings: (channelId) => {
+    const state = get();
+    if (!state.synthClipboard) return false;
+    const targetId = channelId || state.editingChannelId || 'melody';
+    const ch = state.channels[targetId];
+    if (!ch) return false;
+    const pasted = normalizeSynthSettings(JSON.parse(JSON.stringify(state.synthClipboard)));
+    set((s) => ({
+      channels: {
+        ...s.channels,
+        [targetId]: {
+          ...s.channels[targetId],
+          instrument: 'synth',
+          synthSettings: pasted
+        }
+      }
+    }));
+    import('../../audio/toneEngine').then((mod) => {
+      mod.toneEngine.updateSynthSettings(pasted, targetId);
+    }).catch(() => {});
+    return true;
+  },
 
   setCrtEnabled: (isCrtEnabled) => {
     saveUserSettings({ isCrtEnabled });

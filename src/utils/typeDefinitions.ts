@@ -98,14 +98,23 @@ export interface FilterConfig {
   Q: number;         // 0.1 to 20
   rolloff?: -12 | -24;
   drive?: number;    // 0.0 to 1.0 (analog saturation)
+  driveType?: 'warm' | 'tube' | 'tape' | 'fuzz';
   envAmount?: number; // -1.0 to 1.0 (filter envelope modulation amount)
   keyTracking?: number; // 0.0 to 1.0
+}
+
+export interface SynthEQConfig {
+  enabled: boolean;
+  low: number;      // -12 to +12 dB (~100 Hz bass shelf)
+  lowMid: number;   // -12 to +12 dB (~500 Hz peak)
+  highMid: number;  // -12 to +12 dB (~2800 Hz peak)
+  high: number;     // -12 to +12 dB (~10000 Hz treble shelf)
 }
 
 export interface LFOConfig {
   enabled: boolean;
   waveType: 'sine' | 'triangle' | 'square' | 'sawtooth' | 'random';
-  rate: number;    // 0.1 to 20 Hz
+  rate: number;    // 0.05 to 30 Hz
   depth: number;   // 0.0 to 1.0
   target: 'cutoff' | 'pitch' | 'amp';
 }
@@ -114,14 +123,16 @@ export interface SynthFXConfig {
   chorus: {
     enabled: boolean;
     depth: number; // 0.0 to 1.0
-    rate: number;  // 0.5 to 10 Hz
+    rate: number;  // 0.1 to 10 Hz
     mix: number;   // 0.0 to 1.0
   };
   delay: {
     enabled: boolean;
-    time: string | number; // '8n', '4n', etc.
+    time: string | number; // '16n', '8n', '8n.', '4n', etc., o milisegundos
     feedback: number; // 0.0 to 0.9
     mix: number;      // 0.0 to 1.0
+    sync?: boolean;   // true = sincronizado a BPM, false = milisegundos
+    damping?: number; // 0.0 to 1.0 (amortiguación analógica de agudos)
   };
   reverb: {
     enabled: boolean;
@@ -144,8 +155,10 @@ export interface SynthSettings {
   noise?: NoiseConfig;
   filterEnv?: ADSRConfig;
   lfo?: LFOConfig;
+  eq?: SynthEQConfig;
   fx?: SynthFXConfig;
   glide?: number; // Portamento time in seconds
+  masterGain?: number; // 0.0 to 2.0 (default 1.0 = 0 dB)
   presetName?: string;
 }
 

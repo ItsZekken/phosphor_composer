@@ -146,24 +146,27 @@ class ToneEngine {
         let patternIndex = state.currentDrumPatternEdit;
         let localStepIndex = 0;
         let currentChainItemId: string | null = null;
-        const globalStepIndex = Math.floor(beat * 4);
 
         if (!state.isPatternRepeatOn && state.patternChain && state.patternChain.length > 0) {
           const flatChain = flattenPatternChain(state.patternChain);
-          const totalChainSteps = flatChain.length * 16;
-          if (totalChainSteps > 0) {
-            const wrappedStep = globalStepIndex % totalChainSteps;
-            const flatIdx = Math.floor(wrappedStep / 16);
-            const step = flatChain[flatIdx];
+          const totalChainBeats = flatChain.length * 4;
+          if (totalChainBeats > 0) {
+            const wrappedBeat = ((beat % totalChainBeats) + totalChainBeats) % totalChainBeats;
+            const measureIdx = Math.floor(wrappedBeat / 4);
+            const beatInMeasure = wrappedBeat % 4;
+            const step = flatChain[measureIdx];
             if (step) {
               patternIndex = step.patternIndex;
-              localStepIndex = wrappedStep % 16;
               currentChainItemId = step.originalItemId;
+              const patternLen = state.patternLengths?.[patternIndex] || 16;
+              localStepIndex = Math.min(patternLen - 1, Math.max(0, Math.floor((beatInMeasure / 4) * patternLen)));
             }
           }
         } else {
-          localStepIndex = globalStepIndex % 16;
           patternIndex = state.currentDrumPatternEdit;
+          const beatInMeasure = ((beat % 4) + 4) % 4;
+          const patternLen = state.patternLengths?.[patternIndex] || 16;
+          localStepIndex = Math.min(patternLen - 1, Math.max(0, Math.floor((beatInMeasure / 4) * patternLen)));
         }
 
         if (!state.isPatternRepeatOn) {
@@ -847,6 +850,7 @@ class ToneEngine {
   }
 
   public exportToWav(
+    realtime: boolean | undefined,
     onProgress: (elapsed: number, total: number) => void,
     onComplete: (wavBlob: Blob) => void,
     onError: (err: Error) => void
@@ -863,6 +867,7 @@ class ToneEngine {
         const session = serializeSession(state);
         const drumBuffers = this.drumManager.getLoadedBuffers();
         const wavBlob = await renderSessionToWav(session, state.customPatterns || [], {
+          realtime,
           drumBuffers,
           normalize: true,
           targetPeakDb: -0.3,
@@ -901,6 +906,8 @@ class ToneEngine {
   }
 
   public exportToCompressed(
+    format: 'mp3' | 'm4a',
+    realtime: boolean | undefined,
     onProgress: (elapsed: number, total: number) => void,
     onComplete: (result: { blob: Blob; extension: string; mimeType: string }) => void,
     onError: (err: Error) => void
@@ -917,6 +924,8 @@ class ToneEngine {
         const session = serializeSession(state);
         const drumBuffers = this.drumManager.getLoadedBuffers();
         const compressedResult = await renderSessionToCompressed(session, state.customPatterns || [], {
+          format,
+          realtime,
           drumBuffers,
           normalize: true,
           targetPeakDb: -0.3,

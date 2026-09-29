@@ -53,6 +53,9 @@ export default defineConfig({
         }
       }
     }
+  },
+  optimizeDeps: {
+    exclude: ['@mediabunny/mp3-encoder', '@mediabunny/aac-encoder']
   }
 })
 

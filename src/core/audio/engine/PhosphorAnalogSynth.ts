@@ -69,6 +69,12 @@ export class PhosphorAnalogSynth {
   private fftNode: Tone.Analyser | null = null;
   private isAnalyserActive = false;
 
+  // Ecualizador Gráfico 4-Bandas (Fallback Offline)
+  private eqLowNode: Tone.BiquadFilter | null = null;
+  private eqLowMidNode: Tone.BiquadFilter | null = null;
+  private eqHighMidNode: Tone.BiquadFilter | null = null;
+  private eqHighNode: Tone.BiquadFilter | null = null;
+
   // LFO
   private lfoNode: Tone.LFO | null = null;
   private currentLfoTarget: 'cutoff' | 'pitch' | 'amp' | 'none' = 'none';
@@ -80,7 +86,7 @@ export class PhosphorAnalogSynth {
     this.settings = normalizeSynthSettings(initialSettings);
 
     // 1. Salida principal calibrada (0.6 = -4.4 dB)
-    this.outputNode = new Tone.Gain(0.6);
+    this.outputNode = new Tone.Gain(0.6 * (this.settings.masterGain ?? 1.0));
     if (destinationNode) {
       this.outputNode.connect(destinationNode);
     }
@@ -174,12 +180,20 @@ export class PhosphorAnalogSynth {
     if (this.driveNode) try { this.driveNode.disconnect(); } catch (_) {}
     try { this.filterNode.disconnect(); } catch (_) {}
     try { this.lfoAmpNode.disconnect(); } catch (_) {}
+    if (this.eqLowNode) try { this.eqLowNode.disconnect(); } catch (_) {}
+    if (this.eqLowMidNode) try { this.eqLowMidNode.disconnect(); } catch (_) {}
+    if (this.eqHighMidNode) try { this.eqHighMidNode.disconnect(); } catch (_) {}
+    if (this.eqHighNode) try { this.eqHighNode.disconnect(); } catch (_) {}
     try { this.fxInputNode.disconnect(); } catch (_) {}
     if (this.chorusNode) try { this.chorusNode.disconnect(); } catch (_) {}
     if (this.delayNode) try { this.delayNode.disconnect(); } catch (_) {}
     if (this.reverbNode) try { this.reverbNode.disconnect(); } catch (_) {}
+    
+    // Resetear el target de LFO actual para que applyLFO() se vea forzado a re-inicializar
+    // los valores base (ej: frequency.value = 0) la próxima vez que se llame.
+    this.currentLfoTarget = 'none';
 
-    // --- PARTE 1: CADENA PRE-FX DE FALLBACK (Osciladores -> VCF/Drive/Amp -> fxInputNode) ---
+    // --- PARTE 1: CADENA PRE-FX DE FALLBACK (Osciladores -> VCF/Drive/Amp/EQ -> fxInputNode) ---
     let fallbackChain: Tone.ToneAudioNode = this.mixerSumNode;
 
     // 0. Etapa de Modulación de Tono / Pitch Vibrato (Solo si LFO pitch activo y depth > 0.01)
@@ -234,6 +248,30 @@ export class PhosphorAnalogSynth {
     // 3. Etapa de Modulación de Amplitud (LFO Amp Tremolo)
     fallbackChain.connect(this.lfoAmpNode);
     fallbackChain = this.lfoAmpNode;
+
+    // 3.5. Ecualizador Gráfico 4-Bandas (Fallback Offline)
+    const eq = this.settings.eq;
+    if (eq && eq.enabled) {
+      if (!this.eqLowNode) this.eqLowNode = new Tone.BiquadFilter(100, 'lowshelf');
+      this.eqLowNode.gain.value = eq.low ?? 0;
+
+      if (!this.eqLowMidNode) this.eqLowMidNode = new Tone.BiquadFilter(500, 'peaking');
+      this.eqLowMidNode.Q.value = 1.0;
+      this.eqLowMidNode.gain.value = eq.lowMid ?? 0;
+
+      if (!this.eqHighMidNode) this.eqHighMidNode = new Tone.BiquadFilter(2800, 'peaking');
+      this.eqHighMidNode.Q.value = 1.0;
+      this.eqHighMidNode.gain.value = eq.highMid ?? 0;
+
+      if (!this.eqHighNode) this.eqHighNode = new Tone.BiquadFilter(10000, 'highshelf');
+      this.eqHighNode.gain.value = eq.high ?? 0;
+
+      fallbackChain.connect(this.eqLowNode);
+      this.eqLowNode.connect(this.eqLowMidNode);
+      this.eqLowMidNode.connect(this.eqHighMidNode);
+      this.eqHighMidNode.connect(this.eqHighNode);
+      fallbackChain = this.eqHighNode;
+    }
 
     // La síntesis de fallback se conecta al bus de entrada de efectos
     fallbackChain.connect(this.fxInputNode);
@@ -442,6 +480,9 @@ export class PhosphorAnalogSynth {
       const lfoPrev = prev.lfo;
       const lfoNext = next.lfo;
 
+      const eqPrev = prev.eq;
+      const eqNext = next.eq;
+
       const isPitchLfoPrev = Boolean(lfoPrev?.enabled && lfoPrev?.target === 'pitch' && (lfoPrev?.depth ?? 0) > 0.01);
       const isPitchLfoNext = Boolean(lfoNext?.enabled && lfoNext?.target === 'pitch' && (lfoNext?.depth ?? 0) > 0.01);
 
@@ -449,6 +490,7 @@ export class PhosphorAnalogSynth {
         fPrev.enabled !== fNext.enabled ||
         (Math.abs(fPrev.drive ?? 0) > 0.02) !== (Math.abs(fNext.drive ?? 0) > 0.02) ||
         isPitchLfoPrev !== isPitchLfoNext ||
+        Boolean(eqPrev?.enabled) !== Boolean(eqNext?.enabled) ||
         Boolean(fxPrev?.chorus?.enabled && (fxPrev.chorus.mix ?? 0) > 0.01) !== Boolean(fxNext?.chorus?.enabled && (fxNext.chorus?.mix ?? 0) > 0.01) ||
         Boolean(fxPrev?.delay?.enabled && (fxPrev.delay.mix ?? 0) > 0.01) !== Boolean(fxNext?.delay?.enabled && (fxNext.delay?.mix ?? 0) > 0.01) ||
         Boolean(fxPrev?.reverb?.enabled && (fxPrev.reverb.mix ?? 0) > 0.01) !== Boolean(fxNext?.reverb?.enabled && (fxNext.reverb?.mix ?? 0) > 0.01);
@@ -468,18 +510,28 @@ export class PhosphorAnalogSynth {
         if (this.driveNode && fPrev.drive !== fNext.drive) {
           this.driveNode.distortion = Math.max(0, Math.min(1, fNext.drive ?? 0)) * 0.4;
         }
+        if (eqNext?.enabled) {
+          if (this.eqLowNode && eqPrev?.low !== eqNext.low) this.eqLowNode.gain.rampTo(eqNext.low, 0.02);
+          if (this.eqLowMidNode && eqPrev?.lowMid !== eqNext.lowMid) this.eqLowMidNode.gain.rampTo(eqNext.lowMid, 0.02);
+          if (this.eqHighMidNode && eqPrev?.highMid !== eqNext.highMid) this.eqHighMidNode.gain.rampTo(eqNext.highMid, 0.02);
+          if (this.eqHighNode && eqPrev?.high !== eqNext.high) this.eqHighNode.gain.rampTo(eqNext.high, 0.02);
+        }
         if (this.chorusNode && fxNext?.chorus) {
           if (fxPrev?.chorus?.mix !== fxNext.chorus.mix) this.chorusNode.wet.rampTo(fxNext.chorus.mix, 0.02);
           if (fxPrev?.chorus?.depth !== fxNext.chorus.depth) this.chorusNode.depth = fxNext.chorus.depth;
           if (fxPrev?.chorus?.rate !== fxNext.chorus.rate) this.chorusNode.frequency.rampTo(fxNext.chorus.rate, 0.02);
         }
         if (this.delayNode && fxNext?.delay) {
+          if (fxPrev?.delay?.time !== fxNext.delay.time) this.delayNode.delayTime.value = fxNext.delay.time as any;
           if (fxPrev?.delay?.mix !== fxNext.delay.mix) this.delayNode.wet.rampTo(fxNext.delay.mix, 0.02);
           if (fxPrev?.delay?.feedback !== fxNext.delay.feedback) this.delayNode.feedback.rampTo(Math.min(0.85, fxNext.delay.feedback), 0.02);
         }
         if (this.reverbNode && fxNext?.reverb) {
           if (fxPrev?.reverb?.mix !== fxNext.reverb.mix) this.reverbNode.wet.rampTo(fxNext.reverb.mix, 0.02);
           if (fxPrev?.reverb?.decay !== fxNext.reverb.decay) this.reverbNode.roomSize.rampTo(Math.max(0.1, Math.min(0.9, fxNext.reverb.decay / 4)), 0.02);
+        }
+        if (prev.masterGain !== next.masterGain && this.currentLfoTarget !== 'amp') {
+          this.outputNode.gain.rampTo(0.6 * (next.masterGain ?? 1.0), 0.02);
         }
       }
 
@@ -540,7 +592,7 @@ export class PhosphorAnalogSynth {
     if (this.outputNode && this.currentLfoTarget !== 'none') {
       try {
         this.outputNode.gain.cancelScheduledValues(0);
-        this.outputNode.gain.value = 0.6;
+        this.outputNode.gain.value = 0.6 * (this.settings.masterGain ?? 1.0);
       } catch (_) {}
     }
 
@@ -917,6 +969,10 @@ export class PhosphorAnalogSynth {
     if (this.driveNode) try { this.driveNode.dispose(); } catch (_) {}
     try { this.filterNode.dispose(); } catch (_) {}
     try { this.lfoAmpNode.dispose(); } catch (_) {}
+    if (this.eqLowNode) try { this.eqLowNode.dispose(); } catch (_) {}
+    if (this.eqLowMidNode) try { this.eqLowMidNode.dispose(); } catch (_) {}
+    if (this.eqHighMidNode) try { this.eqHighMidNode.dispose(); } catch (_) {}
+    if (this.eqHighNode) try { this.eqHighNode.dispose(); } catch (_) {}
 
     if (this.chorusNode) try { this.chorusNode.stop(); this.chorusNode.dispose(); } catch (_) {}
     if (this.delayNode) try { this.delayNode.dispose(); } catch (_) {}

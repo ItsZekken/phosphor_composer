@@ -78,6 +78,7 @@ interface SynthParams {
   filterFreq: number;
   filterQ: number;
   filterDrive: number;
+  filterDriveType?: 'tube' | 'tape' | 'fuzz' | 'warm';
   // ADSR
   attack: number;
   decay: number;
@@ -91,6 +92,12 @@ interface SynthParams {
   lfoRate: number;
   lfoDepth: number;
   lfoTarget: 'cutoff' | 'pitch' | 'amp';
+  // 4-BAND GRAPHIC / PARAMETRIC EQ
+  eqEnabled?: boolean;
+  eqLow?: number;
+  eqLowMid?: number;
+  eqHighMid?: number;
+  eqHigh?: number;
   // Master
   gain: number;
   pan: number;
@@ -116,6 +123,19 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
   private lfoPhase = 0;
   private lfoRandVal = 0;
 
+  // Coeficientes y estados para Ecualizador Gráfico de 4 Bandas (Direct Form II Transpuesto)
+  private eqB0 = new Float32Array(4);
+  private eqB1 = new Float32Array(4);
+  private eqB2 = new Float32Array(4);
+  private eqA1 = new Float32Array(4);
+  private eqA2 = new Float32Array(4);
+  private eqBypass = [true, true, true, true];
+  private eqAllBypassed = true;
+  private eqL1 = new Float32Array(4);
+  private eqL2 = new Float32Array(4);
+  private eqR1 = new Float32Array(4);
+  private eqR2 = new Float32Array(4);
+
   private params: SynthParams = {
     osc1Wave: 'triangle',
     osc1Vol: 0.8,
@@ -140,6 +160,7 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     filterFreq: 6500,
     filterQ: 1.5,
     filterDrive: 0.1,
+    filterDriveType: 'tube',
     attack: 0.04,
     decay: 0.25,
     sustain: 0.65,
@@ -150,6 +171,11 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     lfoRate: 2.5,
     lfoDepth: 0.25,
     lfoTarget: 'cutoff',
+    eqEnabled: false,
+    eqLow: 0,
+    eqLowMid: 0,
+    eqHighMid: 0,
+    eqHigh: 0,
     gain: 0.7,
     pan: 0.0
   };
@@ -181,6 +207,8 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
       });
     }
 
+    this.updateEqCoefficients();
+
     this.port.onmessage = (e: MessageEvent) => {
       const data = e.data;
       if (!data) return;
@@ -198,6 +226,7 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
         case 'setParams':
           if (data.params) {
             Object.assign(this.params, data.params);
+            this.updateEqCoefficients();
             if (!this.params.noiseEnabled || this.params.noiseVol <= 0.0001) {
               for (let i = 0; i < this.maxVoices; i++) {
                 this.voices[i].b0 = 0;
@@ -209,6 +238,85 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
           break;
       }
     };
+  }
+
+  private updateEqCoefficients() {
+    if (!this.params.eqEnabled) {
+      this.eqAllBypassed = true;
+      return;
+    }
+
+    const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
+    const bands: { type: 'lowshelf' | 'peaking' | 'highshelf'; f0: number; Q: number; gainDb: number }[] = [
+      { type: 'lowshelf', f0: 100, Q: 1.0, gainDb: this.params.eqLow ?? 0 },
+      { type: 'peaking', f0: 500, Q: 1.0, gainDb: this.params.eqLowMid ?? 0 },
+      { type: 'peaking', f0: 2800, Q: 1.0, gainDb: this.params.eqHighMid ?? 0 },
+      { type: 'highshelf', f0: 10000, Q: 1.0, gainDb: this.params.eqHigh ?? 0 }
+    ];
+
+    let anyActive = false;
+    for (let i = 0; i < 4; i++) {
+      const b = bands[i];
+      if (Math.abs(b.gainDb) < 0.05) {
+        this.eqB0[i] = 1;
+        this.eqB1[i] = 0;
+        this.eqB2[i] = 0;
+        this.eqA1[i] = 0;
+        this.eqA2[i] = 0;
+        this.eqBypass[i] = true;
+      } else {
+        anyActive = true;
+        this.eqBypass[i] = false;
+        const A = Math.pow(10, b.gainDb / 40);
+        const w0 = (2 * Math.PI * Math.max(10, Math.min(sr * 0.49, b.f0))) / sr;
+        const cosW = Math.cos(w0);
+        const sinW = Math.sin(w0);
+
+        let b0 = 1, b1 = 0, b2 = 0, a0 = 1, a1 = 0, a2 = 0;
+
+        if (b.type === 'peaking') {
+          const alpha = sinW / (2 * b.Q);
+          b0 = 1 + alpha * A;
+          b1 = -2 * cosW;
+          b2 = 1 - alpha * A;
+          a0 = 1 + alpha / A;
+          a1 = -2 * cosW;
+          a2 = 1 - alpha / A;
+        } else if (b.type === 'lowshelf') {
+          const alpha = (sinW / 2) * Math.SQRT2;
+          const aPlus1 = A + 1;
+          const aMinus1 = A - 1;
+          const twoSqrtAlpha = 2 * Math.sqrt(A) * alpha;
+
+          b0 = A * (aPlus1 - aMinus1 * cosW + twoSqrtAlpha);
+          b1 = 2 * A * (aMinus1 - aPlus1 * cosW);
+          b2 = A * (aPlus1 - aMinus1 * cosW - twoSqrtAlpha);
+          a0 = aPlus1 + aMinus1 * cosW + twoSqrtAlpha;
+          a1 = -2 * (aMinus1 + aPlus1 * cosW);
+          a2 = aPlus1 + aMinus1 * cosW - twoSqrtAlpha;
+        } else if (b.type === 'highshelf') {
+          const alpha = (sinW / 2) * Math.SQRT2;
+          const aPlus1 = A + 1;
+          const aMinus1 = A - 1;
+          const twoSqrtAlpha = 2 * Math.sqrt(A) * alpha;
+
+          b0 = A * (aPlus1 + aMinus1 * cosW + twoSqrtAlpha);
+          b1 = -2 * A * (aMinus1 + aPlus1 * cosW);
+          b2 = A * (aPlus1 - aMinus1 * cosW - twoSqrtAlpha);
+          a0 = aPlus1 - aMinus1 * cosW + twoSqrtAlpha;
+          a1 = 2 * (aMinus1 - aPlus1 * cosW);
+          a2 = aPlus1 - aMinus1 * cosW - twoSqrtAlpha;
+        }
+
+        const invA0 = 1.0 / a0;
+        this.eqB0[i] = b0 * invA0;
+        this.eqB1[i] = b1 * invA0;
+        this.eqB2[i] = b2 * invA0;
+        this.eqA1[i] = a1 * invA0;
+        this.eqA2[i] = a2 * invA0;
+      }
+    }
+    this.eqAllBypassed = !anyActive;
   }
 
   private noteOn(midi: number, velocity: number, durationSeconds?: number, delaySamples?: number) {
@@ -560,6 +668,45 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
           }
         }
 
+        // 4.5. Etapa de Overdrive Analógico con Preservación de Graves y Ganancia Activa
+        if (this.params.filterDrive > 0.005) {
+          const drive = this.params.filterDrive;
+          const dType = this.params.filterDriveType || 'tube';
+          const preGain = 1.0 + drive * 2.8;
+          const s = voiceSample * preGain;
+          let sat = s;
+
+          if (dType === 'warm') {
+            // Saturación sutil analógica con armónicos impares suaves (no comprime en exceso ni aplasta el bajo)
+            if (s > 1.25) sat = 1.0;
+            else if (s < -1.25) sat = -1.0;
+            else sat = s - (s * s * s) * 0.2;
+          } else if (dType === 'tube') {
+            // Válvula triodo analógica: asimetría armónica cálida sin offset DC
+            if (s >= 0) {
+              sat = s / (1.0 + 0.45 * s);
+            } else {
+              const neg = -s;
+              sat = -neg / (1.0 + 0.7 * neg);
+            }
+          } else if (dType === 'tape') {
+            // Saturación de cinta magnética suave (Pade tanh simétrica)
+            const s2 = s * s;
+            sat = (s * (27.0 + s2)) / (27.0 + 9.0 * s2);
+          } else if (dType === 'fuzz') {
+            // Fuzz de germanio con garra y cuerpo armónico
+            sat = (1.35 * s) / Math.sqrt(1.0 + s * s * 0.75);
+          }
+
+          // Aumento real de volumen y presencia al subir Drive
+          const driveBoost = 1.0 + drive * 0.85;
+
+          // Anclaje de graves: mezcla el núcleo limpio fundamental para que el bajo no pierda cuerpo
+          const dryBassAnchor = 0.28 * (1.0 - drive * 0.4);
+          const wetSatMix = 1.0 - dryBassAnchor;
+          voiceSample = (sat * wetSatMix + voiceSample * dryBassAnchor) * driveBoost;
+        }
+
         // 5. Acumular en la mezcla estéreo
         const amp = voiceSample * voice.envLevel * voice.velocity;
         sampleSumL += amp;
@@ -571,9 +718,31 @@ export class PhosphorWorkletProcessor extends AudioWorkletProcessor {
         ? Math.max(0, 1.0 - lfoDepth * 0.5 * (1.0 - lfoVal))
         : 1.0;
 
-      outL[s] = sampleSumL * gainL * lfoAmpGain;
+      let finalL = sampleSumL * gainL * lfoAmpGain;
+      let finalR = sampleSumR * gainR * lfoAmpGain;
+
+      // 6. Ecualizador Gráfico Paramétrico de 4 Bandas (Direct Form II Transpuesto)
+      if (this.params.eqEnabled && !this.eqAllBypassed) {
+        for (let b = 0; b < 4; b++) {
+          if (this.eqBypass[b]) continue;
+          const b0 = this.eqB0[b], b1 = this.eqB1[b], b2 = this.eqB2[b];
+          const a1 = this.eqA1[b], a2 = this.eqA2[b];
+
+          const yL = b0 * finalL + this.eqL1[b];
+          this.eqL1[b] = b1 * finalL - a1 * yL + this.eqL2[b];
+          this.eqL2[b] = b2 * finalL - a2 * yL;
+          finalL = yL;
+
+          const yR = b0 * finalR + this.eqR1[b];
+          this.eqR1[b] = b1 * finalR - a1 * yR + this.eqR2[b];
+          this.eqR2[b] = b2 * finalR - a2 * yR;
+          finalR = yR;
+        }
+      }
+
+      outL[s] = finalL;
       if (outR !== outL) {
-        outR[s] = sampleSumR * gainR * lfoAmpGain;
+        outR[s] = finalR;
       }
     }
 

@@ -238,6 +238,7 @@ export interface ExportSessionMidiParams {
   patternChain?: PatternChainItem[];
   isPatternRepeatOn?: boolean;
   currentDrumPatternEdit?: number;
+  patternLengths?: number[];
   customPatterns?: PatternDef[];
   channels?: Record<string, any>;
   instrumentType?: string;
@@ -300,6 +301,7 @@ export function exportSessionToMidi(session: ExportSessionMidiParams, type: 'nor
       activeDrumKitId: session.activeDrumKitId,
       chordOctaveShift: session.chordOctaveShift,
       currentDrumPatternEdit: session.currentDrumPatternEdit,
+      patternLengths: session.patternLengths,
       styleMarkers: session.styleMarkers
     };
 
@@ -420,10 +422,13 @@ export function exportSessionToMidi(session: ExportSessionMidiParams, type: 'nor
         if (patternIdx < 0) return;
         const measureStartBeat = measureIdx * 4;
 
-        for (let stepIdx = 0; stepIdx < 16; stepIdx++) {
-          const stepBeat = measureStartBeat + (stepIdx * 0.25);
+        const patternLen = session.patternLengths?.[patternIdx] || 16;
+        const stepDuration = 4 / patternLen;
+
+        for (let stepIdx = 0; stepIdx < patternLen; stepIdx++) {
+          const stepBeat = measureStartBeat + (stepIdx * stepDuration);
           const time = tempoMap.beatToSeconds(stepBeat);
-          const duration = Math.max(0.05, Math.min(0.2, tempoMap.getDurationSeconds(stepBeat, 0.25)));
+          const duration = Math.max(0.05, Math.min(0.2, tempoMap.getDurationSeconds(stepBeat, stepDuration)));
 
           drumChannels.forEach(ch => {
             if (ch.muted) return;
@@ -446,6 +451,8 @@ export function exportSessionToMidi(session: ExportSessionMidiParams, type: 'nor
       // Repetición del patrón actual a lo largo de maxBeat
       const patternIdx = session.currentDrumPatternEdit || 0;
       const totalMeasures = Math.max(1, Math.ceil(maxBeat / 4));
+      const patternLen = session.patternLengths?.[patternIdx] || 16;
+      const stepDuration = 4 / patternLen;
       let hasActiveSteps = false;
 
       for (const ch of drumChannels) {
@@ -458,11 +465,11 @@ export function exportSessionToMidi(session: ExportSessionMidiParams, type: 'nor
       if (hasActiveSteps) {
         for (let m = 0; m < totalMeasures; m++) {
           const measureStartBeat = m * 4;
-          for (let stepIdx = 0; stepIdx < 16; stepIdx++) {
-            const stepBeat = measureStartBeat + (stepIdx * 0.25);
+          for (let stepIdx = 0; stepIdx < patternLen; stepIdx++) {
+            const stepBeat = measureStartBeat + (stepIdx * stepDuration);
             if (stepBeat >= maxBeat) break;
             const time = tempoMap.beatToSeconds(stepBeat);
-            const duration = Math.max(0.05, Math.min(0.2, tempoMap.getDurationSeconds(stepBeat, 0.25)));
+            const duration = Math.max(0.05, Math.min(0.2, tempoMap.getDurationSeconds(stepBeat, stepDuration)));
 
             drumChannels.forEach(ch => {
               if (ch.muted) return;
@@ -516,6 +523,7 @@ export function importMidiToSession(
   activeDrumKitId?: string;
   chordOctaveShift?: number;
   currentDrumPatternEdit?: number;
+  patternLengths?: number[];
   message: string;
 } {
   const midi = new Midi(midiData);
@@ -545,6 +553,7 @@ export function importMidiToSession(
           activeDrumKitId: state.activeDrumKitId,
           chordOctaveShift: state.chordOctaveShift,
           currentDrumPatternEdit: state.currentDrumPatternEdit,
+          patternLengths: state.patternLengths,
           message: 'Sesión de proyecto restaurada al 100% desde metadatos.'
         };
       } catch (e) {
