@@ -315,21 +315,23 @@ export const DrumSequencerView: React.FC = () => {
 
       {/* Grid del Secuenciador */}
       <div className="drum-rack">
-        {channelList.map((channel, idx) => (
-          <DrumChannelRow 
-            key={channel.id}
-            channel={channel}
-            channelIndex={idx}
-            isExpanded={expandedChannelId === channel.id}
-            onToggleExpand={() => handleToggleExpand(channel.id)}
-            onDragStartRow={handleDragStartRow}
-            onDragOverRow={handleDragOverRow}
-            onDropRow={handleDropRow}
-            onDragEndRow={handleDragEndRow}
-            isDragging={draggedIndex === idx}
-            isDragOver={dragOverIndex === idx && draggedIndex !== idx}
-          />
-        ))}
+        <div className="drum-channels-shelf">
+          {channelList.map((channel, idx) => (
+            <DrumChannelRow 
+              key={channel.id}
+              channel={channel}
+              channelIndex={idx}
+              isExpanded={expandedChannelId === channel.id}
+              onToggleExpand={() => handleToggleExpand(channel.id)}
+              onDragStartRow={handleDragStartRow}
+              onDragOverRow={handleDragOverRow}
+              onDropRow={handleDropRow}
+              onDragEndRow={handleDragEndRow}
+              isDragging={draggedIndex === idx}
+              isDragOver={dragOverIndex === idx && draggedIndex !== idx}
+            />
+          ))}
+        </div>
 
         {/* Cadena Visual de Patrones (Arranger) */}
         <PatternChainArranger />
