@@ -37,9 +37,16 @@ const DrumActivityLed: React.FC<{ channelColor: string; activePattern: any[] }> 
 
 const isStepDownbeat = (stepIdx: number, total: number) => {
   if (total <= 0) return false;
+  if (total === 16) return stepIdx % 4 === 0;
+  if (total === 12) return stepIdx % 3 === 0;
+  if (total === 14) return stepIdx % 2 === 0;
+  if (total === 15) return stepIdx % 3 === 0;
+  if (total === 10) return stepIdx % 2 === 0;
+  if (total === 8) return stepIdx % 2 === 0;
+  if (total === 24) return stepIdx % 6 === 0;
+  if (total === 32) return stepIdx % 8 === 0;
   if (total % 4 === 0) return stepIdx % (total / 4) === 0;
-  if (total % 2 === 0) return stepIdx % (total / 2) === 0;
-  return stepIdx === 0 || (total === 15 && stepIdx % 5 === 0);
+  return stepIdx === 0;
 };
 
 // Subcomponente aislado para la grilla de pasos dinámicos
@@ -53,9 +60,10 @@ const DrumStepsRow: React.FC<{
   const isPlaying = useSongStore(s => s.isPlaying);
   const playbackStep = useSongStore(s => s.playbackStep);
   const total = activePattern?.length || 16;
+  const stepsWidth = 12 + total * 30;
 
   return (
-    <div className="drum-steps" onMouseLeave={onStopDrawing} style={{ userSelect: 'none' }}>
+    <div className="drum-steps" onMouseLeave={onStopDrawing} style={{ width: `${stepsWidth}px`, userSelect: 'none' }}>
       {activePattern && activePattern.map((step, i) => {
         const isDownbeat = isStepDownbeat(i, total);
         const isPlayingThisStep = isPlaying && playbackStep === i;
@@ -88,10 +96,11 @@ const DrumVelocityRow: React.FC<{
   const isPlaying = useSongStore(s => s.isPlaying);
   const playbackStep = useSongStore(s => s.playbackStep);
   const total = activePattern?.length || 16;
+  const stepsWidth = 12 + total * 30;
 
   return (
     <div className="drum-velocity-panel">
-      <div className="velocity-editor" onMouseLeave={onStopDrawing}>
+      <div className="velocity-editor" onMouseLeave={onStopDrawing} style={{ width: `${stepsWidth}px` }}>
         {activePattern && activePattern.map((step, i) => {
           const isDownbeat = isStepDownbeat(i, total);
           return (
@@ -227,10 +236,11 @@ export const DrumChannelRow: React.FC<Props> = React.memo(({
   // Colores de la paleta
   const colors = ['var(--reposo)', 'var(--subdominante)', 'var(--tension)', 'var(--spicy)', 'var(--exotic)'];
   const channelColor = colors[channelIndex % colors.length];
-  const fullPattern = channel.patterns[currentDrumPatternEdit] || [];
+  const fullPattern = (channel.patterns && channel.patterns[currentDrumPatternEdit]) || [];
   const activePattern = Array.from({ length: currentPatternLength }).map((_, i) =>
     fullPattern[i] || { isActive: false, velocity: 0.8 }
   );
+  const channelRowWidth = 362 + currentPatternLength * 30;
 
   // Cargar lista de muestras por categorías
   const selectGroups: SelectGroup[] = DRUM_CATEGORIES.map(cat => ({
@@ -271,7 +281,10 @@ export const DrumChannelRow: React.FC<Props> = React.memo(({
   };
 
   return (
-    <div className={`drum-channel-container ${isExpanded ? 'expanded' : ''} ${isDragging ? 'dragging-channel' : ''} ${isDragOver ? 'drag-over-channel' : ''}`}>
+    <div 
+      className={`drum-channel-container ${isExpanded ? 'expanded' : ''} ${isDragging ? 'dragging-channel' : ''} ${isDragOver ? 'drag-over-channel' : ''}`}
+      style={{ width: `${channelRowWidth}px`, maxWidth: 'none' }}
+    >
       <div className="drum-channel-row">
         {/* Panel Izquierdo: Controles */}
         <div 

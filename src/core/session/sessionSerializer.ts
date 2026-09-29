@@ -301,6 +301,21 @@ export function deserializeSession(rawInput: unknown): { session: SessionV2; war
 
   // Si ya es un schemaVersion: 2 válido con campos completos
   if (parsedObj.schemaVersion === 2 && parsedObj.transport && parsedObj.tracks && parsedObj.harmony) {
+    if (parsedObj.drums) {
+      let drumChannels = parsedObj.drums.drumChannels;
+      if (!Array.isArray(drumChannels) || drumChannels.length === 0) {
+        if (drumChannels && typeof drumChannels === 'object' && Object.values(drumChannels).length > 0) {
+          parsedObj.drums.drumChannels = Object.values(drumChannels);
+        } else {
+          parsedObj.drums.drumChannels = DEFAULT_DRUM_CHANNELS;
+        }
+      }
+      if (!Array.isArray(parsedObj.drums.patternLengths)) {
+        parsedObj.drums.patternLengths = Array.from({ 
+          length: parsedObj.drums.drumChannels[0]?.patterns?.length || 8 
+        }).map(() => 16);
+      }
+    }
     // Normalizar synthSettings en todos los canales existentes para robustez total
     if (parsedObj.mixer?.channels) {
       Object.keys(parsedObj.mixer.channels).forEach((chId) => {

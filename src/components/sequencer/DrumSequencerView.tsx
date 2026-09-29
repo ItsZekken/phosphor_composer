@@ -12,6 +12,7 @@ import { Copy, ClipboardPaste, Repeat, Plus, Trash2, Eraser, Layers } from 'luci
 import { type DrumChannel } from '../../utils/typeDefinitions';
 
 import { useShallow } from 'zustand/react/shallow';
+import { DEFAULT_DRUM_CHANNELS } from '../../store/slices/drumSlice';
 
 export const DrumSequencerView: React.FC = () => {
   const { 
@@ -58,7 +59,14 @@ export const DrumSequencerView: React.FC = () => {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [patternContextMenu, setPatternContextMenu] = useState<{ x: number; y: number; index: number } | null>(null);
 
-  const totalPatterns = drumChannels[0]?.patterns?.length || 8;
+  const rawChannels = drumChannels;
+  const channelList: DrumChannel[] = (Array.isArray(rawChannels) && rawChannels.length > 0)
+    ? rawChannels
+    : (rawChannels && typeof rawChannels === 'object' && Object.values(rawChannels).length > 0
+      ? (Object.values(rawChannels) as DrumChannel[])
+      : DEFAULT_DRUM_CHANNELS);
+
+  const totalPatterns = channelList[0]?.patterns?.length || 8;
   const currentPatternLength = (patternLengths && patternLengths[currentDrumPatternEdit]) || 16;
 
   const PRESET_STEP_COUNTS = [
@@ -307,7 +315,7 @@ export const DrumSequencerView: React.FC = () => {
 
       {/* Grid del Secuenciador */}
       <div className="drum-rack">
-        {(Array.isArray(drumChannels) ? drumChannels : []).map((channel, idx) => (
+        {channelList.map((channel, idx) => (
           <DrumChannelRow 
             key={channel.id}
             channel={channel}

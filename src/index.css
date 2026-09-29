@@ -6611,28 +6611,6 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 
 
-/* Drum Sequencer CSS */
-.sequencer-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  background: var(--bg-primary);
-  overflow: hidden;
-}
-
-.add-channel-btn {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
-  padding: 0.3rem 0.8rem;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-family: inherit;
-  margin-left: 1rem;
-}
 
 .loader-title {
   font-weight: 600;
@@ -6850,7 +6828,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 .drum-channel-container {
-  width: fit-content;
+  width: max-content;
   max-width: none;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
@@ -6867,10 +6845,9 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .drum-channel-row {
   display: flex;
   height: 60px;
-  width: fit-content;
+  width: 100%;
   background: linear-gradient(180deg, #252030 0%, #1e1a26 100%);
   border-radius: 5px;
-  overflow: hidden;
 }
 
 .drum-channel-container.dragging-channel {
@@ -7553,8 +7530,9 @@ input[type="range"]::-webkit-slider-thumb:hover {
   box-shadow: inset 0 2px 10px rgba(0,0,0,0.5);
   justify-content: flex-start;
   align-items: center;
-  width: fit-content;
-  flex: none;
+  flex: 1;
+  border-top-right-radius: 5px;
+  border-bottom-right-radius: 5px;
 }
 
 .drum-step {

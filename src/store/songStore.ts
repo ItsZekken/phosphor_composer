@@ -90,6 +90,13 @@ export const useSongStore = create<SongStore>()(
         const activeTrack = session.tracks.find((t) => t.id === session.activeTrackId) || session.tracks[0];
         const activeMelodyNotes = activeTrack ? activeTrack.notes : [];
 
+        const rawDrumChannels = session.drums.drumChannels;
+        const normalizedDrumChannels = (Array.isArray(rawDrumChannels) && rawDrumChannels.length > 0)
+          ? rawDrumChannels
+          : (rawDrumChannels && typeof rawDrumChannels === 'object' && Object.values(rawDrumChannels).length > 0
+            ? (Object.values(rawDrumChannels) as any)
+            : DEFAULT_DRUM_CHANNELS);
+
         set({
           bpm: session.transport.bpm,
           tempoMarkers: session.transport.tempoMarkers || [],
@@ -110,8 +117,8 @@ export const useSongStore = create<SongStore>()(
           patternChain: session.drums.patternChain,
           isPatternRepeatOn: session.drums.isPatternRepeatOn,
           activeDrumKitId: session.drums.activeDrumKitId,
-          drumChannels: session.drums.drumChannels,
-          patternLengths: session.drums.patternLengths || Array.from({ length: session.drums.drumChannels[0]?.patterns?.length || 8 }).map(() => 16),
+          drumChannels: normalizedDrumChannels,
+          patternLengths: session.drums.patternLengths || Array.from({ length: normalizedDrumChannels[0]?.patterns?.length || 8 }).map(() => 16),
           drumTimelineViewport: session.drums.drumTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 },
           audioTracks: (session as any).audio?.tracks || DEFAULT_AUDIO_TRACKS,
           audioClips: (session as any).audio?.clips || [],
@@ -154,6 +161,7 @@ export const useSongStore = create<SongStore>()(
         pattern: state.pattern,
         chordOctaveShift: state.chordOctaveShift,
         drumChannels: state.drumChannels,
+        patternLengths: state.patternLengths,
         patternChain: state.patternChain,
         drumTimelineViewport: state.drumTimelineViewport,
         audioTracks: state.audioTracks,
