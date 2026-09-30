@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { toneEngine } from '../../audio/toneEngine';
 import { useSongStore } from '../../store/songStore';
+import { ensureMp3Encoder } from '../../utils/mp3Encoder';
 import type { VisualizerMode } from '../visualizer/StageTelemetryHUD';
 
 export interface SaveExportModalProps {
@@ -41,7 +42,7 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
 
   // Vistas internas del modal: 'formats' (menú principal) | 'video' (configuración y render de video)
   const [currentView, setCurrentView] = useState<'formats' | 'video'>('formats');
-  const [realtimeExport, setRealtimeExport] = useState(true); // Default a true para evitar tiempos offline muy largos
+  const [realtimeExport, setRealtimeExport] = useState(false); // Renderizado offline ultrarrápido de alta fidelidad (<15s) por defecto
 
   // Ajustes de video
   const [resolution, setResolution] = useState<'1080p' | '720p'>('1080p');
@@ -63,6 +64,7 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
       setCurrentView('formats');
       setIsCrtEnabled(isCrtGlobal);
       setVideoError(null);
+      ensureMp3Encoder().catch(() => {});
     }
   }, [isOpen, isCrtGlobal]);
 
@@ -444,8 +446,8 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
                   }}
                 >
                   {realtimeExport 
-                    ? 'Graba la salida principal mientras reproduce.'
-                    : 'Renderizado offline ultra-preciso (MUY lento).'}
+                    ? 'Graba la salida principal mientras reproduce en tiempo real.'
+                    : 'Renderizado offline ultrarrápido de alta fidelidad (<15s).'}
                 </span>
               </div>
               

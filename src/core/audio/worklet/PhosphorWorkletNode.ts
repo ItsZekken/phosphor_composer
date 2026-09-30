@@ -41,6 +41,17 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     this.lfoPhase = 0;
     this.lfoRandVal = 0;
 
+    this.activeVoiceIndices = new Int32Array(16);
+
+    this.osc1WaveCode = 3; // triangle
+    this.osc2WaveCode = 1; // sawtooth
+    this.subWaveCode = 0;  // sine
+    this.filterTypeCode = 0; // lowpass
+    this.driveTypeCode = 0;  // tube
+    this.noiseTypeCode = 0;  // white
+    this.lfoWaveCode = 0;    // sine
+    this.lfoTargetCode = 0;  // cutoff
+
     this.params = {
       osc1Wave: 'triangle',
       osc1Vol: 0.8,
@@ -81,11 +92,13 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
       lfoRate: 2.5,
       lfoDepth: 0.25,
       lfoTarget: 'cutoff',
+
       eqEnabled: false,
       eqLow: 0,
       eqLowMid: 0,
       eqHighMid: 0,
       eqHigh: 0,
+
       gain: 0.7,
       pan: 0.0
     };
@@ -102,6 +115,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     this.eqR1 = new Float32Array(4);
     this.eqR2 = new Float32Array(4);
 
+    this.updateParamCodes();
     this.updateEqCoefficients();
 
     for (let i = 0; i < this.maxVoices; i++) {
@@ -144,6 +158,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
         case 'setParams':
           if (data.params) {
             Object.assign(this.params, data.params);
+            this.updateParamCodes();
             this.updateEqCoefficients();
             if (!this.params.noiseEnabled || this.params.noiseVol <= 0.0001) {
               for (let i = 0; i < this.maxVoices; i++) {
@@ -156,6 +171,70 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
           break;
       }
     };
+  }
+
+  waveToCode(w) {
+    switch (w) {
+      case 'sine': return 0;
+      case 'saw':
+      case 'sawtooth': return 1;
+      case 'pulse':
+      case 'square': return 2;
+      case 'tri':
+      case 'triangle': return 3;
+      default: return 0;
+    }
+  }
+
+  filterToCode(t) {
+    switch (t) {
+      case 'lowpass': return 0;
+      case 'bandpass': return 1;
+      case 'highpass': return 2;
+      case 'notch': return 3;
+      default: return 0;
+    }
+  }
+
+  driveToCode(d) {
+    switch (d) {
+      case 'tube': return 0;
+      case 'tape': return 1;
+      case 'fuzz': return 2;
+      case 'warm': return 3;
+      default: return 0;
+    }
+  }
+
+  lfoWaveToCode(w) {
+    switch (w) {
+      case 'sine': return 0;
+      case 'sawtooth': return 1;
+      case 'square': return 2;
+      case 'triangle': return 3;
+      case 'random': return 4;
+      default: return 0;
+    }
+  }
+
+  lfoTargetToCode(t) {
+    switch (t) {
+      case 'cutoff': return 0;
+      case 'pitch': return 1;
+      case 'amp': return 2;
+      default: return 0;
+    }
+  }
+
+  updateParamCodes() {
+    this.osc1WaveCode = this.waveToCode(this.params.osc1Wave);
+    this.osc2WaveCode = this.waveToCode(this.params.osc2Wave);
+    this.subWaveCode = this.waveToCode(this.params.subWave);
+    this.filterTypeCode = this.filterToCode(this.params.filterType);
+    this.driveTypeCode = this.driveToCode(this.params.filterDriveType);
+    this.noiseTypeCode = this.params.noiseType === 'pink' ? 1 : 0;
+    this.lfoWaveCode = this.lfoWaveToCode(this.params.lfoWave);
+    this.lfoTargetCode = this.lfoTargetToCode(this.params.lfoTarget);
   }
 
   updateEqCoefficients() {
@@ -221,7 +300,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
           b0 = A * (aPlus1 + aMinus1 * cosW + twoSqrtAlpha);
           b1 = -2 * A * (aMinus1 + aPlus1 * cosW);
           b2 = A * (aPlus1 - aMinus1 * cosW - twoSqrtAlpha);
-          a0 = aPlus1 - aMinus1 * cosW + twoSqrtAlpha;
+          a0 = aPlus1 + aMinus1 * cosW + twoSqrtAlpha;
           a1 = 2 * (aMinus1 - aPlus1 * cosW);
           a2 = aPlus1 - aMinus1 * cosW - twoSqrtAlpha;
         }
@@ -295,12 +374,13 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
   noteOff(midi, delaySamples) {
     const releaseSample = delaySamples && delaySamples > 0 ? this.currentSample + Math.floor(delaySamples) : this.currentSample;
     for (let i = 0; i < this.maxVoices; i++) {
-      if (this.voices[i].active && this.voices[i].midi === midi && this.voices[i].envStage !== 'release' && this.voices[i].envStage !== 'idle') {
+      const v = this.voices[i];
+      if (v.active && v.midi === midi && v.envStage !== 'release' && v.envStage !== 'idle') {
         if (delaySamples && delaySamples > 0) {
-          this.voices[i].targetReleaseSample = releaseSample;
+          v.targetReleaseSample = releaseSample;
         } else {
-          this.voices[i].envStage = 'release';
-          this.voices[i].targetReleaseSample = -1;
+          v.envStage = 'release';
+          v.targetReleaseSample = -1;
         }
       }
     }
@@ -309,33 +389,31 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
   allNotesOff(delaySamples) {
     const releaseSample = delaySamples && delaySamples > 0 ? this.currentSample + Math.floor(delaySamples) : this.currentSample;
     for (let i = 0; i < this.maxVoices; i++) {
-      if (this.voices[i].active && this.voices[i].envStage !== 'idle') {
+      const v = this.voices[i];
+      if (v.active && v.envStage !== 'idle' && v.envStage !== 'release') {
         if (delaySamples && delaySamples > 0) {
-          this.voices[i].targetReleaseSample = releaseSample;
+          v.targetReleaseSample = releaseSample;
         } else {
-          this.voices[i].envStage = 'release';
-          this.voices[i].targetReleaseSample = -1;
+          v.envStage = 'release';
+          v.targetReleaseSample = -1;
         }
       }
     }
   }
 
-  sampleOsc(wave, phase, dt) {
-    switch (wave) {
-      case 'sine':
-        return Math.sin(phase * 2 * Math.PI);
-      case 'sawtooth':
-      case 'saw': {
+  sampleOsc(waveCode, phase, dt) {
+    switch (waveCode) {
+      case 0: // sine
+        return Math.sin(phase * 6.283185307179586);
+      case 1: { // sawtooth
         const raw = 2.0 * phase - 1.0;
         return raw - polyBlep(phase, dt);
       }
-      case 'square':
-      case 'pulse': {
+      case 2: { // square
         const raw = phase < 0.5 ? 1.0 : -1.0;
         return raw + polyBlep(phase, dt) - polyBlep((phase + 0.5) % 1.0, dt);
       }
-      case 'triangle':
-      case 'tri': {
+      case 3: { // triangle
         const saw = 2.0 * phase - 1.0 - polyBlep(phase, dt);
         return 2.0 * Math.abs(saw) - 1.0;
       }
@@ -369,20 +447,25 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     const osc2PitchFactor = this.params.osc2Enabled ? Math.pow(2, (this.params.osc2Octave * 12 + this.params.osc2Semi + this.params.osc2Detune / 100) / 12) : 1;
     const subPitchFactor = this.params.subEnabled ? Math.pow(2, (this.params.subOctave * 12) / 12) : 0.5;
 
-    const activeIndices = [];
+    let activeCount = 0;
+    const voices = this.voices;
+    const activeIndices = this.activeVoiceIndices;
     for (let v = 0; v < this.maxVoices; v++) {
-      if (this.voices[v].active && this.voices[v].envStage !== 'idle') {
-        activeIndices.push(v);
+      if (voices[v].active && voices[v].envStage !== 'idle') {
+        activeIndices[activeCount++] = v;
       }
     }
-    if (activeIndices.length === 0) {
+    if (activeCount === 0) {
       this.currentSample += blockSize;
       return true;
     }
 
     let a1 = 0, a2 = 0, a3 = 0, k = 1;
-    if (this.params.filterEnabled) {
-      const cutoffClamped = Math.max(20, Math.min(sr * 0.49, this.params.filterFreq));
+    const filterEnabled = this.params.filterEnabled;
+    const filterFreq = this.params.filterFreq;
+    const filterTypeCode = this.filterTypeCode;
+    if (filterEnabled) {
+      const cutoffClamped = Math.max(20, Math.min(sr * 0.49, filterFreq));
       const g = Math.tan((Math.PI * cutoffClamped) / sr);
       k = 1.0 / Math.max(0.1, this.params.filterQ);
       a1 = 1.0 / (1.0 + g * (g + k));
@@ -393,14 +476,40 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     const pan = Math.max(-1, Math.min(1, this.params.pan));
     const gainL = this.params.gain * (pan <= 0 ? 1 : 1 - pan);
     const gainR = this.params.gain * (pan >= 0 ? 1 : 1 + pan);
-    const activeCount = activeIndices.length;
 
     const isLfoActive = Boolean(this.params.lfoEnabled && (this.params.lfoDepth ?? 0) > 0.001);
-    const lfoRate = Math.max(0.1, Math.min(20, this.params.lfoRate ?? 2.5));
+    const lfoRate = Math.max(0.05, Math.min(30, this.params.lfoRate ?? 2.5));
     const lfoDepth = Math.max(0, Math.min(1, this.params.lfoDepth ?? 0.25));
-    const lfoTarget = this.params.lfoTarget || 'cutoff';
-    const lfoWave = this.params.lfoWave || 'sine';
+    const lfoTargetCode = this.lfoTargetCode;
+    const lfoWaveCode = this.lfoWaveCode;
     const lfoStep = lfoRate * dtBase;
+
+    const osc1Vol = this.params.osc1Vol;
+    const osc1WaveCode = this.osc1WaveCode;
+    const osc2Enabled = this.params.osc2Enabled && this.params.osc2Vol > 0.0001;
+    const osc2Vol = this.params.osc2Vol;
+    const osc2WaveCode = this.osc2WaveCode;
+    const subEnabled = this.params.subEnabled && this.params.subVol > 0.0001;
+    const subVol = this.params.subVol;
+    const subWaveCode = this.subWaveCode;
+    const noiseEnabled = this.params.noiseEnabled && this.params.noiseVol > 0.0001;
+    const noiseVol = this.params.noiseVol;
+    const isPinkNoise = this.noiseTypeCode === 1;
+
+    const filterDrive = this.params.filterDrive;
+    const filterDriveActive = filterDrive > 0.005;
+    const driveTypeCode = this.driveTypeCode;
+    const drivePreGain = 1.0 + filterDrive * 2.8;
+    const driveBoost = 1.0 + filterDrive * 0.85;
+    const dryBassAnchor = 0.28 * (1.0 - filterDrive * 0.4);
+    const wetSatMix = 1.0 - dryBassAnchor;
+
+    const eqEnabled = this.params.eqEnabled && !this.eqAllBypassed;
+    const eqBypass = this.eqBypass;
+    const eqB0 = this.eqB0, eqB1 = this.eqB1, eqB2 = this.eqB2;
+    const eqA1 = this.eqA1, eqA2 = this.eqA2;
+    const eqL1 = this.eqL1, eqL2 = this.eqL2;
+    const eqR1 = this.eqR1, eqR2 = this.eqR2;
 
     for (let s = 0; s < blockSize; s++) {
       this.currentSample++;
@@ -415,36 +524,34 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
           this.lfoRandVal = Math.random() * 2.0 - 1.0;
         }
 
-        switch (lfoWave) {
-          case 'triangle':
-          case 'tri':
+        switch (lfoWaveCode) {
+          case 3: // triangle
             lfoVal = 2.0 * Math.abs(2.0 * this.lfoPhase - 1.0) - 1.0;
             break;
-          case 'sawtooth':
-          case 'saw':
+          case 1: // sawtooth
             lfoVal = 1.0 - 2.0 * this.lfoPhase;
             break;
-          case 'square':
+          case 2: // square
             lfoVal = this.lfoPhase < 0.5 ? 1.0 : -1.0;
             break;
-          case 'random':
+          case 4: // random
             lfoVal = this.lfoRandVal;
             break;
-          case 'sine':
+          case 0: // sine
           default:
-            lfoVal = Math.sin(this.lfoPhase * 2.0 * Math.PI);
+            lfoVal = Math.sin(this.lfoPhase * 6.283185307179586);
             break;
         }
       }
 
-      const lfoPitchMult = (isLfoActive && lfoTarget === 'pitch')
+      const lfoPitchMult = (isLfoActive && lfoTargetCode === 1)
         ? (1.0 + lfoVal * lfoDepth * 0.086)
         : 1.0;
 
-      if (this.params.filterEnabled && isLfoActive && lfoTarget === 'cutoff') {
+      if (filterEnabled && isLfoActive && lfoTargetCode === 0) {
         if ((s & 3) === 0) {
           const modFactor = Math.pow(2.0, lfoVal * lfoDepth * 3.5);
-          const modCutoff = Math.max(20, Math.min(sr * 0.49, this.params.filterFreq * modFactor));
+          const modCutoff = Math.max(20, Math.min(sr * 0.49, filterFreq * modFactor));
           const g = Math.tan((Math.PI * modCutoff) / sr);
           a1 = 1.0 / (1.0 + g * (g + k));
           a2 = g * a1;
@@ -453,7 +560,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
       }
 
       for (let i = 0; i < activeCount; i++) {
-        const voice = this.voices[activeIndices[i]];
+        const voice = voices[activeIndices[i]];
         if (!voice.active || voice.envStage === 'idle') continue;
 
         if (voice.envStage === 'pending') {
@@ -512,78 +619,75 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
 
         const dt1 = voice.frequency * osc1PitchFactor * lfoPitchMult * dtBase;
         voice.phase1 = (voice.phase1 + dt1) % 1.0;
-        let voiceSample = this.sampleOsc(this.params.osc1Wave, voice.phase1, dt1) * this.params.osc1Vol;
+        let voiceSample = this.sampleOsc(osc1WaveCode, voice.phase1, dt1) * osc1Vol;
 
-        if (this.params.osc2Enabled && this.params.osc2Vol > 0.0001) {
+        if (osc2Enabled) {
           const dt2 = voice.frequency * osc2PitchFactor * lfoPitchMult * dtBase;
           voice.phase2 = (voice.phase2 + dt2) % 1.0;
-          voiceSample += this.sampleOsc(this.params.osc2Wave, voice.phase2, dt2) * this.params.osc2Vol;
+          voiceSample += this.sampleOsc(osc2WaveCode, voice.phase2, dt2) * osc2Vol;
         }
 
-        if (this.params.subEnabled && this.params.subVol > 0.0001) {
+        if (subEnabled) {
           const dtSub = voice.frequency * subPitchFactor * lfoPitchMult * dtBase;
           voice.phaseSub = (voice.phaseSub + dtSub) % 1.0;
-          voiceSample += this.sampleOsc(this.params.subWave || 'sine', voice.phaseSub, dtSub) * this.params.subVol;
+          voiceSample += this.sampleOsc(subWaveCode, voice.phaseSub, dtSub) * subVol;
         }
 
-        if (this.params.noiseEnabled && this.params.noiseVol > 0.0001) {
+        if (noiseEnabled) {
           const white = Math.random() * 2.0 - 1.0;
-          if (this.params.noiseType === 'pink') {
+          if (isPinkNoise) {
             voice.b0 = 0.99765 * voice.b0 + white * 0.0990460;
             voice.b1 = 0.96300 * voice.b1 + white * 0.2965164;
             voice.b2 = 0.57000 * voice.b2 + white * 1.0526913;
             const pink = voice.b0 + voice.b1 + voice.b2 + white * 0.1848;
-            voiceSample += pink * 0.18 * this.params.noiseVol;
+            voiceSample += pink * 0.18 * noiseVol;
           } else {
-            voiceSample += white * this.params.noiseVol;
+            voiceSample += white * noiseVol;
           }
         }
 
-        if (this.params.filterEnabled) {
+        if (filterEnabled) {
           const v0 = voiceSample;
           const v1 = a1 * voice.ic1eq + a2 * (v0 - voice.ic2eq);
           const v2 = voice.ic2eq + a2 * voice.ic1eq + a3 * (v0 - voice.ic2eq);
           voice.ic1eq = 2.0 * v1 - voice.ic1eq;
           voice.ic2eq = 2.0 * v2 - voice.ic2eq;
-          if (this.params.filterType === 'lowpass') {
-            voiceSample = v2;
-          } else if (this.params.filterType === 'bandpass') {
-            voiceSample = v1;
-          } else if (this.params.filterType === 'highpass') {
-            voiceSample = v0 - k * v1 - v2;
-          } else if (this.params.filterType === 'notch') {
-            voiceSample = v0 - k * v1;
+          switch (filterTypeCode) {
+            case 0: voiceSample = v2; break;
+            case 1: voiceSample = v1; break;
+            case 2: voiceSample = v0 - k * v1 - v2; break;
+            case 3: voiceSample = v0 - k * v1; break;
           }
         }
 
-        if (this.params.filterDrive > 0.005) {
-          const drive = this.params.filterDrive;
-          const dType = this.params.filterDriveType || 'tube';
-          const preGain = 1.0 + drive * 2.8;
-          const s = voiceSample * preGain;
-          let sat = s;
+        if (filterDriveActive) {
+          const sVal = voiceSample * drivePreGain;
+          let sat = sVal;
 
-          if (dType === 'warm') {
-            if (s > 1.25) sat = 1.0;
-            else if (s < -1.25) sat = -1.0;
-            else sat = s - (s * s * s) * 0.2;
-          } else if (dType === 'tube') {
-            if (s >= 0) {
-              sat = s / (1.0 + 0.45 * s);
-            } else {
-              const neg = -s;
-              sat = -neg / (1.0 + 0.7 * neg);
+          switch (driveTypeCode) {
+            case 0: // tube
+              if (sVal >= 0) {
+                sat = sVal / (1.0 + 0.45 * sVal);
+              } else {
+                const neg = -sVal;
+                sat = -neg / (1.0 + 0.7 * neg);
+              }
+              break;
+            case 1: { // tape
+              const s2 = sVal * sVal;
+              sat = (sVal * (27.0 + s2)) / (27.0 + 9.0 * s2);
+              break;
             }
-          } else if (dType === 'tape') {
-            const s2 = s * s;
-            sat = (s * (27.0 + s2)) / (27.0 + 9.0 * s2);
-          } else if (dType === 'fuzz') {
-            sat = (1.35 * s) / Math.sqrt(1.0 + s * s * 0.75);
+            case 2: // fuzz
+              sat = (1.35 * sVal) / Math.sqrt(1.0 + sVal * sVal * 0.75);
+              break;
+            case 3: // warm
+              if (sVal > 1.25) sat = 1.0;
+              else if (sVal < -1.25) sat = -1.0;
+              else sat = sVal - (sVal * sVal * sVal) * 0.2;
+              break;
           }
 
-          const driveBoost = 1.0 + drive * 0.85;
-          const dryBassAnchor = 0.28 * (1.0 - drive * 0.4);
-          const wetSatMix = 1.0 - dryBassAnchor;
           voiceSample = (sat * wetSatMix + voiceSample * dryBassAnchor) * driveBoost;
         }
 
@@ -592,18 +696,18 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
         sampleSumR += amp;
       }
 
-      const lfoAmpGain = (isLfoActive && lfoTarget === 'amp')
+      const lfoAmpGain = (isLfoActive && lfoTargetCode === 2)
         ? Math.max(0, 1.0 - lfoDepth * 0.5 * (1.0 - lfoVal))
         : 1.0;
 
       let finalL = sampleSumL * gainL * lfoAmpGain;
       let finalR = sampleSumR * gainR * lfoAmpGain;
 
-      if (this.params.eqEnabled && !this.eqAllBypassed) {
+      if (eqEnabled) {
         for (let b = 0; b < 4; b++) {
-          if (this.eqBypass[b]) continue;
-          const b0 = this.eqB0[b], b1 = this.eqB1[b], b2 = this.eqB2[b];
-          const a1 = this.eqA1[b], a2 = this.eqA2[b];
+          if (eqBypass[b]) continue;
+          const b0 = eqB0[b], b1 = eqB1[b], b2 = eqB2[b];
+          const a1 = eqA1[b], a2 = eqA2[b];
 
           const yL = b0 * finalL + this.eqL1[b];
           this.eqL1[b] = b1 * finalL - a1 * yL + this.eqL2[b];

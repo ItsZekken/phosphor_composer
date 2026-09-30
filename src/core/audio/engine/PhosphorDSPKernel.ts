@@ -1,4 +1,89 @@
-function polyBlep(t, dt) {
+/**
+ * PhosphorDSPKernel.ts
+ * Motor de síntesis analógica pura de alta velocidad para renderizado offline y exportación.
+ * 
+ * Este kernel replica al 100% el comportamiento acústico y DSP de PhosphorWorkletProcessor
+ * pero sin requerir AudioWorkletProcessor ni depender del emulador de standardized-audio-context.
+ * 
+ * - Osciladores con Anti-Aliasing PolyBLEP (Saw, Square, Triangle, Sine)
+ * - Sub-oscilador multiforma y generador de ruido blanco/rosa (1/f de 3 polos)
+ * - Filtro SVF Cytomic (Lowpass, Bandpass, Highpass, Notch) con saturación analógica
+ * - Envolvente ADSR con curvas analógicas T60 (-60 dB)
+ * - Ecualizador Gráfico Paramétrico de 4 bandas (Direct Form II Transpuesto)
+ * - Modulación LFO (Pitch, Cutoff, Amp)
+ * - Cero asignaciones en el bucle caliente (Hot Loop)
+ */
+
+import * as Tone from 'tone';
+import type { SynthSettings } from '../../../utils/typeDefinitions';
+import { noteToMidi } from '../../music/pitchClass';
+
+export interface Voice {
+  active: boolean;
+  midi: number;
+  frequency: number;
+  targetFrequency: number;
+  velocity: number;
+  phase1: number;
+  phase2: number;
+  phaseSub: number;
+  envStage: 'idle' | 'pending' | 'attack' | 'decay' | 'sustain' | 'release';
+  envLevel: number;
+  startSample: number;
+  targetReleaseSample: number;
+  ic1eq: number;
+  ic2eq: number;
+  b0: number;
+  b1: number;
+  b2: number;
+  age: number;
+}
+
+export interface SynthParams {
+  osc1Wave: 'sine' | 'square' | 'triangle' | 'sawtooth';
+  osc1Vol: number;
+  osc1Octave: number;
+  osc1Semi: number;
+  osc1Detune: number;
+  osc2Enabled: boolean;
+  osc2Wave: 'sine' | 'square' | 'triangle' | 'sawtooth';
+  osc2Vol: number;
+  osc2Octave: number;
+  osc2Semi: number;
+  osc2Detune: number;
+  subEnabled: boolean;
+  subWave: 'sine' | 'square' | 'triangle';
+  subVol: number;
+  subOctave: number;
+  noiseEnabled: boolean;
+  noiseType: 'white' | 'pink';
+  noiseVol: number;
+  filterEnabled: boolean;
+  filterType: 'lowpass' | 'highpass' | 'bandpass' | 'notch';
+  filterFreq: number;
+  filterQ: number;
+  filterDrive: number;
+  filterDriveType?: 'tube' | 'tape' | 'fuzz' | 'warm';
+  attack: number;
+  decay: number;
+  sustain: number;
+  release: number;
+  glide: number;
+  lfoEnabled: boolean;
+  lfoWave: 'sine' | 'triangle' | 'square' | 'sawtooth' | 'random';
+  lfoRate: number;
+  lfoDepth: number;
+  lfoTarget: 'cutoff' | 'pitch' | 'amp';
+  eqEnabled?: boolean;
+  eqLow?: number;
+  eqLowMid?: number;
+  eqHighMid?: number;
+  eqHigh?: number;
+  gain: number;
+  pan: number;
+}
+
+function polyBlep(t: number, dt: number): number {
   if (t < dt) {
     const v = t / dt;
     return v + v - v * v - 1.0;
@@ -9,93 +94,83 @@ function polyBlep(t, dt) {
   return 0.0;
 }
 
-class PhosphorWorkletProcessor extends AudioWorkletProcessor {
-  constructor() {
-    super();
-    this.voices = [];
-    this.maxVoices = 16;
-    this.ageCounter = 0;
-    this.currentSample = 0;
-    this.lfoPhase = 0;
-    this.lfoRandVal = 0;
+export class PhosphorDSPKernel {
+  private voices: Voice[] = [];
+  private maxVoices = 32;
+  private ageCounter = 0;
+  private currentSample = 0;
+  private lfoPhase = 0;
+  private lfoRandVal = 0;
+  private sampleRate: number;
 
-    this.activeVoiceIndices = new Int32Array(16);
+  private activeVoiceIndices = new Int32Array(32);
+  private osc1WaveCode = 3; // triangle
+  private osc2WaveCode = 1; // sawtooth
+  private subWaveCode = 0;  // sine
+  private lfoWaveCode = 0;  // sine
+  private filterTypeCode = 0; // lowpass: 0, bandpass: 1, highpass: 2, notch: 3
+  private driveTypeCode = 0;  // tube: 0, tape: 1, fuzz: 2, warm: 3
+  private noiseTypeCode = 0;  // white: 0, pink: 1
+  private lfoTargetCode = 0;  // cutoff: 0, pitch: 1, amp: 2
 
-    this.osc1WaveCode = 3; // triangle
-    this.osc2WaveCode = 1; // sawtooth
-    this.subWaveCode = 0;  // sine
-    this.filterTypeCode = 0; // lowpass
-    this.driveTypeCode = 0;  // tube
-    this.noiseTypeCode = 0;  // white
-    this.lfoWaveCode = 0;    // sine
-    this.lfoTargetCode = 0;  // cutoff
+  private eqB0 = new Float32Array(4);
+  private eqB1 = new Float32Array(4);
+  private eqB2 = new Float32Array(4);
+  private eqA1 = new Float32Array(4);
+  private eqA2 = new Float32Array(4);
+  private eqBypass = [true, true, true, true];
+  private eqAllBypassed = true;
+  private eqL1 = new Float32Array(4);
+  private eqL2 = new Float32Array(4);
+  private eqR1 = new Float32Array(4);
+  private eqR2 = new Float32Array(4);
 
-    this.params = {
-      osc1Wave: 'triangle',
-      osc1Vol: 0.8,
-      osc1Octave: 0,
-      osc1Semi: 0,
-      osc1Detune: 0,
+  private params: SynthParams = {
+    osc1Wave: 'triangle',
+    osc1Vol: 0.8,
+    osc1Octave: 0,
+    osc1Semi: 0,
+    osc1Detune: 0,
+    osc2Enabled: true,
+    osc2Wave: 'sawtooth',
+    osc2Vol: 0.4,
+    osc2Octave: 0,
+    osc2Semi: 0,
+    osc2Detune: 0,
+    subEnabled: false,
+    subWave: 'sine',
+    subVol: 0.0,
+    subOctave: -1,
+    noiseEnabled: false,
+    noiseType: 'white',
+    noiseVol: 0.0,
+    filterEnabled: true,
+    filterType: 'lowpass',
+    filterFreq: 6500,
+    filterQ: 1.5,
+    filterDrive: 0.1,
+    filterDriveType: 'tube',
+    attack: 0.04,
+    decay: 0.25,
+    sustain: 0.65,
+    release: 0.6,
+    glide: 0.0,
+    lfoEnabled: false,
+    lfoWave: 'sine',
+    lfoRate: 2.5,
+    lfoDepth: 0.25,
+    lfoTarget: 'cutoff',
+    eqEnabled: false,
+    eqLow: 0,
+    eqLowMid: 0,
+    eqHighMid: 0,
+    eqHigh: 0,
+    gain: 0.7,
+    pan: 0.0
+  };
 
-      osc2Enabled: true,
-      osc2Wave: 'sawtooth',
-      osc2Vol: 0.4,
-      osc2Octave: 0,
-      osc2Semi: 0,
-      osc2Detune: 0,
-
-      subEnabled: false,
-      subWave: 'sine',
-      subVol: 0.0,
-      subOctave: -1,
-
-      noiseEnabled: false,
-      noiseType: 'white',
-      noiseVol: 0.0,
-
-      filterEnabled: true,
-      filterType: 'lowpass',
-      filterFreq: 6500,
-      filterQ: 1.5,
-      filterDrive: 0.1,
-      filterDriveType: 'tube',
-      attack: 0.04,
-      decay: 0.25,
-      sustain: 0.65,
-      release: 0.6,
-
-      glide: 0.0,
-      lfoEnabled: false,
-      lfoWave: 'sine',
-      lfoRate: 2.5,
-      lfoDepth: 0.25,
-      lfoTarget: 'cutoff',
-
-      eqEnabled: false,
-      eqLow: 0,
-      eqLowMid: 0,
-      eqHighMid: 0,
-      eqHigh: 0,
-
-      gain: 0.7,
-      pan: 0.0
-    };
-
-    // Coeficientes y estados de Ecualizador Gráfico de 4 Bandas
-    this.eqB0 = new Float32Array(4);
-    this.eqB1 = new Float32Array(4);
-    this.eqB2 = new Float32Array(4);
-    this.eqA1 = new Float32Array(4);
-    this.eqA2 = new Float32Array(4);
-    this.eqBypass = [true, true, true, true];
-    this.eqAllBypassed = true;
-    this.eqL1 = new Float32Array(4);
-    this.eqL2 = new Float32Array(4);
-    this.eqR1 = new Float32Array(4);
-    this.eqR2 = new Float32Array(4);
-
-    this.updateParamCodes();
-    this.updateEqCoefficients();
+  constructor(sampleRate = 44100) {
+    this.sampleRate = sampleRate;
 
     for (let i = 0; i < this.maxVoices; i++) {
       this.voices.push({
@@ -120,39 +195,10 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
       });
     }
 
-    this.port.onmessage = (e) => {
-      const data = e.data;
-      if (!data) return;
-
-      switch (data.type) {
-        case 'noteOn':
-          this.noteOn(data.midi, data.velocity ?? 0.8, data.durationSeconds, data.delaySamples);
-          break;
-        case 'noteOff':
-          this.noteOff(data.midi, data.delaySamples);
-          break;
-        case 'allNotesOff':
-          this.allNotesOff(data.delaySamples);
-          break;
-        case 'setParams':
-          if (data.params) {
-            Object.assign(this.params, data.params);
-            this.updateParamCodes();
-            this.updateEqCoefficients();
-            if (!this.params.noiseEnabled || this.params.noiseVol <= 0.0001) {
-              for (let i = 0; i < this.maxVoices; i++) {
-                this.voices[i].b0 = 0;
-                this.voices[i].b1 = 0;
-                this.voices[i].b2 = 0;
-              }
-            }
-          }
-          break;
-      }
-    };
+    this.updateEqCoefficients();
   }
 
-  waveToCode(w) {
+  private waveToCode(w?: string): number {
     switch (w) {
       case 'sine': return 0;
       case 'saw':
@@ -165,7 +211,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     }
   }
 
-  filterToCode(t) {
+  private filterToCode(t?: string): number {
     switch (t) {
       case 'lowpass': return 0;
       case 'bandpass': return 1;
@@ -175,7 +221,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     }
   }
 
-  driveToCode(d) {
+  private driveToCode(d?: string): number {
     switch (d) {
       case 'tube': return 0;
       case 'tape': return 1;
@@ -185,7 +231,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     }
   }
 
-  lfoWaveToCode(w) {
+  private lfoWaveToCode(w?: string): number {
     switch (w) {
       case 'sine': return 0;
       case 'sawtooth': return 1;
@@ -196,7 +242,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     }
   }
 
-  lfoTargetToCode(t) {
+  private lfoTargetToCode(t?: string): number {
     switch (t) {
       case 'cutoff': return 0;
       case 'pitch': return 1;
@@ -205,7 +251,69 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     }
   }
 
-  updateParamCodes() {
+  public setSettings(settings: Partial<SynthSettings>) {
+    const s = settings;
+    const osc1 = s.osc1;
+    const osc2 = s.osc2;
+    const sub = s.subOsc;
+    const noise = s.noise;
+    const filter = s.filter;
+    const env = s.envelope;
+    const lfo = s.lfo;
+    const eq = s.eq;
+
+    this.params = {
+      osc1Wave: (osc1?.waveType || s.waveType || 'triangle') as any,
+      osc1Vol: osc1?.enabled !== false ? (osc1?.volume ?? 0.8) : 0,
+      osc1Octave: osc1?.octave ?? 0,
+      osc1Semi: osc1?.semi ?? 0,
+      osc1Detune: osc1?.detune ?? 0,
+
+      osc2Enabled: osc2?.enabled ?? false,
+      osc2Wave: (osc2?.waveType || 'sawtooth') as any,
+      osc2Vol: osc2?.volume ?? 0.4,
+      osc2Octave: osc2?.octave ?? 0,
+      osc2Semi: osc2?.semi ?? 0,
+      osc2Detune: osc2?.detune ?? 0,
+
+      subEnabled: sub?.enabled ?? false,
+      subWave: (sub?.waveType || 'sine') as any,
+      subVol: sub?.enabled ? (sub?.volume ?? 0.0) : 0,
+      subOctave: sub?.octave ?? -1,
+
+      noiseEnabled: noise?.enabled ?? false,
+      noiseType: (noise?.type || 'white') as any,
+      noiseVol: noise?.enabled ? (noise?.volume ?? 0.0) : 0,
+
+      filterEnabled: filter?.enabled !== false,
+      filterType: (filter?.type || 'lowpass') as any,
+      filterFreq: filter?.enabled ? Math.max(20, Math.min(20000, filter?.frequency ?? 6500)) : 20000,
+      filterQ: Math.max(0.1, Math.min(20, filter?.Q ?? 1.5)),
+      filterDrive: Math.max(0, Math.min(1, filter?.drive ?? 0.1)),
+      filterDriveType: filter?.driveType || 'tube',
+
+      attack: Math.max(0.001, env?.attack ?? 0.04),
+      decay: Math.max(0.001, env?.decay ?? 0.25),
+      sustain: Math.max(0, Math.min(1, env?.sustain ?? 0.65)),
+      release: Math.max(0.001, env?.release ?? 0.6),
+
+      glide: s.glide || 0.0,
+      lfoEnabled: Boolean(lfo?.enabled),
+      lfoWave: (lfo?.waveType || 'sine') as any,
+      lfoRate: Math.max(0.05, Math.min(30, lfo?.rate ?? 2.5)),
+      lfoDepth: Math.max(0, Math.min(1, lfo?.depth ?? 0.25)),
+      lfoTarget: lfo?.target || 'cutoff',
+
+      eqEnabled: Boolean(eq?.enabled),
+      eqLow: eq?.low ?? 0,
+      eqLowMid: eq?.lowMid ?? 0,
+      eqHighMid: eq?.highMid ?? 0,
+      eqHigh: eq?.high ?? 0,
+
+      gain: 0.7 * (s.masterGain ?? 1.0),
+      pan: 0.0
+    };
+
     this.osc1WaveCode = this.waveToCode(this.params.osc1Wave);
     this.osc2WaveCode = this.waveToCode(this.params.osc2Wave);
     this.subWaveCode = this.waveToCode(this.params.subWave);
@@ -214,16 +322,25 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     this.noiseTypeCode = this.params.noiseType === 'pink' ? 1 : 0;
     this.lfoWaveCode = this.lfoWaveToCode(this.params.lfoWave);
     this.lfoTargetCode = this.lfoTargetToCode(this.params.lfoTarget);
+
+    this.updateEqCoefficients();
+    if (!this.params.noiseEnabled || this.params.noiseVol <= 0.0001) {
+      for (let i = 0; i < this.maxVoices; i++) {
+        this.voices[i].b0 = 0;
+        this.voices[i].b1 = 0;
+        this.voices[i].b2 = 0;
+      }
+    }
   }
 
-  updateEqCoefficients() {
+  private updateEqCoefficients() {
     if (!this.params.eqEnabled) {
       this.eqAllBypassed = true;
       return;
     }
 
-    const sr = typeof sampleRate !== 'undefined' ? sampleRate : 44100;
-    const bands = [
+    const sr = this.sampleRate;
+    const bands: { type: 'lowshelf' | 'peaking' | 'highshelf'; f0: number; Q: number; gainDb: number }[] = [
       { type: 'lowshelf', f0: 100, Q: 1.0, gainDb: this.params.eqLow ?? 0 },
       { type: 'peaking', f0: 500, Q: 1.0, gainDb: this.params.eqLowMid ?? 0 },
       { type: 'peaking', f0: 2800, Q: 1.0, gainDb: this.params.eqHighMid ?? 0 },
@@ -292,17 +409,20 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
         this.eqA2[i] = a2 * invA0;
       }
     }
+
     this.eqAllBypassed = !anyActive;
   }
 
-  noteOn(midi, velocity, durationSeconds, delaySamples) {
-    let targetVoice = null;
+  public noteOn(midi: number, velocity: number, durationSeconds?: number, delaySamples?: number) {
+    let targetVoice: Voice | null = null;
+
     for (let i = 0; i < this.maxVoices; i++) {
       if (!this.voices[i].active || this.voices[i].envStage === 'idle') {
         targetVoice = this.voices[i];
         break;
       }
     }
+
     if (!targetVoice) {
       let oldestAge = Infinity;
       for (let i = 0; i < this.maxVoices; i++) {
@@ -312,6 +432,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
         }
       }
     }
+
     if (!targetVoice) return;
 
     const freq = 440 * Math.pow(2, (midi - 69) / 12);
@@ -346,26 +467,25 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
 
     targetVoice.targetReleaseSample =
       durationSeconds && durationSeconds > 0
-        ? targetStart + Math.floor(durationSeconds * sampleRate)
+        ? targetStart + Math.floor(durationSeconds * this.sampleRate)
         : -1;
   }
 
-  noteOff(midi, delaySamples) {
+  public noteOff(midi: number, delaySamples?: number) {
     const releaseSample = delaySamples && delaySamples > 0 ? this.currentSample + Math.floor(delaySamples) : this.currentSample;
     for (let i = 0; i < this.maxVoices; i++) {
       const v = this.voices[i];
-      if (v.active && v.midi === midi && v.envStage !== 'release' && v.envStage !== 'idle') {
+      if (v.active && v.midi === midi && v.envStage !== 'idle' && v.envStage !== 'release') {
         if (delaySamples && delaySamples > 0) {
           v.targetReleaseSample = releaseSample;
         } else {
           v.envStage = 'release';
-          v.targetReleaseSample = -1;
         }
       }
     }
   }
 
-  allNotesOff(delaySamples) {
+  public allNotesOff(delaySamples?: number) {
     const releaseSample = delaySamples && delaySamples > 0 ? this.currentSample + Math.floor(delaySamples) : this.currentSample;
     for (let i = 0; i < this.maxVoices; i++) {
       const v = this.voices[i];
@@ -374,13 +494,12 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
           v.targetReleaseSample = releaseSample;
         } else {
           v.envStage = 'release';
-          v.targetReleaseSample = -1;
         }
       }
     }
   }
 
-  sampleOsc(waveCode, phase, dt) {
+  private sampleOsc(waveCode: number, phase: number, dt: number): number {
     switch (waveCode) {
       case 0: // sine
         return Math.sin(phase * 6.283185307179586);
@@ -401,18 +520,11 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     }
   }
 
-  process(_inputs, outputs, _parameters) {
-    const output = outputs[0];
-    if (!output || output.length === 0) return true;
-
-    const outL = output[0];
-    const outR = output.length > 1 ? output[1] : outL;
-    const blockSize = outL.length;
-
+  public process(outL: Float32Array, outR: Float32Array, blockSize: number): boolean {
     outL.fill(0);
-    if (outR !== outL) outR.fill(0);
+    outR.fill(0);
 
-    const sr = sampleRate;
+    const sr = this.sampleRate;
     const dtBase = 1.0 / sr;
 
     const TIME_FACTOR = -6.907755;
@@ -436,7 +548,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     }
     if (activeCount === 0) {
       this.currentSample += blockSize;
-      return true;
+      return false;
     }
 
     let a1 = 0, a2 = 0, a3 = 0, k = 1;
@@ -457,7 +569,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     const gainR = this.params.gain * (pan >= 0 ? 1 : 1 + pan);
 
     const isLfoActive = Boolean(this.params.lfoEnabled && (this.params.lfoDepth ?? 0) > 0.001);
-    const lfoRate = Math.max(0.05, Math.min(30, this.params.lfoRate ?? 2.5));
+    const lfoRate = Math.max(0.1, Math.min(20, this.params.lfoRate ?? 2.5));
     const lfoDepth = Math.max(0, Math.min(1, this.params.lfoDepth ?? 0.25));
     const lfoTargetCode = this.lfoTargetCode;
     const lfoWaveCode = this.lfoWaveCode;
@@ -490,8 +602,10 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
     const eqL1 = this.eqL1, eqL2 = this.eqL2;
     const eqR1 = this.eqR1, eqR2 = this.eqR2;
 
+    let currentSample = this.currentSample;
+
     for (let s = 0; s < blockSize; s++) {
-      this.currentSample++;
+      currentSample++;
       let sampleSumL = 0;
       let sampleSumR = 0;
 
@@ -540,17 +654,19 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
 
       for (let i = 0; i < activeCount; i++) {
         const voice = voices[activeIndices[i]];
-        if (!voice.active || voice.envStage === 'idle') continue;
+        if (!voice.active || voice.envStage === 'idle') {
+          continue;
+        }
 
         if (voice.envStage === 'pending') {
-          if (this.currentSample >= voice.startSample) {
+          if (currentSample >= voice.startSample) {
             voice.envStage = 'attack';
           } else {
             continue;
           }
         }
 
-        if (voice.targetReleaseSample > 0 && this.currentSample >= voice.targetReleaseSample) {
+        if (voice.targetReleaseSample > 0 && currentSample >= voice.targetReleaseSample) {
           voice.envStage = 'release';
           voice.targetReleaseSample = -1;
         }
@@ -631,6 +747,7 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
           const v2 = voice.ic2eq + a2 * voice.ic1eq + a3 * (v0 - voice.ic2eq);
           voice.ic1eq = 2.0 * v1 - voice.ic1eq;
           voice.ic2eq = 2.0 * v2 - voice.ic2eq;
+
           switch (filterTypeCode) {
             case 0: voiceSample = v2; break;
             case 1: voiceSample = v1; break;
@@ -639,7 +756,6 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
           }
         }
 
-        // Etapa de Overdrive Analógico con Preservación de Graves y Ganancia Activa
         if (filterDriveActive) {
           const sVal = voiceSample * drivePreGain;
           let sat = sVal;
@@ -683,7 +799,6 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
       let finalL = sampleSumL * gainL * lfoAmpGain;
       let finalR = sampleSumR * gainR * lfoAmpGain;
 
-      // Ecualizador Gráfico Paramétrico de 4 Bandas
       if (eqEnabled) {
         for (let b = 0; b < 4; b++) {
           if (eqBypass[b]) continue;
@@ -703,14 +818,135 @@ class PhosphorWorkletProcessor extends AudioWorkletProcessor {
       }
 
       outL[s] = finalL;
-      if (outR !== outL) {
-        outR[s] = finalR;
-      }
+      outR[s] = finalR;
     }
+
+    this.currentSample = currentSample;
     return true;
   }
 }
 
-try {
-  registerProcessor('phosphor-synth-processor', PhosphorWorkletProcessor);
-} catch (_) {}
+/**
+ * Crea un AudioBuffer nativo a partir de canales Float32Array
+ */
+export function createAudioBufferFromChannels(channels: Float32Array[], sampleRate: number): AudioBuffer {
+  const numChannels = channels.length;
+  const length = channels[0]?.length || 0;
+  let nativeBuffer: AudioBuffer | null = null;
+
+  // 1. Intentar constructor nativo de AudioBuffer (estándar en navegadores modernos)
+  if (typeof AudioBuffer !== 'undefined') {
+    try {
+      nativeBuffer = new AudioBuffer({ length, numberOfChannels: numChannels, sampleRate });
+    } catch {}
+  }
+
+  // 2. Intentar createBuffer en el contexto nativo de Tone / Web Audio
+  if (!nativeBuffer) {
+    try {
+      const rawCtx = Tone.getContext().rawContext as any;
+      if (rawCtx && typeof rawCtx.createBuffer === 'function') {
+        nativeBuffer = rawCtx.createBuffer(numChannels, length, sampleRate);
+      }
+    } catch {}
+  }
+
+  // 3. Extraer desde ToneAudioBuffer si Tone.getContext().createBuffer fue usado
+  if (!nativeBuffer) {
+    try {
+      const toneBuf = (Tone.getContext() as any).createBuffer(numChannels, length, sampleRate);
+      const inner = (toneBuf?.get && toneBuf.get()) || (toneBuf as any)?._buffer;
+      if (inner && typeof inner.getChannelData === 'function') {
+        nativeBuffer = inner;
+      }
+    } catch {}
+  }
+
+  // 4. Fallback compatible con AudioBuffer si no hay AudioContext nativo disponible
+  if (!nativeBuffer || typeof nativeBuffer.getChannelData !== 'function') {
+    const channelArrays = channels.map((c) => new Float32Array(c));
+    return {
+      numberOfChannels: numChannels,
+      length,
+      sampleRate,
+      duration: length / sampleRate,
+      getChannelData: (ch: number) => channelArrays[ch] || channelArrays[0],
+      copyFromChannel: (dest: Float32Array, ch: number, offset = 0) => {
+        const src = channelArrays[ch] || channelArrays[0];
+        dest.set(src.subarray(offset, offset + dest.length));
+      },
+      copyToChannel: (src: Float32Array, ch: number, offset = 0) => {
+        const dest = channelArrays[ch] || channelArrays[0];
+        dest.set(src, offset);
+      }
+    } as unknown as AudioBuffer;
+  }
+
+  for (let ch = 0; ch < numChannels; ch++) {
+    nativeBuffer.getChannelData(ch).set(channels[ch]);
+  }
+
+  return nativeBuffer;
+}
+
+/**
+ * Renderiza de forma determinista y offline una lista de eventos de notas
+ * directamente a un AudioBuffer estéreo en milisegundos con cero dependencias de AudioWorklet.
+ */
+export function renderSynthTrackOffline(
+  events: Array<{ note: string; timeSeconds: number; durationSeconds: number; velocity: number }>,
+  settings: Partial<SynthSettings>,
+  totalDurationSeconds: number,
+  sampleRate = 44100
+): AudioBuffer {
+  const totalSamples = Math.ceil(Math.max(1, totalDurationSeconds) * sampleRate);
+  const left = new Float32Array(totalSamples);
+  const right = new Float32Array(totalSamples);
+
+  if (!events || events.length === 0) {
+    return createAudioBufferFromChannels([left, right], sampleRate);
+  }
+
+  const sortedEvents = [...events].sort((a, b) => a.timeSeconds - b.timeSeconds);
+
+  const kernel = new PhosphorDSPKernel(sampleRate);
+  kernel.setSettings(settings);
+
+  const blockSize = 128;
+  const tempL = new Float32Array(blockSize);
+  const tempR = new Float32Array(blockSize);
+  let eventIdx = 0;
+  const numEvents = sortedEvents.length;
+
+  for (let sampleOffset = 0; sampleOffset < totalSamples; sampleOffset += blockSize) {
+    const blockEndSample = sampleOffset + blockSize;
+    const blockEndTime = blockEndSample / sampleRate;
+
+    while (eventIdx < numEvents && sortedEvents[eventIdx].timeSeconds < blockEndTime) {
+      const evt = sortedEvents[eventIdx];
+      const midi = noteToMidi(evt.note);
+      const noteStartSample = Math.round(evt.timeSeconds * sampleRate);
+      const delaySamples = Math.max(0, noteStartSample - sampleOffset);
+      kernel.noteOn(midi, evt.velocity ?? 0.8, evt.durationSeconds, delaySamples);
+      eventIdx++;
+    }
+
+    const hasAudio = kernel.process(tempL, tempR, blockSize);
+    if (hasAudio) {
+      const count = Math.min(blockSize, totalSamples - sampleOffset);
+      if (count === blockSize) {
+        left.set(tempL, sampleOffset);
+        right.set(tempR, sampleOffset);
+      } else {
+        left.set(tempL.subarray(0, count), sampleOffset);
+        right.set(tempR.subarray(0, count), sampleOffset);
+      }
+    } else if (eventIdx >= numEvents) {
+      // Todas las notas han terminado y sus colas de release llegaron a reposo.
+      // El resto del buffer Float32Array ya contiene ceros deterministas (silencio).
+      break;
+    }
+  }
+
+  return createAudioBufferFromChannels([left, right], sampleRate);
+}

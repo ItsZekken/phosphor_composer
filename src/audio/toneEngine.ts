@@ -228,8 +228,34 @@ class ToneEngine {
       const state = useSongStore.getState();
       const chordNotes = Array.from(this.activePlaybackChordNotes.keys());
       const melodyNotes = Array.from(this.activePlaybackMelodyNotes.keys());
-      state.setActiveNotes(chordNotes);
-      state.setActiveMelodyNotes(melodyNotes);
+
+      const prevChords = state.activeNotes;
+      let chordsChanged = prevChords.length !== chordNotes.length;
+      if (!chordsChanged) {
+        for (let i = 0; i < chordNotes.length; i++) {
+          if (chordNotes[i] !== prevChords[i]) {
+            chordsChanged = true;
+            break;
+          }
+        }
+      }
+      if (chordsChanged) {
+        state.setActiveNotes(chordNotes);
+      }
+
+      const prevMelody = state.activeMelodyNotes;
+      let melodyChanged = prevMelody.length !== melodyNotes.length;
+      if (!melodyChanged) {
+        for (let i = 0; i < melodyNotes.length; i++) {
+          if (melodyNotes[i] !== prevMelody[i]) {
+            melodyChanged = true;
+            break;
+          }
+        }
+      }
+      if (melodyChanged) {
+        state.setActiveMelodyNotes(melodyNotes);
+      }
     });
   }
 

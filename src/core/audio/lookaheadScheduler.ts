@@ -64,7 +64,16 @@ export class LookaheadScheduler {
     const currentLiveBeat = wasRunning ? this.getLiveBeat() : this.currentBeat;
     const oldTempoMap = this.tempoMap;
 
-    this.scheduledEvents = events;
+    const sortedChords = events.chordEvents.slice().sort((a, b) => a.timeSeconds - b.timeSeconds);
+    const sortedTracks = events.trackEvents.slice().sort((a, b) => a.timeSeconds - b.timeSeconds);
+    const sortedDrums = events.drumEvents.slice().sort((a, b) => a.timeSeconds - b.timeSeconds);
+
+    this.scheduledEvents = {
+      ...events,
+      chordEvents: sortedChords,
+      trackEvents: sortedTracks,
+      drumEvents: sortedDrums
+    };
     this.tempoMap = createTempoMap(bpm, tempoMarkers);
     this.isLooping = isLooping;
     this.totalBeats = Math.max(1, events.totalBeats);
@@ -262,35 +271,35 @@ export class LookaheadScheduler {
       }
     }
 
-    // Programar acordes dentro de la ventana de audio
-    this.scheduledEvents.chordEvents.forEach((evt) => {
-      const times = this.getEventTriggerTimes(evt.timeSeconds, startSec, endSec, currentAudioSeconds, now);
-      times.forEach((triggerTime) => {
-        try {
-          this.callbacks.onTriggerChord(evt, triggerTime);
-        } catch (_) {}
-      });
-    });
+    // Programar acordes dentro de la ventana de audio (O(log N) con cero asignaciones)
+    this.dispatchEventsInRange(
+      this.scheduledEvents.chordEvents,
+      startSec,
+      endSec,
+      currentAudioSeconds,
+      now,
+      this.callbacks.onTriggerChord
+    );
 
-    // Programar pistas melódicas del Piano Roll
-    this.scheduledEvents.trackEvents.forEach((evt) => {
-      const times = this.getEventTriggerTimes(evt.timeSeconds, startSec, endSec, currentAudioSeconds, now);
-      times.forEach((triggerTime) => {
-        try {
-          this.callbacks.onTriggerTrack(evt, triggerTime);
-        } catch (_) {}
-      });
-    });
+    // Programar pistas melódicas del Piano Roll (O(log N) con cero asignaciones)
+    this.dispatchEventsInRange(
+      this.scheduledEvents.trackEvents,
+      startSec,
+      endSec,
+      currentAudioSeconds,
+      now,
+      this.callbacks.onTriggerTrack
+    );
 
-    // Programar batería
-    this.scheduledEvents.drumEvents.forEach((evt) => {
-      const times = this.getEventTriggerTimes(evt.timeSeconds, startSec, endSec, currentAudioSeconds, now);
-      times.forEach((triggerTime) => {
-        try {
-          this.callbacks.onTriggerDrum(evt, triggerTime);
-        } catch (_) {}
-      });
-    });
+    // Programar batería (O(log N) con cero asignaciones)
+    this.dispatchEventsInRange(
+      this.scheduledEvents.drumEvents,
+      startSec,
+      endSec,
+      currentAudioSeconds,
+      now,
+      this.callbacks.onTriggerDrum
+    );
 
     // Programar metrónomo en fase exacta con la métrica y tempo
     if (this.isMetronomeActive && this.callbacks.onTriggerMetronome) {
@@ -301,27 +310,27 @@ export class LookaheadScheduler {
 
       const firstStep = Math.floor((startBeat - 0.001) / stepBeats);
       const lastStep = Math.ceil((endBeat + 0.001) / stepBeats);
+      const L = this.totalDurationSeconds;
 
       for (let s = firstStep; s <= lastStep; s++) {
         const clickBeat = s * stepBeats;
         if (clickBeat < 0) continue;
         const clickSec = this.tempoMap.beatToSeconds(clickBeat);
-        const times = this.getEventTriggerTimes(clickSec, startSec, endSec, currentAudioSeconds, now);
 
-        if (times.length > 0) {
-          const isMeasureStart = Math.abs(clickBeat % beatsPerMeasure) < 0.001 || Math.abs((clickBeat % beatsPerMeasure) - beatsPerMeasure) < 0.001;
-          const isBeat = Math.abs(clickBeat % 1) < 0.001 || Math.abs((clickBeat % 1) - 1) < 0.001;
+        const isMeasureStart = Math.abs(clickBeat % beatsPerMeasure) < 0.001 || Math.abs((clickBeat % beatsPerMeasure) - beatsPerMeasure) < 0.001;
+        const isBeat = Math.abs(clickBeat % 1) < 0.001 || Math.abs((clickBeat % 1) - 1) < 0.001;
+        const freq = isMeasureStart ? 1200 : isBeat ? 800 : 400;
+        const volumeFactor = isMeasureStart || isBeat ? 1.0 : 0.5;
 
-          let freq = 400;
-          if (isMeasureStart) {
-            freq = 1200;
-          } else if (isBeat) {
-            freq = 800;
+        if (clickSec >= startSec && clickSec < endSec) {
+          const triggerTime = Math.max(now, now + (clickSec - currentAudioSeconds));
+          this.callbacks.onTriggerMetronome(freq, volumeFactor, triggerTime);
+        } else if (this.isLooping && L > 0 && endSec > L) {
+          const nextCycleSec = clickSec + L;
+          if (nextCycleSec >= startSec && nextCycleSec < endSec) {
+            const triggerTime = Math.max(now, now + (nextCycleSec - currentAudioSeconds));
+            this.callbacks.onTriggerMetronome(freq, volumeFactor, triggerTime);
           }
-          const volumeFactor = isMeasureStart || isBeat ? 1.0 : 0.5;
-          times.forEach((triggerTime) => {
-            this.callbacks.onTriggerMetronome!(freq, volumeFactor, triggerTime);
-          });
         }
       }
     }
@@ -329,31 +338,52 @@ export class LookaheadScheduler {
     this.nextScheduledSeconds = endSec;
   }
 
-  private getEventTriggerTimes(
-    evtSeconds: number,
+  private dispatchEventsInRange<T extends { timeSeconds: number }>(
+    events: T[],
     startSec: number,
     endSec: number,
     currentAudioSeconds: number,
-    now: number
-  ): number[] {
-    const triggerTimes: number[] = [];
+    now: number,
+    callback: (evt: T, triggerTime: number) => void
+  ) {
+    if (!events || events.length === 0) return;
+    const len = events.length;
     const L = this.totalDurationSeconds;
 
-    // 1. Ocurrencia en el ciclo actual
-    if (evtSeconds >= startSec && evtSeconds < endSec) {
-      const timeOffset = evtSeconds - currentAudioSeconds;
-      triggerTimes.push(Math.max(now, now + timeOffset));
-    }
-
-    // 2. Ocurrencia en el siguiente ciclo si la ventana sobrepasa la duración del bucle
-    if (this.isLooping && L > 0 && endSec > L) {
-      const nextCycleSeconds = evtSeconds + L;
-      if (nextCycleSeconds >= startSec && nextCycleSeconds < endSec) {
-        const timeOffset = nextCycleSeconds - currentAudioSeconds;
-        triggerTimes.push(Math.max(now, now + timeOffset));
+    // Búsqueda binaria O(log N) del primer evento dentro de [startSec, endSec)
+    let low = 0;
+    let high = len;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (events[mid].timeSeconds < startSec) {
+        low = mid + 1;
+      } else {
+        high = mid;
       }
     }
 
-    return triggerTimes;
+    for (let i = low; i < len; i++) {
+      const evt = events[i];
+      if (evt.timeSeconds >= endSec) break;
+      const timeOffset = evt.timeSeconds - currentAudioSeconds;
+      const triggerTime = Math.max(now, now + timeOffset);
+      try {
+        callback(evt, triggerTime);
+      } catch (_) {}
+    }
+
+    // 2. Loop wrap: si el horizonte sobrepasa el final de la canción
+    if (this.isLooping && L > 0 && endSec > L) {
+      const wrapEnd = endSec - L;
+      for (let i = 0; i < len; i++) {
+        const evt = events[i];
+        if (evt.timeSeconds >= wrapEnd) break;
+        const timeOffset = evt.timeSeconds + L - currentAudioSeconds;
+        const triggerTime = Math.max(now, now + timeOffset);
+        try {
+          callback(evt, triggerTime);
+        } catch (_) {}
+      }
+    }
   }
 }

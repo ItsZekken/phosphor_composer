@@ -40,7 +40,7 @@ export interface Mp3WorkerEncodeOptions extends Mp3EncoderOptions {
 
 let isMp3EncoderRegistered = false;
 
-async function ensureMp3Encoder(): Promise<void> {
+export async function ensureMp3Encoder(): Promise<void> {
   if (isMp3EncoderRegistered) return;
   try {
     const canNative = await canEncodeAudio('mp3');
@@ -159,10 +159,10 @@ export async function audioBufferToMp3BlobAsync(
     });
     output.addAudioTrack(audioSource);
 
-    // CRÍTICO: Timeout de 3s para evitar hang infinito en Vite dev mode
+    // Timeout de seguridad de 20s para permitir compilación de Wasm en dev o CPUs lentas sin caer innecesariamente en LAME JS
     const startPromise = output.start();
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('timeout')), 3000)
+      setTimeout(() => reject(new Error('timeout')), 20000)
     );
     await Promise.race([startPromise, timeoutPromise]);
     
