@@ -4,46 +4,16 @@ import { useShallow } from 'zustand/react/shallow';
 import type { ChordSuggestion } from '../../utils/typeDefinitions';
 import type { PaletteMode } from '../../store/songStore';
 import { toneEngine } from '../../audio/toneEngine';
-import { NOTE_CLASSES, getDiatonicChords, getChromaticDegreePalette } from '../../core/music';
+import { getDiatonicChords, getChromaticDegreePalette } from '../../core/music';
 import type { NoteClass, ScaleType } from '../../utils/typeDefinitions';
 import { CircleFifthsView } from './CircleFifthsView';
 import { CadencesView } from './CadencesView';
 import { HarmonicFlowView } from './HarmonicFlowView';
 import { ChordBuilderView } from './ChordBuilderView';
-import { LayoutGrid, GitFork, Sliders, Disc, Music } from 'lucide-react';
+import { getChordRole } from './chordRoleUtils';
+import { LayoutGrid, GitFork, Sliders, Disc, Music, Plus } from 'lucide-react';
 
 // ------- Helpers -------
-
-/** Función hash del chord a color de función armónica */
-export function getChordRole(chord: string, key: NoteClass, _scale: ScaleType): 'reposo' | 'tension' | 'subdominante' | 'spicy' | 'exotic' {
-  const NOTE_IDX = NOTE_CLASSES;
-  const match = chord.match(/^([A-G]#?)(m|maj7|min7|7|maj|min|dim|aug|m7b5|sus4|sus2|6|m6|add9)?$/);
-  if (!match) return 'spicy';
-  const rootNote = match[1] as NoteClass;
-  const type = match[2] || '';
-
-  const rootVal = NOTE_IDX.indexOf(rootNote);
-  const keyVal = NOTE_IDX.indexOf(key);
-  const interval = ((rootVal - keyVal) + 12) % 12;
-
-  // Basado en grados clásicos de la escala mayor
-  const roleMap: Record<number, 'reposo' | 'tension' | 'subdominante' | 'spicy' | 'exotic'> = {
-    0: 'reposo',     // I
-    2: 'subdominante', // II
-    4: 'reposo',     // III
-    5: 'subdominante', // IV
-    7: 'tension',    // V
-    9: 'reposo',     // VI
-    11: 'tension',   // VII
-  };
-
-  // Si es disminuido, aumentado o m7b5 → más spicy
-  if (type === 'dim' || type === 'aug' || type === 'm7b5') return 'spicy';
-
-  const baseRole = roleMap[interval];
-  if (!baseRole) return 'exotic'; // nota fuera de la escala → exotic
-  return baseRole;
-}
 
 const ROLE_CONFIG = {
   reposo:       { label: 'Reposo',       color: 'var(--role-reposo)',       glow: 'var(--glow-reposo)' },
@@ -98,14 +68,27 @@ interface ChordCardProps {
   probability?: number;
   role: 'reposo' | 'tension' | 'subdominante' | 'spicy' | 'exotic';
   small?: boolean;
+  onQuickAppend?: (chord: string) => void;
 }
 
-const ChordCard: React.FC<ChordCardProps> = ({ chord, probability = 0, role, small }) => {
+const ChordCard: React.FC<ChordCardProps> = ({
+  chord,
+  probability = 0,
+  role,
+  small,
+  onQuickAppend
+}) => {
   const draggingChord = useSongStore(state => state.draggingChord);
   const setDraggingChord = useSongStore(state => state.setDraggingChord);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return; // solo click izquierdo
+    if (e.shiftKey && onQuickAppend) {
+      e.preventDefault();
+      e.stopPropagation();
+      onQuickAppend(chord);
+      return;
+    }
     toneEngine.playChordPreviewStart(chord);
     setDraggingChord(chord);
   };
@@ -147,8 +130,24 @@ const ChordCard: React.FC<ChordCardProps> = ({ chord, probability = 0, role, sma
       onMouseDown={handleMouseDown}
       onMouseEnter={handleMouseEnter}
       onTouchStart={handleTouchStart}
-      title={`${chord} · Desliza el dedo sobre los acordes para escuchar. Arrastra fuera de la paleta a la línea de tiempo para añadir`}
+      title={`${chord} · Click y desliza para audición · Arrastra al timeline o Shift+Click / (+) para añadir al final`}
     >
+      {onQuickAppend && (
+        <button
+          type="button"
+          className="chord-card-quick-add"
+          onMouseDown={(e) => {
+            e.stopPropagation();
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onQuickAppend(chord);
+          }}
+          title={`Añadir ${chord} al final de la progresión`}
+        >
+          <Plus size={10} strokeWidth={2.5} />
+        </button>
+      )}
       <span className="chord-matrix-name">{chord}</span>
       {probability > 0.02 && (
         <span className="chord-matrix-pct" style={{ color: '#fff', opacity: 0.85 }}>
@@ -172,9 +171,15 @@ interface MatrixViewProps {
   key_: NoteClass;
   scale: ScaleType;
   suggestions: ChordSuggestion[];
+  onQuickAppend: (chord: string) => void;
 }
 
-const MatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggestions }) => {
+const MatrixView: React.FC<MatrixViewProps> = ({
+  key_,
+  scale,
+  suggestions,
+  onQuickAppend
+}) => {
   const matrixMode = useSongStore(state => state.matrixMode);
   const setMatrixMode = useSongStore(state => state.setMatrixMode);
 
@@ -259,6 +264,7 @@ const MatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggestions }) => 
                   probability={prob}
                   role={role}
                   small={row.suffix !== ''}
+                  onQuickAppend={onQuickAppend}
                 />
               );
             })}
@@ -271,7 +277,12 @@ const MatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggestions }) => 
 
 // ------- Transposed Matrix View (Móvil: Grados Verticales, Variaciones Horizontales sin Divisiones) -------
 
-const TransposedMatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggestions }) => {
+const TransposedMatrixView: React.FC<MatrixViewProps> = ({
+  key_,
+  scale,
+  suggestions,
+  onQuickAppend
+}) => {
   const matrixMode = useSongStore(state => state.matrixMode);
   const setMatrixMode = useSongStore(state => state.setMatrixMode);
 
@@ -354,6 +365,7 @@ const TransposedMatrixView: React.FC<MatrixViewProps> = ({ key_, scale, suggesti
                   probability={prob}
                   role={role}
                   small={row.suffix !== ''}
+                  onQuickAppend={onQuickAppend}
                 />
               );
             })}
@@ -400,6 +412,103 @@ export const ChordPalette: React.FC = () => {
   const [isMouseOutside, setIsMouseOutside] = React.useState(false);
   const [mousePos, setMousePos] = React.useState({ x: 0, y: 0 });
   const [touchPos, setTouchPos] = useState<{ x: number; y: number } | null>(null);
+  const isPlaying = useSongStore(state => state.isPlaying);
+  const matrixMode = useSongStore(state => state.matrixMode);
+  const paletteRef = React.useRef<HTMLDivElement | null>(null);
+
+  const sortedChordBlocks = useMemo(() => {
+    return [...(chordBlocks || [])].sort((a, b) => a.startBeat - b.startBeat);
+  }, [chordBlocks]);
+
+  // Highlight imperativo por RAF + búsqueda binaria O(log N) sin setInterval ni re-renders React
+  useEffect(() => {
+    const container = paletteRef.current;
+    if (!container) return;
+
+    const cardGroups = new Map<string, HTMLElement[]>();
+    const cardNodes = container.querySelectorAll<HTMLElement>('.chord-card-matrix[data-chord]');
+    cardNodes.forEach((el) => {
+      const ch = el.dataset.chord;
+      if (!ch) return;
+      let list = cardGroups.get(ch);
+      if (!list) {
+        list = [];
+        cardGroups.set(ch, list);
+      }
+      list.push(el);
+    });
+
+    let activeChord: string | null = null;
+    const setHighlight = (nextChord: string | null) => {
+      if (nextChord === activeChord) return;
+      if (activeChord) {
+        const prevEls = cardGroups.get(activeChord);
+        if (prevEls) {
+          for (let i = 0; i < prevEls.length; i++) prevEls[i].classList.remove('playing-match');
+        }
+      }
+      activeChord = nextChord;
+      if (activeChord) {
+        const nextEls = cardGroups.get(activeChord);
+        if (nextEls) {
+          for (let i = 0; i < nextEls.length; i++) nextEls[i].classList.add('playing-match');
+        }
+      }
+    };
+
+    if (!isPlaying || paletteMode !== 'matrix' || sortedChordBlocks.length === 0) {
+      setHighlight(null);
+      return;
+    }
+
+    let animId = 0;
+    const findChordAtBeat = (beat: number): string | null => {
+      const blocks = sortedChordBlocks;
+      let lo = 0;
+      let hi = blocks.length - 1;
+      let candidateIdx = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >>> 1;
+        if (blocks[mid].startBeat <= beat) {
+          candidateIdx = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      if (candidateIdx >= 0) {
+        const blk = blocks[candidateIdx];
+        if (beat >= blk.startBeat && beat < blk.startBeat + blk.durationBeats) {
+          return blk.chord;
+        }
+      }
+      return null;
+    };
+
+    const tick = () => {
+      const beat = toneEngine.getLiveBeat();
+      setHighlight(findChordAtBeat(beat));
+      animId = requestAnimationFrame(tick);
+    };
+
+    animId = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(animId);
+      setHighlight(null);
+    };
+  }, [isPlaying, paletteMode, matrixMode, key, scale, sortedChordBlocks]);
+
+  const handleQuickAppend = React.useCallback((chord: string) => {
+    const state = useSongStore.getState();
+    const blocks = state.chordBlocks || [];
+    const beatsPerMeasure = state.timeSignature === '3/4' ? 3 : state.timeSignature === '6/8' ? 6 : 4;
+    const sorted = [...blocks].sort((a, b) => a.startBeat - b.startBeat);
+    const lastBlock = sorted[sorted.length - 1];
+    const nextBeat = lastBlock ? lastBlock.startBeat + lastBlock.durationBeats : 0;
+    const duration = lastBlock ? lastBlock.durationBeats : beatsPerMeasure;
+    state.addChordBlock(chord, nextBeat, duration);
+    toneEngine.playChordPreview(chord, state.chordOctaveShift || 0);
+  }, []);
 
   const lastHoveredTouchChordRef = React.useRef<string | null>(null);
   const initialDragChordRef = React.useRef<string | null>(null);
@@ -515,6 +624,7 @@ export const ChordPalette: React.FC = () => {
 
   return (
     <div 
+      ref={paletteRef}
       className="chord-palette"
       onMouseLeave={() => {
         if (draggingChord) {
@@ -558,10 +668,20 @@ export const ChordPalette: React.FC = () => {
         {paletteMode === 'matrix' && (
           <>
             <div className="desktop-matrix-container">
-              <MatrixView key_={key} scale={scale} suggestions={chordSuggestions} />
+              <MatrixView
+                key_={key}
+                scale={scale}
+                suggestions={chordSuggestions}
+                onQuickAppend={handleQuickAppend}
+              />
             </div>
             <div className="mobile-transposed-matrix-container">
-              <TransposedMatrixView key_={key} scale={scale} suggestions={chordSuggestions} />
+              <TransposedMatrixView
+                key_={key}
+                scale={scale}
+                suggestions={chordSuggestions}
+                onQuickAppend={handleQuickAppend}
+              />
             </div>
           </>
         )}

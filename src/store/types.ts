@@ -23,6 +23,7 @@ import type { PatternDef } from '../patterns/patternTypes';
 
 export type PaletteMode = 'matrix' | 'alchemy' | 'builder' | 'fifths' | 'cadences';
 export type MatrixMode = 'diatonic' | 'chromatic';
+export type PianoRollGridSnap = '1' | '1/2' | '1/3' | '1/4' | '1/6' | '1/8' | '1/12' | '1/16' | 'off';
 
 export interface TransportState {
   bpm: number;
@@ -80,7 +81,7 @@ export interface HarmonyState {
   chordBlocks: ChordBlock[];
   selectedChordId: string | null;
   selectedChordIds: string[];
-  chordGridSnap: '1' | '1/2' | '1/4';
+  chordGridSnap: '1' | '1/2' | '1/4' | 'off';
   chordClipboard: ChordBlock[];
   chordTimelineViewport: { scrollLeft: number; zoomLevel: number };
   chordSuggestions: ChordSuggestion[];
@@ -99,12 +100,17 @@ export interface HarmonyState {
 export interface HarmonyActions {
   addChordBlock: (chord: string, startBeat: number, durationBeats?: number) => void;
   updateChordBlock: (id: string, updates: Partial<Omit<ChordBlock, 'id'>>) => void;
+  updateChordBlocksBatch: (updates: Array<{ id: string; changes: Partial<Omit<ChordBlock, 'id'>> }>) => void;
+  addChordBlocksBatch: (blocks: Array<Omit<ChordBlock, 'id'>>) => string[];
+  splitChordBlock: (id: string, splitBeat: number) => void;
+  transposeChordBlocks: (ids: string[], semitones: number) => void;
+  clearChordBlocks: () => void;
   removeChordBlock: (id: string) => void;
   setSelectedChordId: (id: string | null) => void;
   setSelectedChordIds: (ids: string[]) => void;
   toggleSelectChordId: (id: string, multi?: boolean) => void;
   selectAllChords: () => void;
-  setChordGridSnap: (gridSnap: '1' | '1/2' | '1/4') => void;
+  setChordGridSnap: (gridSnap: '1' | '1/2' | '1/4' | 'off') => void;
   setChordTimelineViewport: (viewport: Partial<{ scrollLeft: number; zoomLevel: number }>) => void;
   resetChordTimelineScroll: () => void;
   copySelectedChords: () => void;
@@ -134,6 +140,7 @@ export interface TrackState {
   activeTrackId: string;
   clipboardNotes: MelodyNote[];
   melodyNotes: MelodyNote[]; // Sincronizado para retrocompatibilidad con componentes existentes
+  pianoRollGridSnap: PianoRollGridSnap;
 }
 
 export interface TrackActions {
@@ -150,6 +157,9 @@ export interface TrackActions {
   removeMelodyNote: (id: string) => void;
   setMelodyNotes: (notes: MelodyNote[]) => void;
   setClipboardNotes: (notes: MelodyNote[]) => void;
+  setPianoRollGridSnap: (snap: PianoRollGridSnap) => void;
+  updateMelodyNotesBatch: (updates: Array<{ id: string; changes: Partial<MelodyNote> }>) => void;
+  removeMelodyNotesBatch: (ids: string[]) => void;
 }
 
 export interface DrumState {
@@ -200,8 +210,14 @@ export interface DrumActions {
   ungroupSelectedChainItems: () => void;
   setDrumTimelineViewport: (viewport: Partial<{ scrollLeft: number; zoomLevel: number }>) => void;
   resetDrumTimelineScroll: () => void;
-  addChainItem: (patternIndex: number, repeatCount?: number) => void;
+  addChainItem: (patternIndex: number, repeatCount?: number, startMeasure?: number) => void;
+  addChainItemsBatch: (clips: Array<{ patternIndex: number; startMeasure: number; durationMeasures: number }>) => string[];
   updateChainItem: (id: string, updates: Partial<PatternChainItem>) => void;
+  updateChainItemsBatch: (updates: Array<{ id: string; changes: Partial<PatternChainItem> }>) => void;
+  splitChainItem: (id: string, splitMeasure: number) => void;
+  makeChainItemUnique: (id: string) => number | null;
+  fillChainToSong: (patternIndex: number, targetMeasures: number) => void;
+  clearPatternChain: () => void;
   removeChainItem: (id: string) => void;
   moveChainItem: (fromIndex: number, toIndex: number) => void;
 }
@@ -224,8 +240,13 @@ export interface MixerActions {
   reorderChannels: (fromIndex: number, toIndex: number) => void;
 }
 
+export type CommandPaletteMode = 'closed' | 'commands' | 'shortcuts';
+
 export interface UIState {
   activeView: ActiveView;
+  projectTitle: string;
+  lastSavedAt: number | null;
+  commandPaletteMode: CommandPaletteMode;
   activeNotes: string[];
   activeMelodyNotes: string[];
   instrumentType: 'synth' | 'piano';
@@ -243,6 +264,9 @@ export interface UIState {
 
 export interface UIActions {
   setActiveView: (view: ActiveView) => void;
+  setProjectTitle: (title: string) => void;
+  setLastSavedAt: (timestamp: number | null) => void;
+  setCommandPaletteMode: (mode: CommandPaletteMode) => void;
   setActiveNotes: (notes: string[]) => void;
   setActiveMelodyNotes: (notes: string[]) => void;
   setInstrumentType: (type: 'synth' | 'piano') => void;
@@ -263,7 +287,7 @@ export interface UIActions {
 export interface ProjectActions {
   transposeSong: (semitones: number) => void;
   clearSong: () => void;
-  importSong: (sessionInput: unknown) => void;
+  importSong: (sessionInput: unknown, fallbackTitle?: string) => void;
 }
 
 export type SongStore = TransportState &

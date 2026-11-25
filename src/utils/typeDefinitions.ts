@@ -225,9 +225,18 @@ export interface DrumChannel {
 export interface PatternChainItem {
   id: string;
   type: 'pattern' | 'group' | 'rest';
-  repeatCount: number;  // 1 a 64
-  patternIndex?: number; // 0 a N, o -1 para silencio
-  items?: PatternChainItem[]; // Solo usado si type === 'group'
+  repeatCount: number;        // Duración aproximada en compases enteros (retrocompatibilidad)
+  patternIndex?: number;      // 0 a N, o -1 para silencio legado
+  startMeasure?: number;      // Posición lineal absoluta en compases (base 0, soporta decimales ej: 3.5)
+  durationMeasures?: number;  // Duración lineal exacta en compases (ej: 1, 2, 4, 0.5)
+  items?: PatternChainItem[]; // Legado (se aplana automáticamente a clips lineales)
+}
+
+export interface LinearDrumClip {
+  id: string;
+  patternIndex: number;
+  startMeasure: number;
+  durationMeasures: number;
 }
 
 export interface FlatChainStep {
@@ -235,29 +244,105 @@ export interface FlatChainStep {
   originalItemId: string; // ID for UI highlighting
 }
 
-export const flattenPatternChain = (chain: PatternChainItem[]): FlatChainStep[] => {
-  const result: FlatChainStep[] = [];
-  
+/**
+ * Convierte cualquier cadena de patrones (legada secuencial/grupos o lineal moderna)
+ * a una lista ordenada y determinista de clips lineales acoplados al timeline global.
+ */
+export const normalizePatternChainToLinear = (chain: PatternChainItem[]): LinearDrumClip[] => {
+  if (!chain || chain.length === 0) return [];
+  const clips: LinearDrumClip[] = [];
+  let sequentialCursor = 0;
+
   for (const item of chain) {
-    for (let r = 0; r < item.repeatCount; r++) {
-      if (item.type === 'group' && item.items) {
-        for (const subItem of item.items) {
-          // Asumimos 1 solo nivel de profundidad
-          for (let sr = 0; sr < subItem.repeatCount; sr++) {
-            result.push({
-              patternIndex: subItem.type === 'rest' || subItem.patternIndex === -1 ? -1 : (subItem.patternIndex ?? 0),
-              originalItemId: subItem.id
+    if (!item) continue;
+    const isLinear = typeof item.startMeasure === 'number' && !Number.isNaN(item.startMeasure);
+
+    if (item.type === 'group' && item.items && item.items.length > 0 && !isLinear) {
+      const repeats = Math.max(1, item.repeatCount || 1);
+      for (let r = 0; r < repeats; r++) {
+        for (const sub of item.items) {
+          const subDur = Math.max(0.25, sub.durationMeasures ?? (sub.repeatCount || 1));
+          const subIsRest = sub.type === 'rest' || sub.patternIndex === -1;
+          if (!subIsRest) {
+            clips.push({
+              id: r === 0 ? sub.id : `${sub.id}_r${r}`,
+              patternIndex: Math.max(0, sub.patternIndex ?? 0),
+              startMeasure: sequentialCursor,
+              durationMeasures: subDur
             });
           }
+          sequentialCursor += subDur;
         }
-      } else {
-        result.push({
-          patternIndex: item.type === 'rest' || item.patternIndex === -1 ? -1 : (item.patternIndex ?? 0),
-          originalItemId: item.id
+      }
+      continue;
+    }
+
+    const dur = Math.max(0.25, item.durationMeasures ?? (item.repeatCount || 1));
+    const isRest = item.type === 'rest' || item.patternIndex === -1;
+
+    if (isLinear) {
+      const start = Math.max(0, item.startMeasure!);
+      if (!isRest) {
+        clips.push({
+          id: item.id,
+          patternIndex: Math.max(0, item.patternIndex ?? 0),
+          startMeasure: start,
+          durationMeasures: dur
         });
       }
+      sequentialCursor = Math.max(sequentialCursor, start + dur);
+    } else {
+      if (!isRest) {
+        clips.push({
+          id: item.id || `clip_${sequentialCursor}`,
+          patternIndex: Math.max(0, item.patternIndex ?? 0),
+          startMeasure: sequentialCursor,
+          durationMeasures: dur
+        });
+      }
+      sequentialCursor += dur;
     }
   }
+
+  return clips.sort((a, b) => a.startMeasure - b.startMeasure);
+};
+
+/**
+ * Normaliza PatternChainItem[] in-place de formato legado a objetos PatternChainItem lineales persistibles.
+ */
+export const normalizePatternChainItems = (chain: PatternChainItem[]): PatternChainItem[] => {
+  return normalizePatternChainToLinear(chain).map((clip) => ({
+    id: clip.id,
+    type: 'pattern' as const,
+    patternIndex: clip.patternIndex,
+    startMeasure: clip.startMeasure,
+    durationMeasures: clip.durationMeasures,
+    repeatCount: Math.max(1, Math.round(clip.durationMeasures))
+  }));
+};
+
+export const flattenPatternChain = (chain: PatternChainItem[]): FlatChainStep[] => {
+  const clips = normalizePatternChainToLinear(chain);
+  if (clips.length === 0) return [];
+
+  const maxEndMeasure = clips.reduce((max, c) => Math.max(max, c.startMeasure + c.durationMeasures), 0);
+  const totalMeasures = Math.max(1, Math.ceil(maxEndMeasure));
+  const result: FlatChainStep[] = Array.from({ length: totalMeasures }, () => ({
+    patternIndex: -1,
+    originalItemId: ''
+  }));
+
+  for (const clip of clips) {
+    const startM = Math.max(0, Math.floor(clip.startMeasure));
+    const endM = Math.min(totalMeasures, Math.ceil(clip.startMeasure + clip.durationMeasures));
+    for (let m = startM; m < endM; m++) {
+      result[m] = {
+        patternIndex: clip.patternIndex,
+        originalItemId: clip.id
+      };
+    }
+  }
+
   return result;
 };
 

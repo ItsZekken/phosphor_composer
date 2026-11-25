@@ -17,6 +17,7 @@ import type {
 import type { NoteClass, ScaleType } from '../music';
 import { normalizePitchClass, noteToMidi } from '../music';
 import { normalizeSynthSettings } from '../audio/engine/synthPresets';
+import { normalizePatternChainItems } from '../../utils/typeDefinitions';
 
 export const createEmptyPatterns = (numPatterns = 8, length = 16) => 
   Array.from({ length: numPatterns }).map(() => 
@@ -55,6 +56,8 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
     ? (raw.scale as ScaleType)
     : 'major';
   const timeSignature: TimeSignature = (raw.timeSignature === '3/4' || raw.timeSignature === '6/8') ? raw.timeSignature : '4/4';
+  const rawSwing = (raw as any).swing ?? (raw as any).transport?.swing;
+  const swing = typeof rawSwing === 'number' && !Number.isNaN(rawSwing) ? Math.max(0, Math.min(1, rawSwing)) : 0;
   const isAutoKey = Boolean(raw.isAutoKey);
   const rawTempoMarkers = (raw as any).transport?.tempoMarkers || (raw as any).tempoMarkers;
   const tempoMarkers: TempoMarker[] = Array.isArray(rawTempoMarkers)
@@ -161,8 +164,9 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
     ? raw.activeTrackId
     : tracks[0].id;
 
-  // 4. Normalizar Baterías
-  const patternChain = Array.isArray(raw.patternChain) ? raw.patternChain : [];
+  // 4. Normalizar Baterías (migrar cadena secuencial legada a clips lineales)
+  const rawChain = Array.isArray(raw.patternChain) ? raw.patternChain : [];
+  const patternChain = normalizePatternChainItems(rawChain);
   const isPatternRepeatOn = Boolean(raw.isPatternRepeatOn);
   const activeDrumKitId = typeof raw.activeDrumKitId === 'string' ? raw.activeDrumKitId : 'kit_1';
 
@@ -233,6 +237,7 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
       bpm,
       tempoMarkers,
       timeSignature,
+      swing,
       key,
       scale,
       isAutoKey
@@ -315,6 +320,9 @@ export function deserializeSession(rawInput: unknown): { session: SessionV2; war
           length: parsedObj.drums.drumChannels[0]?.patterns?.length || 8 
         }).map(() => 16);
       }
+      if (Array.isArray(parsedObj.drums.patternChain)) {
+        parsedObj.drums.patternChain = normalizePatternChainItems(parsedObj.drums.patternChain);
+      }
     }
     // Normalizar synthSettings en todos los canales existentes para robustez total
     if (parsedObj.mixer?.channels) {
@@ -346,7 +354,7 @@ export function serializeSession(state: any, metadataUpdates?: Partial<SessionMe
   return {
     schemaVersion: 2,
     metadata: {
-      title: metadataUpdates?.title || 'Phosphor Project',
+      title: metadataUpdates?.title || (state.projectTitle && state.projectTitle !== 'Sin título' ? state.projectTitle : 'Phosphor Project'),
       author: metadataUpdates?.author,
       createdAt: metadataUpdates?.createdAt || Date.now(),
       modifiedAt: Date.now(),
@@ -356,6 +364,7 @@ export function serializeSession(state: any, metadataUpdates?: Partial<SessionMe
       bpm: state.bpm || 120,
       tempoMarkers: state.tempoMarkers || [],
       timeSignature: state.timeSignature || '4/4',
+      swing: typeof state.swing === 'number' ? state.swing : 0,
       key: state.key || 'C',
       scale: state.scale || 'major',
       isAutoKey: Boolean(state.isAutoKey)

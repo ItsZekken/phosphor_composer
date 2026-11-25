@@ -10,12 +10,16 @@ import type { MixerGraph } from './MixerGraph';
 import type { TempoMap } from '../../music';
 import { audioBufferRegistry } from '../audioBufferRegistry';
 import { useSongStore } from '../../../store/songStore';
+import type { AudioTrack } from '../../../utils/typeDefinitions';
 import { getNativeAudioContext } from '../worklet/PhosphorWorkletNode';
 
 export class AudioTrackEngine {
   private mixerGraph: MixerGraph;
   private activeSources = new Set<Tone.ToneBufferSource>();
   private scheduledClipEvents = new Set<string>(); // Evita double-trigger dentro de la ventana de lookahead
+  private cachedTracksRef: AudioTrack[] | null = null;
+  private cachedTrackMap = new Map<string, AudioTrack>();
+  private cachedHasAnySolo = false;
 
   constructor(mixerGraph: MixerGraph) {
     this.mixerGraph = mixerGraph;
@@ -31,9 +35,20 @@ export class AudioTrackEngine {
     if (!clips || clips.length === 0) return;
 
     const tracks = state.audioTracks || [];
-    const trackMap = new Map(tracks.map((t) => [t.id, t]));
+    if (tracks !== this.cachedTracksRef) {
+      this.cachedTracksRef = tracks;
+      this.cachedTrackMap.clear();
+      let anySolo = false;
+      for (let i = 0; i < tracks.length; i++) {
+        const t = tracks[i];
+        this.cachedTrackMap.set(t.id, t);
+        if (t.solo) anySolo = true;
+      }
+      this.cachedHasAnySolo = anySolo;
+    }
 
-    const hasAnySolo = tracks.some((t) => t.solo);
+    const trackMap = this.cachedTrackMap;
+    const hasAnySolo = this.cachedHasAnySolo;
     const now = Tone.now();
 
     for (const clip of clips) {

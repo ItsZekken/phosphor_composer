@@ -15,6 +15,8 @@ import {
 import { toneEngine } from '../../audio/toneEngine';
 import { useSongStore } from '../../store/songStore';
 import { ensureMp3Encoder } from '../../utils/mp3Encoder';
+import { sanitizeExportBaseName } from '../../core/session/projectFileImport';
+import { notify } from '../../core/ui/toastBus';
 import type { VisualizerMode } from '../visualizer/StageTelemetryHUD';
 
 export interface SaveExportModalProps {
@@ -130,14 +132,21 @@ export const SaveExportModal: React.FC<SaveExportModalProps> = ({
   };
 
   const downloadVideoBlob = (blob: Blob) => {
+    const state = useSongStore.getState();
+    const baseName =
+      state.projectTitle && state.projectTitle !== 'Sin título'
+        ? sanitizeExportBaseName(state.projectTitle)
+        : 'Phosphor_Stage';
+    const filename = `${baseName}_${resolution}.mp4`;
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Phosphor_Stage_${resolution}_${Date.now()}.mp4`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 5000);
+    notify.success('Video Stage exportado', filename);
   };
 
   const sections = [

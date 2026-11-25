@@ -27,10 +27,16 @@ import {
   Zap,
   Copy,
   ClipboardPaste,
-  Check
+  Check,
+  Dices,
+  Music,
+  ArrowLeftRight
 } from 'lucide-react';
 import { toneEngine } from '../../audio/toneEngine';
 import { RotaryKnob } from './RotaryKnob';
+import { CustomSelect, type SelectGroup } from './CustomSelect';
+import { notify } from '../../core/ui/toastBus';
+import { getScaleNotes, type ScaleType } from '../../core/music';
 import {
   SYNTH_PRESETS,
   DEFAULT_SYNTH_SETTINGS,
@@ -105,6 +111,7 @@ const SynthConfigModalContent: React.FC = () => {
   const editingChannelId = useSongStore((state) => state.editingChannelId);
   const setChannelSynthSettings = useSongStore((state) => state.setChannelSynthSettings);
   const currentKey = useSongStore((state) => state.key || 'C');
+  const currentScale = (useSongStore((state) => state.scale) || 'major') as ScaleType;
 
   const targetChannelId = editingChannelId || 'chords';
   const targetChannel = useSongStore((state) => state.channels[targetChannelId] || state.channels['chords']);
@@ -121,6 +128,8 @@ const SynthConfigModalContent: React.FC = () => {
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [savePresetName, setSavePresetName] = useState('');
   const [copiedNotice, setCopiedNotice] = useState(false);
+  const [abSlot, setAbSlot] = useState<'A' | 'B'>('A');
+  const [hasSlotBCompare, setHasSlotBCompare] = useState(false);
 
   const synthClipboard = useSongStore((state) => state.synthClipboard);
   const copySynthSettings = useSongStore((state) => state.copySynthSettings);
@@ -129,6 +138,33 @@ const SynthConfigModalContent: React.FC = () => {
   const synthSettings: SynthSettings = useMemo(() => {
     return normalizeSynthSettings(targetChannel?.synthSettings);
   }, [targetChannel?.synthSettings]);
+
+  const abSnapshotsRef = useRef<{ A: SynthSettings; B: SynthSettings }>({
+    A: synthSettings,
+    B: synthSettings
+  });
+  const abChannelRef = useRef<string>(targetChannelId);
+  const isSwitchingAbRef = useRef(false);
+
+  // Reiniciar snapshots A/B cuando cambia el canal editado
+  useEffect(() => {
+    if (abChannelRef.current !== targetChannelId) {
+      abChannelRef.current = targetChannelId;
+      const cloned = JSON.parse(JSON.stringify(synthSettings)) as SynthSettings;
+      abSnapshotsRef.current = { A: cloned, B: JSON.parse(JSON.stringify(cloned)) as SynthSettings };
+      setAbSlot('A');
+      setHasSlotBCompare(false);
+    }
+  }, [targetChannelId, synthSettings]);
+
+  // Mantener sincronizada la ranura activa A/B con los cambios en vivo
+  useEffect(() => {
+    if (isSwitchingAbRef.current) {
+      isSwitchingAbRef.current = false;
+      return;
+    }
+    abSnapshotsRef.current[abSlot] = JSON.parse(JSON.stringify(synthSettings)) as SynthSettings;
+  }, [synthSettings, abSlot]);
 
   // 1. Osciloscopio y Espectro FFT Aislado Exclusivo del Canal (Buffer reutilizado para cero GC)
   useEffect(() => {
@@ -466,17 +502,251 @@ const SynthConfigModalContent: React.FC = () => {
   const handleCopySettings = () => {
     copySynthSettings(targetChannelId);
     setCopiedNotice(true);
+    notify.info('Parche copiado al portapapeles');
     setTimeout(() => setCopiedNotice(false), 1200);
   };
 
   const handlePasteSettings = () => {
     pasteSynthSettings(targetChannelId);
+    notify.success('Parche pegado en el canal');
   };
 
   // Probar nota tónica de la escala actual en octava 4
   const handleTestTone = () => {
     const tonic = `${currentKey}4`;
     toneEngine.playNotePreview(tonic, targetChannelId);
+  };
+
+  // Probar acorde tónico de la tonalidad actual en el canal del sintetizador
+  const handleTestChord = () => {
+    const lowScale = getScaleNotes(currentKey, currentScale, 3);
+    const midScale = getScaleNotes(currentKey, currentScale, 4);
+    const voicing = [
+      lowScale[0] || `${currentKey}3`,
+      midScale[0] || `${currentKey}4`,
+      midScale[2] || `${currentKey}4`,
+      midScale[4] || `${currentKey}4`
+    ];
+    voicing.forEach((note, idx) => {
+      window.setTimeout(() => {
+        toneEngine.playNotePreview(note, targetChannelId, idx === 0 ? 0.72 : 0.64);
+      }, idx * 20);
+    });
+  };
+
+  // Alternar comparación instantánea entre parches A y B
+  const handleToggleAB = () => {
+    const currentSnapshot = JSON.parse(JSON.stringify(synthSettings)) as SynthSettings;
+    abSnapshotsRef.current[abSlot] = currentSnapshot;
+    const nextSlot: 'A' | 'B' = abSlot === 'A' ? 'B' : 'A';
+    const nextPatch = normalizeSynthSettings(
+      JSON.parse(JSON.stringify(abSnapshotsRef.current[nextSlot])) as SynthSettings
+    );
+    isSwitchingAbRef.current = true;
+    setAbSlot(nextSlot);
+    setChannelSynthSettings(targetChannelId, nextPatch);
+    toneEngine.updateSynthSettings(nextPatch, targetChannelId);
+    notify.info(`Comparación A/B: ranura ${nextSlot} activa`);
+  };
+
+  const handleCopyToOtherAB = () => {
+    const otherSlot: 'A' | 'B' = abSlot === 'A' ? 'B' : 'A';
+    abSnapshotsRef.current[otherSlot] = JSON.parse(JSON.stringify(synthSettings)) as SynthSettings;
+    setHasSlotBCompare(true);
+    notify.info(`Parche copiado a ranura ${otherSlot}`);
+  };
+
+  // Mutador musical con rangos curados (evita clipping y disonancias extremas)
+  const handleMutatePatch = () => {
+    // Guardar respaldo automático en la otra ranura si aún no hay comparación A/B
+    if (!hasSlotBCompare) {
+      const otherSlot: 'A' | 'B' = abSlot === 'A' ? 'B' : 'A';
+      abSnapshotsRef.current[otherSlot] = JSON.parse(JSON.stringify(synthSettings)) as SynthSettings;
+      setHasSlotBCompare(true);
+    }
+
+    const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)];
+    const rand = (min: number, max: number) => min + Math.random() * (max - min);
+    const round2 = (v: number) => Math.round(v * 100) / 100;
+
+    const archetypes = ['pad', 'lead', 'pluck', 'keys', 'bass'] as const;
+    const archetype = pick(archetypes);
+    const waves: OscWaveType[] = ['sawtooth', 'square', 'triangle', 'pulse', 'sine'];
+
+    const osc1Wave: OscWaveType =
+      archetype === 'bass'
+        ? pick(['sawtooth', 'square', 'triangle'])
+        : archetype === 'keys'
+          ? pick(['triangle', 'sine', 'pulse'])
+          : pick(waves);
+
+    const osc2Enabled = archetype === 'keys' ? Math.random() > 0.35 : Math.random() > 0.2;
+    const osc2Wave: OscWaveType = pick(waves);
+    const osc2Octave =
+      archetype === 'bass'
+        ? pick([-1, 0])
+        : archetype === 'pad'
+          ? pick([-1, 0, 1])
+          : pick([0, 0, 1, -1]);
+    const osc2Semi = Math.random() > 0.84 && archetype !== 'bass' ? 7 : 0;
+
+    const subEnabled = archetype === 'bass' ? true : Math.random() > 0.55;
+    const noiseEnabled = archetype !== 'bass' && Math.random() > 0.72;
+
+    const filterCutoff = Math.round(
+      archetype === 'bass'
+        ? rand(520, 2200)
+        : archetype === 'pad'
+          ? rand(900, 4200)
+          : archetype === 'pluck'
+            ? rand(700, 3400)
+            : rand(1400, 7600)
+    );
+    const filterQ = parseFloat(rand(0.9, archetype === 'lead' ? 4.8 : 3.4).toFixed(1));
+    const filterEnvAmt = round2(
+      archetype === 'pluck'
+        ? rand(0.32, 0.62)
+        : archetype === 'bass'
+          ? rand(0.28, 0.56)
+          : rand(0.12, 0.45)
+    );
+
+    const envByType: Record<(typeof archetypes)[number], ADSRConfig> = {
+      pad: {
+        attack: round2(rand(0.18, 0.75)),
+        decay: round2(rand(0.4, 1.2)),
+        sustain: round2(rand(0.65, 0.9)),
+        release: round2(rand(0.8, 2.2))
+      },
+      lead: {
+        attack: round2(rand(0.008, 0.05)),
+        decay: round2(rand(0.15, 0.55)),
+        sustain: round2(rand(0.55, 0.85)),
+        release: round2(rand(0.18, 0.55))
+      },
+      pluck: {
+        attack: round2(rand(0.005, 0.02)),
+        decay: round2(rand(0.14, 0.48)),
+        sustain: round2(rand(0.08, 0.28)),
+        release: round2(rand(0.18, 0.65))
+      },
+      keys: {
+        attack: round2(rand(0.008, 0.04)),
+        decay: round2(rand(0.35, 0.95)),
+        sustain: round2(rand(0.32, 0.65)),
+        release: round2(rand(0.3, 0.95))
+      },
+      bass: {
+        attack: round2(rand(0.005, 0.025)),
+        decay: round2(rand(0.16, 0.55)),
+        sustain: round2(rand(0.45, 0.8)),
+        release: round2(rand(0.1, 0.32))
+      }
+    };
+
+    const env = envByType[archetype];
+    const lfoEnabled = archetype === 'pad' || Math.random() > 0.52;
+    const lfoTarget: 'cutoff' | 'pitch' = archetype === 'lead' && Math.random() > 0.65 ? 'pitch' : 'cutoff';
+
+    const mutated = normalizeSynthSettings({
+      ...DEFAULT_SYNTH_SETTINGS,
+      presetName: 'MUTATED',
+      waveType: osc1Wave === 'pulse' ? 'square' : osc1Wave,
+      detune: Math.round(rand(-6, 6)),
+      osc1: {
+        enabled: true,
+        waveType: osc1Wave,
+        octave: archetype === 'bass' ? -1 : 0,
+        semi: 0,
+        detune: Math.round(rand(-7, 7)),
+        volume: round2(rand(0.58, 0.82)),
+        pulseWidth: round2(rand(0.25, 0.72))
+      },
+      osc2: {
+        enabled: osc2Enabled,
+        waveType: osc2Wave,
+        octave: osc2Octave,
+        semi: osc2Semi,
+        detune: Math.round(rand(-16, 16)),
+        volume: round2(rand(0.25, 0.58)),
+        pulseWidth: round2(rand(0.28, 0.7))
+      },
+      subOsc: {
+        enabled: subEnabled,
+        waveType: pick(['sine', 'square'] as const),
+        octave: -1,
+        volume: round2(archetype === 'bass' ? rand(0.35, 0.58) : rand(0.18, 0.36))
+      },
+      noise: {
+        enabled: noiseEnabled,
+        type: pick(['pink', 'white'] as const),
+        volume: round2(rand(0.02, 0.1))
+      },
+      filter: {
+        enabled: true,
+        type: 'lowpass',
+        frequency: filterCutoff,
+        Q: filterQ,
+        rolloff: pick([-12, -24] as const),
+        drive: round2(rand(0.04, 0.28)),
+        driveType: pick(['warm', 'tube', 'tape'] as const),
+        envAmount: filterEnvAmt,
+        keyTracking: round2(rand(0.2, 0.65))
+      },
+      envelope: env,
+      filterEnv: {
+        attack: round2(archetype === 'pad' ? rand(0.15, 0.65) : rand(0.005, 0.04)),
+        decay: round2(archetype === 'pluck' ? rand(0.12, 0.38) : rand(0.25, 0.85)),
+        sustain: round2(archetype === 'pluck' ? rand(0.05, 0.25) : rand(0.25, 0.65)),
+        release: round2(rand(0.2, 0.9))
+      },
+      lfo: {
+        enabled: lfoEnabled,
+        waveType: pick(['sine', 'triangle']),
+        rate: round2(lfoTarget === 'pitch' ? rand(3.5, 5.8) : rand(0.35, 3.2)),
+        depth: round2(lfoTarget === 'pitch' ? rand(0.02, 0.07) : rand(0.08, 0.28)),
+        target: lfoTarget
+      },
+      fx: {
+        chorus: {
+          enabled: archetype === 'pad' || archetype === 'keys' || Math.random() > 0.5,
+          depth: round2(rand(0.2, 0.55)),
+          rate: round2(rand(0.4, 2.1)),
+          mix: round2(rand(0.12, 0.32))
+        },
+        delay: {
+          enabled: archetype !== 'bass' && Math.random() > 0.45,
+          time: pick(['8n', '8n.', '4n']),
+          feedback: round2(rand(0.16, 0.36)),
+          mix: round2(rand(0.1, 0.26)),
+          sync: true,
+          damping: round2(rand(0.2, 0.55))
+        },
+        reverb: {
+          enabled: archetype !== 'bass' && (archetype === 'pad' || Math.random() > 0.35),
+          decay: round2(archetype === 'pad' ? rand(2.2, 4.0) : rand(1.1, 2.5)),
+          mix: round2(archetype === 'pad' ? rand(0.22, 0.36) : rand(0.12, 0.26))
+        }
+      },
+      eq: {
+        enabled: false,
+        low: 0,
+        lowMid: 0,
+        highMid: 0,
+        high: 0
+      },
+      masterGain: 0.92
+    });
+
+    setChannelSynthSettings(targetChannelId, mutated);
+    toneEngine.updateSynthSettings(mutated, targetChannelId);
+    notify.info(`Timbre mutado (${archetype.toUpperCase()})`, 'Pulsa A/B para comparar con el sonido anterior');
+
+    if (archetype === 'pad' || archetype === 'keys') {
+      handleTestChord();
+    } else {
+      toneEngine.playNotePreview(`${currentKey}${archetype === 'bass' ? '3' : '4'}`, targetChannelId, 0.75);
+    }
   };
 
   const handleApplyPreset = (presetId: string) => {
@@ -490,7 +760,7 @@ const SynthConfigModalContent: React.FC = () => {
   };
 
   const handleOpenSaveModal = () => {
-    setSavePresetName(synthSettings.presetName === 'CUSTOM' ? '' : synthSettings.presetName || '');
+    setSavePresetName(synthSettings.presetName === 'CUSTOM' || synthSettings.presetName === 'MUTATED' ? '' : synthSettings.presetName || '');
     setIsSaveModalOpen(true);
   };
 
@@ -502,10 +772,12 @@ const SynthConfigModalContent: React.FC = () => {
     setChannelSynthSettings(targetChannelId, fullPreset);
     toneEngine.updateSynthSettings(fullPreset, targetChannelId);
     setIsSaveModalOpen(false);
+    notify.success(`Preset guardado: ${saved.name}`);
   };
 
   const handleExportPreset = () => {
     exportPresetToJson(synthSettings, synthSettings.presetName || 'Mi_Preset');
+    notify.success('Preset exportado a JSON');
   };
 
   const handleImportPresetClick = () => {
@@ -528,6 +800,9 @@ const SynthConfigModalContent: React.FC = () => {
         const fullPreset = normalizeSynthSettings({ ...imported.settings, presetName: imported.name });
         setChannelSynthSettings(targetChannelId, fullPreset);
         toneEngine.updateSynthSettings(fullPreset, targetChannelId);
+        notify.success(`Preset importado: ${imported.name}`);
+      } else {
+        notify.error('No se pudo importar el preset JSON');
       }
     };
     reader.readAsText(file);
@@ -645,12 +920,58 @@ const SynthConfigModalContent: React.FC = () => {
 
   const currentPresetId = useMemo(() => {
     const pName = synthSettings.presetName;
-    if (!pName || pName === 'CUSTOM') return 'CUSTOM';
+    if (!pName || pName === 'CUSTOM' || pName === 'MUTATED') return 'CUSTOM';
     const found = allPresets.find(
       (p) => p.id === pName || p.name.toLowerCase() === pName.toLowerCase()
     );
     return found ? found.id : 'CUSTOM';
   }, [allPresets, synthSettings.presetName]);
+
+  const presetGroups = useMemo<SelectGroup[]>(() => {
+    const groups: SelectGroup[] = [];
+
+    if (currentPresetId === 'CUSTOM') {
+      groups.push({
+        label: 'ESTADO ACTUAL',
+        options: [
+          {
+            value: 'CUSTOM',
+            label: synthSettings.presetName === 'MUTATED' ? 'MUTATED' : 'PERSONALIZADO'
+          }
+        ]
+      });
+    }
+
+    if (userPresets.length > 0) {
+      groups.push({
+        label: 'MIS PRESETS',
+        options: userPresets.map((p) => ({
+          value: p.id,
+          label: p.name.toUpperCase()
+        }))
+      });
+    }
+
+    const byCategory = new Map<string, SynthPresetDef[]>();
+    SYNTH_PRESETS.forEach((p) => {
+      const cat = (p.category || 'GENERAL').toUpperCase();
+      const bucket = byCategory.get(cat) || [];
+      bucket.push(p);
+      byCategory.set(cat, bucket);
+    });
+
+    byCategory.forEach((presets, cat) => {
+      groups.push({
+        label: cat,
+        options: presets.map((p) => ({
+          value: p.id,
+          label: p.name.toUpperCase()
+        }))
+      });
+    });
+
+    return groups;
+  }, [currentPresetId, synthSettings.presetName, userPresets]);
 
   const currentDelayDivIndex = useMemo(() => {
     const rawTime = synthSettings.fx?.delay?.time;
@@ -710,90 +1031,116 @@ const SynthConfigModalContent: React.FC = () => {
               <span>PHOSPHOR // {channelName}</span>
             </div>
 
-            {/* BARRA DE PRESETS (SIN ÍCONO SPARKLES) */}
+            {/* SELECTOR DE PRESETS CON CUSTOMSELECT */}
             <div className="synth-preset-picker-wrap">
-              <select
-                className="synth-preset-select"
+              <CustomSelect
                 value={currentPresetId}
-                onChange={(e) => handleApplyPreset(e.target.value)}
-                title="Seleccionar Preset"
-              >
-                <option value="CUSTOM">
-                  {currentPresetId === 'CUSTOM' ? 'CUSTOM' : 'PERSONALIZADO'}
-                </option>
-                {userPresets.length > 0 && (
-                  <optgroup label="PRESETS DE USUARIO">
-                    {userPresets.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name.toUpperCase()}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                <optgroup label="PRESETS DE FÁBRICA">
-                  {SYNTH_PRESETS.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name.toUpperCase()} [{p.category.toUpperCase()}]
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
+                groups={presetGroups}
+                onChange={(val) => {
+                  if (val !== 'CUSTOM') {
+                    handleApplyPreset(val);
+                  }
+                }}
+                className="synth-preset-custom-select"
+                style={{ minWidth: '148px', maxWidth: '170px' }}
+              />
             </div>
 
-            {/* BOTONES DE GESTIÓN DE PRESETS: GUARDAR, EXPORTAR, IMPORTAR */}
-            <button
-              className="synth-action-btn"
-              onClick={handleOpenSaveModal}
-              title="Guardar Preset Actual"
-            >
-              <Save size={11} />
-              <span>GUARDAR</span>
-            </button>
-            <button
-              className="synth-action-btn"
-              onClick={handleExportPreset}
-              title="Exportar Preset a Archivo JSON"
-            >
-              <Download size={11} />
-              <span>EXPORTAR</span>
-            </button>
-            <button
-              className="synth-action-btn"
-              onClick={handleImportPresetClick}
-              title="Importar Preset desde Archivo JSON"
-            >
-              <Upload size={11} />
-              <span>IMPORTAR</span>
-            </button>
-            <button
-              className={`synth-action-btn ${copiedNotice ? 'synth-copied-btn' : ''}`}
-              onClick={handleCopySettings}
-              title="Copiar configuración del sintetizador al portapapeles"
-            >
-              {copiedNotice ? <Check size={11} style={{ color: '#00e5ff' }} /> : <Copy size={11} />}
-              <span>{copiedNotice ? 'COPIADO' : 'COPIAR'}</span>
-            </button>
-            <button
-              className="synth-action-btn"
-              onClick={handlePasteSettings}
-              disabled={!synthClipboard}
-              title={synthClipboard ? `Pegar parche: ${synthClipboard.presetName || 'Preset'}` : "Portapapeles de sintetizador vacío"}
-              style={{ opacity: synthClipboard ? 1 : 0.45 }}
-            >
-              <ClipboardPaste size={11} />
-              <span>PEGAR</span>
-            </button>
+            {/* BARRA COMPACTA DE UTILIDADES DE PRESET: GUARDAR, EXPORTAR, IMPORTAR, COPIAR, PEGAR */}
+            <div className="synth-utility-bar">
+              <button
+                className="synth-action-btn synth-icon-btn"
+                onClick={handleOpenSaveModal}
+                title="Guardar Preset Actual"
+                aria-label="Guardar Preset Actual"
+              >
+                <Save size={12} />
+              </button>
+              <button
+                className="synth-action-btn synth-icon-btn"
+                onClick={handleExportPreset}
+                title="Exportar Preset a Archivo JSON"
+                aria-label="Exportar Preset"
+              >
+                <Download size={12} />
+              </button>
+              <button
+                className="synth-action-btn synth-icon-btn"
+                onClick={handleImportPresetClick}
+                title="Importar Preset desde Archivo JSON"
+                aria-label="Importar Preset"
+              >
+                <Upload size={12} />
+              </button>
+              <button
+                className={`synth-action-btn synth-icon-btn ${copiedNotice ? 'synth-copied-btn' : ''}`}
+                onClick={handleCopySettings}
+                title="Copiar configuración del sintetizador al portapapeles"
+                aria-label="Copiar Parche"
+              >
+                {copiedNotice ? <Check size={12} style={{ color: '#00e5ff' }} /> : <Copy size={12} />}
+              </button>
+              <button
+                className="synth-action-btn synth-icon-btn"
+                onClick={handlePasteSettings}
+                disabled={!synthClipboard}
+                title={synthClipboard ? `Pegar parche: ${synthClipboard.presetName || 'Preset'}` : 'Portapapeles de sintetizador vacío'}
+                aria-label="Pegar Parche"
+                style={{ opacity: synthClipboard ? 1 : 0.45 }}
+              >
+                <ClipboardPaste size={12} />
+              </button>
+            </div>
           </div>
 
           <div className="synth-header-right">
-            {/* BOTÓN TEST: SIN 'C4', DISPARA NOTA TÓNICA DE LA ESCALA ACTUAL */}
+            {/* COMPARADOR A/B + COPIA ENTRE RANURAS */}
+            <div className="synth-ab-group">
+              <button
+                className={`synth-action-btn synth-ab-toggle ${abSlot === 'B' ? 'slot-b' : 'slot-a'}`}
+                onClick={handleToggleAB}
+                title={`Alternar comparación A/B (activo: ${abSlot})`}
+              >
+                <span className={abSlot === 'A' ? 'ab-pill-active' : 'ab-pill-dim'}>A</span>
+                <span className="ab-divider">/</span>
+                <span className={abSlot === 'B' ? 'ab-pill-active' : 'ab-pill-dim'}>B</span>
+              </button>
+              <button
+                className="synth-action-btn synth-ab-copy"
+                onClick={handleCopyToOtherAB}
+                title={`Copiar parche actual a ranura ${abSlot === 'A' ? 'B' : 'A'}`}
+              >
+                <ArrowLeftRight size={10} />
+                <span>{abSlot === 'A' ? 'A→B' : 'B→A'}</span>
+              </button>
+            </div>
+
+            {/* MUTADOR MUSICAL DE PARCHE */}
+            <button
+              className="synth-action-btn synth-mutate-btn"
+              onClick={handleMutatePatch}
+              title="Generar variación musical de timbre (guarda el actual en A/B)"
+            >
+              <Dices size={11} />
+              <span>MUTAR</span>
+            </button>
+
+            {/* AUDICIÓN DE NOTA Y ACORDE EN TONALIDAD */}
             <button
               className="synth-action-btn synth-test-btn"
               onClick={handleTestTone}
-              title="Probar nota tónica en tiempo real"
+              title={`Probar nota tónica (${currentKey}4) en tiempo real`}
             >
               <Play size={11} />
               <span>PROBAR</span>
+            </button>
+            <button
+              className="synth-action-btn synth-chord-btn"
+              onClick={handleTestChord}
+              title={`Audicionar acorde tónico en ${currentKey} ${currentScale}`}
+            >
+              <Music size={11} />
+              <span>ACORDE</span>
             </button>
             <button
               className="synth-action-btn"
@@ -2026,14 +2373,13 @@ const SynthConfigModalContent: React.FC = () => {
         {/* ================= FOOTER ================= */}
         <div className="synth-modal-footer">
           <div className="footer-status-pill">
-            <span className="status-dot"></span>
-            <span>DSP 64-BIT</span>
+            <span>WASM DSP</span>
           </div>
           <div className="footer-status-pill">
-            <span>STEREO</span>
+            <span>STEREO FX</span>
           </div>
           <div className="footer-status-pill">
-            <span>16 VOICES</span>
+            <span>32 VOICES</span>
           </div>
         </div>
       </div>

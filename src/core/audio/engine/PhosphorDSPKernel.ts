@@ -17,6 +17,7 @@
 import * as Tone from 'tone';
 import type { SynthSettings } from '../../../utils/typeDefinitions';
 import { noteToMidi } from '../../music/pitchClass';
+import { PhosphorWasmEngine, getCompiledPhosphorWasmModuleSync } from '../wasm/PhosphorWasmDSP';
 
 export interface Voice {
   active: boolean;
@@ -24,15 +25,29 @@ export interface Voice {
   frequency: number;
   targetFrequency: number;
   velocity: number;
+  velGain: number;
   phase1: number;
   phase2: number;
   phaseSub: number;
   envStage: 'idle' | 'pending' | 'attack' | 'decay' | 'sustain' | 'release';
   envLevel: number;
+  fEnvStage: 'idle' | 'pending' | 'attack' | 'decay' | 'sustain' | 'release';
+  fEnvLevel: number;
   startSample: number;
   targetReleaseSample: number;
   ic1eq: number;
   ic2eq: number;
+  ic3eq: number;
+  ic4eq: number;
+  panL: number;
+  panR: number;
+  a1: number;
+  a2: number;
+  a3: number;
+  a1_2: number;
+  a2_2: number;
+  a3_2: number;
+  fDirty: boolean;
   b0: number;
   b1: number;
   b2: number;
@@ -62,8 +77,15 @@ export interface SynthParams {
   filterType: 'lowpass' | 'highpass' | 'bandpass' | 'notch';
   filterFreq: number;
   filterQ: number;
+  filterRolloff?: -12 | -24 | -48;
   filterDrive: number;
   filterDriveType?: 'tube' | 'tape' | 'fuzz' | 'warm';
+  filterEnvAmount?: number;
+  filterKeyTracking?: number;
+  filterEnvAttack?: number;
+  filterEnvDecay?: number;
+  filterEnvSustain?: number;
+  filterEnvRelease?: number;
   attack: number;
   decay: number;
   sustain: number;
@@ -124,6 +146,13 @@ export class PhosphorDSPKernel {
   private eqL2 = new Float32Array(4);
   private eqR1 = new Float32Array(4);
   private eqR2 = new Float32Array(4);
+  private dcPrevInL = 0;
+  private dcPrevOutL = 0;
+  private dcPrevInR = 0;
+  private dcPrevOutR = 0;
+  private wasmEngine: PhosphorWasmEngine | null = null;
+  private includeFx = false;
+  private bpm = 120;
 
   private params: SynthParams = {
     osc1Wave: 'triangle',
@@ -148,8 +177,15 @@ export class PhosphorDSPKernel {
     filterType: 'lowpass',
     filterFreq: 6500,
     filterQ: 1.5,
+    filterRolloff: -12,
     filterDrive: 0.1,
     filterDriveType: 'tube',
+    filterEnvAmount: 0.3,
+    filterKeyTracking: 0.5,
+    filterEnvAttack: 0.02,
+    filterEnvDecay: 0.35,
+    filterEnvSustain: 0.3,
+    filterEnvRelease: 0.6,
     attack: 0.04,
     decay: 0.25,
     sustain: 0.65,
@@ -169,8 +205,20 @@ export class PhosphorDSPKernel {
     pan: 0.0
   };
 
-  constructor(sampleRate = 44100) {
+  constructor(sampleRate = 44100, options?: { useWasm?: boolean; includeFx?: boolean }) {
     this.sampleRate = sampleRate;
+    this.includeFx = options?.includeFx ?? false;
+
+    if (options?.useWasm !== false) {
+      try {
+        const mod = getCompiledPhosphorWasmModuleSync();
+        if (mod) {
+          this.wasmEngine = new PhosphorWasmEngine(sampleRate, mod);
+        }
+      } catch (_) {
+        this.wasmEngine = null;
+      }
+    }
 
     for (let i = 0; i < this.maxVoices; i++) {
       this.voices.push({
@@ -179,15 +227,29 @@ export class PhosphorDSPKernel {
         frequency: 440,
         targetFrequency: 440,
         velocity: 0.8,
+        velGain: 0.414,
         phase1: 0,
         phase2: 0,
         phaseSub: 0,
         envStage: 'idle',
         envLevel: 0,
+        fEnvStage: 'idle',
+        fEnvLevel: 0,
         startSample: -1,
         targetReleaseSample: -1,
         ic1eq: 0,
         ic2eq: 0,
+        ic3eq: 0,
+        ic4eq: 0,
+        panL: 1,
+        panR: 1,
+        a1: 0,
+        a2: 0,
+        a3: 0,
+        a1_2: 0,
+        a2_2: 0,
+        a3_2: 0,
+        fDirty: true,
         b0: 0,
         b1: 0,
         b2: 0,
@@ -251,13 +313,25 @@ export class PhosphorDSPKernel {
     }
   }
 
+  public setBpm(bpm: number) {
+    const safe = Number.isFinite(bpm) && bpm > 0 ? Math.max(20, Math.min(300, bpm)) : 120;
+    this.bpm = safe;
+    this.wasmEngine?.setBpm(safe);
+  }
+
   public setSettings(settings: Partial<SynthSettings>) {
+    if (this.wasmEngine) {
+      this.wasmEngine.setBpm(this.bpm);
+      this.wasmEngine.setSettings(settings, this.includeFx);
+      return;
+    }
     const s = settings;
     const osc1 = s.osc1;
     const osc2 = s.osc2;
     const sub = s.subOsc;
     const noise = s.noise;
     const filter = s.filter;
+    const filterEnv = s.filterEnv;
     const env = s.envelope;
     const lfo = s.lfo;
     const eq = s.eq;
@@ -289,13 +363,20 @@ export class PhosphorDSPKernel {
       filterType: (filter?.type || 'lowpass') as any,
       filterFreq: filter?.enabled ? Math.max(20, Math.min(20000, filter?.frequency ?? 6500)) : 20000,
       filterQ: Math.max(0.1, Math.min(20, filter?.Q ?? 1.5)),
+      filterRolloff: filter?.rolloff ?? -12,
       filterDrive: Math.max(0, Math.min(1, filter?.drive ?? 0.1)),
       filterDriveType: filter?.driveType || 'tube',
+      filterEnvAmount: Math.max(-1, Math.min(1, filter?.envAmount ?? 0)),
+      filterKeyTracking: Math.max(0, Math.min(1, filter?.keyTracking ?? 0)),
+      filterEnvAttack: Math.max(0.003, filterEnv?.attack ?? 0.02),
+      filterEnvDecay: Math.max(0.005, filterEnv?.decay ?? 0.35),
+      filterEnvSustain: Math.max(0, Math.min(1, filterEnv?.sustain ?? 0.3)),
+      filterEnvRelease: Math.max(0.005, filterEnv?.release ?? 0.6),
 
-      attack: Math.max(0.001, env?.attack ?? 0.04),
-      decay: Math.max(0.001, env?.decay ?? 0.25),
+      attack: Math.max(0.003, env?.attack ?? 0.04),
+      decay: Math.max(0.005, env?.decay ?? 0.25),
       sustain: Math.max(0, Math.min(1, env?.sustain ?? 0.65)),
-      release: Math.max(0.001, env?.release ?? 0.6),
+      release: Math.max(0.005, env?.release ?? 0.6),
 
       glide: s.glide || 0.0,
       lfoEnabled: Boolean(lfo?.enabled),
@@ -395,7 +476,7 @@ export class PhosphorDSPKernel {
 
           b0 = A * (aPlus1 + aMinus1 * cosW + twoSqrtAlpha);
           b1 = -2 * A * (aMinus1 + aPlus1 * cosW);
-          b2 = A * (aPlus1 - aMinus1 * cosW - twoSqrtAlpha);
+          b2 = A * (aPlus1 + aMinus1 * cosW - twoSqrtAlpha);
           a0 = aPlus1 - aMinus1 * cosW + twoSqrtAlpha;
           a1 = 2 * (aMinus1 - aPlus1 * cosW);
           a2 = aPlus1 - aMinus1 * cosW - twoSqrtAlpha;
@@ -414,11 +495,17 @@ export class PhosphorDSPKernel {
   }
 
   public noteOn(midi: number, velocity: number, durationSeconds?: number, delaySamples?: number) {
+    if (this.wasmEngine) {
+      this.wasmEngine.noteOn(midi, velocity, durationSeconds ?? -1, delaySamples ?? 0);
+      return;
+    }
     let targetVoice: Voice | null = null;
+    let voiceIndex = -1;
 
     for (let i = 0; i < this.maxVoices; i++) {
       if (!this.voices[i].active || this.voices[i].envStage === 'idle') {
         targetVoice = this.voices[i];
+        voiceIndex = i;
         break;
       }
     }
@@ -429,12 +516,14 @@ export class PhosphorDSPKernel {
         if (this.voices[i].age < oldestAge) {
           oldestAge = this.voices[i].age;
           targetVoice = this.voices[i];
+          voiceIndex = i;
         }
       }
     }
 
     if (!targetVoice) return;
 
+    const wasIdle = !targetVoice.active || targetVoice.envStage === 'idle';
     const freq = 440 * Math.pow(2, (midi - 69) / 12);
     const startDelay = delaySamples && delaySamples > 0 ? Math.floor(delaySamples) : 0;
     const targetStart = this.currentSample + startDelay;
@@ -442,28 +531,44 @@ export class PhosphorDSPKernel {
     targetVoice.active = true;
     targetVoice.midi = midi;
     targetVoice.targetFrequency = freq;
-    if (this.params.glide <= 0.001 || targetVoice.envStage === 'idle' || !targetVoice.frequency) {
+    if (this.params.glide <= 0.001 || wasIdle || !targetVoice.frequency) {
       targetVoice.frequency = freq;
     }
-    targetVoice.velocity = velocity;
+    const clampedVel = Math.max(0.05, Math.min(1.0, velocity));
+    targetVoice.velocity = clampedVel;
+    targetVoice.velGain = Math.pow(clampedVel, 1.35) * 0.56;
     targetVoice.startSample = targetStart;
     targetVoice.age = ++this.ageCounter;
 
-    targetVoice.phase1 = 0;
-    targetVoice.phase2 = 0;
+    targetVoice.phase1 = (this.ageCounter * 0.61803398875) % 1.0;
+    targetVoice.phase2 = ((this.ageCounter * 0.38196601125) + 0.37) % 1.0;
     targetVoice.phaseSub = 0;
-    targetVoice.ic1eq = 0;
-    targetVoice.ic2eq = 0;
+
+    if (wasIdle) {
+      targetVoice.envLevel = 0;
+      targetVoice.fEnvLevel = 0;
+      targetVoice.ic1eq = 0;
+      targetVoice.ic2eq = 0;
+      targetVoice.ic3eq = 0;
+      targetVoice.ic4eq = 0;
+    }
     targetVoice.b0 = 0;
     targetVoice.b1 = 0;
     targetVoice.b2 = 0;
 
     if (startDelay > 0) {
       targetVoice.envStage = 'pending';
-      targetVoice.envLevel = 0;
+      targetVoice.fEnvStage = 'pending';
     } else {
       targetVoice.envStage = 'attack';
+      targetVoice.fEnvStage = 'attack';
     }
+    targetVoice.fDirty = true;
+
+    const voicePan = midi < 50 ? 0.0 : ((voiceIndex & 1) === 0 ? -0.11 : 0.11);
+    const panAng = (voicePan + 1.0) * 0.7853981633974483;
+    targetVoice.panL = Math.cos(panAng) * 1.4142135623730951;
+    targetVoice.panR = Math.sin(panAng) * 1.4142135623730951;
 
     targetVoice.targetReleaseSample =
       durationSeconds && durationSeconds > 0
@@ -472,6 +577,10 @@ export class PhosphorDSPKernel {
   }
 
   public noteOff(midi: number, delaySamples?: number) {
+    if (this.wasmEngine) {
+      this.wasmEngine.noteOff(midi, delaySamples ?? 0);
+      return;
+    }
     const releaseSample = delaySamples && delaySamples > 0 ? this.currentSample + Math.floor(delaySamples) : this.currentSample;
     for (let i = 0; i < this.maxVoices; i++) {
       const v = this.voices[i];
@@ -480,12 +589,18 @@ export class PhosphorDSPKernel {
           v.targetReleaseSample = releaseSample;
         } else {
           v.envStage = 'release';
+          v.fEnvStage = 'release';
+          v.targetReleaseSample = -1;
         }
       }
     }
   }
 
   public allNotesOff(delaySamples?: number) {
+    if (this.wasmEngine) {
+      this.wasmEngine.allNotesOff(delaySamples ?? 0);
+      return;
+    }
     const releaseSample = delaySamples && delaySamples > 0 ? this.currentSample + Math.floor(delaySamples) : this.currentSample;
     for (let i = 0; i < this.maxVoices; i++) {
       const v = this.voices[i];
@@ -494,6 +609,8 @@ export class PhosphorDSPKernel {
           v.targetReleaseSample = releaseSample;
         } else {
           v.envStage = 'release';
+          v.fEnvStage = 'release';
+          v.targetReleaseSample = -1;
         }
       }
     }
@@ -511,16 +628,17 @@ export class PhosphorDSPKernel {
         const raw = phase < 0.5 ? 1.0 : -1.0;
         return raw + polyBlep(phase, dt) - polyBlep((phase + 0.5) % 1.0, dt);
       }
-      case 3: { // triangle
-        const saw = 2.0 * phase - 1.0 - polyBlep(phase, dt);
-        return 2.0 * Math.abs(saw) - 1.0;
-      }
+      case 3: // clean piecewise triangle
+        return phase < 0.5 ? (4.0 * phase - 1.0) : (3.0 - 4.0 * phase);
       default:
         return 0;
     }
   }
 
   public process(outL: Float32Array, outR: Float32Array, blockSize: number): boolean {
+    if (this.wasmEngine) {
+      return this.wasmEngine.process(outL, outR, blockSize);
+    }
     outL.fill(0);
     outR.fill(0);
 
@@ -528,10 +646,16 @@ export class PhosphorDSPKernel {
     const dtBase = 1.0 / sr;
 
     const TIME_FACTOR = -6.907755;
-    const attackStep = dtBase / Math.max(0.001, this.params.attack);
-    const decayFactor = Math.exp((TIME_FACTOR * dtBase) / Math.max(0.001, this.params.decay));
-    const releaseFactor = Math.exp((TIME_FACTOR * dtBase) / Math.max(0.001, this.params.release));
+    const attackStep = dtBase / Math.max(0.003, this.params.attack);
+    const decayFactor = Math.exp((TIME_FACTOR * dtBase) / Math.max(0.005, this.params.decay));
+    const releaseFactor = Math.exp((TIME_FACTOR * dtBase) / Math.max(0.005, this.params.release));
     const sustainLevel = Math.max(0, Math.min(1, this.params.sustain));
+
+    const fAttackStep = dtBase / Math.max(0.003, this.params.filterEnvAttack ?? 0.02);
+    const fDecayFactor = Math.exp((TIME_FACTOR * dtBase) / Math.max(0.005, this.params.filterEnvDecay ?? 0.35));
+    const fReleaseFactor = Math.exp((TIME_FACTOR * dtBase) / Math.max(0.005, this.params.filterEnvRelease ?? 0.6));
+    const fSustainLevel = Math.max(0, Math.min(1, this.params.filterEnvSustain ?? 0.3));
+
     const glideFactor = this.params.glide > 0.001 ? Math.exp(-dtBase / Math.max(0.005, this.params.glide)) : 0;
 
     const osc1PitchFactor = Math.pow(2, (this.params.osc1Octave * 12 + this.params.osc1Semi + this.params.osc1Detune / 100) / 12);
@@ -551,25 +675,22 @@ export class PhosphorDSPKernel {
       return false;
     }
 
-    let a1 = 0, a2 = 0, a3 = 0, k = 1;
     const filterEnabled = this.params.filterEnabled;
     const filterFreq = this.params.filterFreq;
     const filterTypeCode = this.filterTypeCode;
-    if (filterEnabled) {
-      const cutoffClamped = Math.max(20, Math.min(sr * 0.49, filterFreq));
-      const g = Math.tan((Math.PI * cutoffClamped) / sr);
-      k = 1.0 / Math.max(0.1, this.params.filterQ);
-      a1 = 1.0 / (1.0 + g * (g + k));
-      a2 = g * a1;
-      a3 = g * a2;
-    }
+    const qClamped = Math.max(0.5, Math.min(10.0, this.params.filterQ));
+    const k = 1.0 / qClamped;
+    const isFourPole = (this.params.filterRolloff ?? -12) <= -24;
+    const k2 = Math.max(0.707, k * 1.45);
+    const filterEnvAmount = Math.max(-1, Math.min(1, this.params.filterEnvAmount ?? 0));
+    const filterKeyTracking = Math.max(0, Math.min(1, this.params.filterKeyTracking ?? 0));
 
     const pan = Math.max(-1, Math.min(1, this.params.pan));
     const gainL = this.params.gain * (pan <= 0 ? 1 : 1 - pan);
     const gainR = this.params.gain * (pan >= 0 ? 1 : 1 + pan);
 
     const isLfoActive = Boolean(this.params.lfoEnabled && (this.params.lfoDepth ?? 0) > 0.001);
-    const lfoRate = Math.max(0.1, Math.min(20, this.params.lfoRate ?? 2.5));
+    const lfoRate = Math.max(0.05, Math.min(30, this.params.lfoRate ?? 2.5));
     const lfoDepth = Math.max(0, Math.min(1, this.params.lfoDepth ?? 0.25));
     const lfoTargetCode = this.lfoTargetCode;
     const lfoWaveCode = this.lfoWaveCode;
@@ -587,12 +708,18 @@ export class PhosphorDSPKernel {
     const noiseVol = this.params.noiseVol;
     const isPinkNoise = this.noiseTypeCode === 1;
 
+    const activeOscSum = osc1Vol
+      + (osc2Enabled ? osc2Vol : 0)
+      + (subEnabled ? subVol * 0.7 : 0)
+      + (noiseEnabled ? noiseVol * 0.35 : 0);
+    const oscNorm = activeOscSum > 1.0 ? (1.0 / Math.pow(activeOscSum, 0.7)) : 1.0;
+
     const filterDrive = this.params.filterDrive;
     const filterDriveActive = filterDrive > 0.005;
     const driveTypeCode = this.driveTypeCode;
-    const drivePreGain = 1.0 + filterDrive * 2.8;
-    const driveBoost = 1.0 + filterDrive * 0.85;
-    const dryBassAnchor = 0.28 * (1.0 - filterDrive * 0.4);
+    const drivePreGain = 1.0 + filterDrive * 2.4;
+    const drivePostComp = 1.0 / (1.0 + filterDrive * 0.42);
+    const dryBassAnchor = 0.25 * (1.0 - filterDrive * 0.35);
     const wetSatMix = 1.0 - dryBassAnchor;
 
     const eqEnabled = this.params.eqEnabled && !this.eqAllBypassed;
@@ -640,17 +767,7 @@ export class PhosphorDSPKernel {
       const lfoPitchMult = (isLfoActive && lfoTargetCode === 1)
         ? (1.0 + lfoVal * lfoDepth * 0.086)
         : 1.0;
-
-      if (filterEnabled && isLfoActive && lfoTargetCode === 0) {
-        if ((s & 3) === 0) {
-          const modFactor = Math.pow(2.0, lfoVal * lfoDepth * 3.5);
-          const modCutoff = Math.max(20, Math.min(sr * 0.49, filterFreq * modFactor));
-          const g = Math.tan((Math.PI * modCutoff) / sr);
-          a1 = 1.0 / (1.0 + g * (g + k));
-          a2 = g * a1;
-          a3 = g * a2;
-        }
-      }
+      const lfoOct = (isLfoActive && lfoTargetCode === 0) ? (lfoVal * lfoDepth * 2.5) : 0;
 
       for (let i = 0; i < activeCount; i++) {
         const voice = voices[activeIndices[i]];
@@ -661,6 +778,8 @@ export class PhosphorDSPKernel {
         if (voice.envStage === 'pending') {
           if (currentSample >= voice.startSample) {
             voice.envStage = 'attack';
+            voice.fEnvStage = 'attack';
+            voice.fDirty = true;
           } else {
             continue;
           }
@@ -668,6 +787,7 @@ export class PhosphorDSPKernel {
 
         if (voice.targetReleaseSample > 0 && currentSample >= voice.targetReleaseSample) {
           voice.envStage = 'release';
+          voice.fEnvStage = 'release';
           voice.targetReleaseSample = -1;
         }
 
@@ -684,9 +804,13 @@ export class PhosphorDSPKernel {
             if (sustainLevel <= 0.001 && voice.envLevel < 0.0005) {
               voice.envLevel = 0;
               voice.envStage = 'idle';
+              voice.fEnvStage = 'idle';
+              voice.fEnvLevel = 0;
               voice.active = false;
               voice.ic1eq = 0;
               voice.ic2eq = 0;
+              voice.ic3eq = 0;
+              voice.ic4eq = 0;
               continue;
             }
             break;
@@ -698,10 +822,41 @@ export class PhosphorDSPKernel {
             if (voice.envLevel < 0.0005) {
               voice.envLevel = 0;
               voice.envStage = 'idle';
+              voice.fEnvStage = 'idle';
+              voice.fEnvLevel = 0;
               voice.active = false;
               voice.ic1eq = 0;
               voice.ic2eq = 0;
+              voice.ic3eq = 0;
+              voice.ic4eq = 0;
               continue;
+            }
+            break;
+        }
+
+        switch (voice.fEnvStage) {
+          case 'attack':
+            voice.fEnvLevel += fAttackStep;
+            if (voice.fEnvLevel >= 1.0) {
+              voice.fEnvLevel = 1.0;
+              voice.fEnvStage = 'decay';
+            }
+            break;
+          case 'decay':
+            voice.fEnvLevel = fSustainLevel + (voice.fEnvLevel - fSustainLevel) * fDecayFactor;
+            if (Math.abs(voice.fEnvLevel - fSustainLevel) < 0.0002) {
+              voice.fEnvLevel = fSustainLevel;
+              voice.fEnvStage = 'sustain';
+            }
+            break;
+          case 'sustain':
+            voice.fEnvLevel = fSustainLevel;
+            break;
+          case 'release':
+            voice.fEnvLevel *= fReleaseFactor;
+            if (voice.fEnvLevel < 0.0005) {
+              voice.fEnvLevel = 0;
+              voice.fEnvStage = 'idle';
             }
             break;
         }
@@ -741,10 +896,32 @@ export class PhosphorDSPKernel {
           }
         }
 
+        voiceSample *= oscNorm;
+
         if (filterEnabled) {
+          if (voice.fDirty || (s & 3) === 0) {
+            const keyOct = filterKeyTracking > 0.001 ? ((voice.midi - 60) / 12) * filterKeyTracking : 0;
+            const envOct = Math.abs(filterEnvAmount) > 0.001 ? voice.fEnvLevel * filterEnvAmount * 3.5 : 0;
+            const velOct = (voice.velocity - 0.75) * 0.9;
+            const effCutoff = Math.max(25, Math.min(sr * 0.43, filterFreq * Math.pow(2.0, lfoOct + keyOct + envOct + velOct)));
+            const g = Math.tan((Math.PI * effCutoff) / sr);
+            const a1 = 1.0 / (1.0 + g * (g + k));
+            voice.a1 = a1;
+            voice.a2 = g * a1;
+            voice.a3 = g * voice.a2;
+            if (isFourPole) {
+              const a1_2 = 1.0 / (1.0 + g * (g + k2));
+              voice.a1_2 = a1_2;
+              voice.a2_2 = g * a1_2;
+              voice.a3_2 = g * voice.a2_2;
+            }
+            voice.fDirty = false;
+          }
+
           const v0 = voiceSample;
-          const v1 = a1 * voice.ic1eq + a2 * (v0 - voice.ic2eq);
-          const v2 = voice.ic2eq + a2 * voice.ic1eq + a3 * (v0 - voice.ic2eq);
+          const v1Raw = voice.a1 * voice.ic1eq + voice.a2 * (v0 - voice.ic2eq);
+          const v1 = v1Raw / (1.0 + 0.14 * Math.abs(v1Raw));
+          const v2 = voice.ic2eq + voice.a2 * voice.ic1eq + voice.a3 * (v0 - voice.ic2eq);
           voice.ic1eq = 2.0 * v1 - voice.ic1eq;
           voice.ic2eq = 2.0 * v2 - voice.ic2eq;
 
@@ -753,6 +930,21 @@ export class PhosphorDSPKernel {
             case 1: voiceSample = v1; break;
             case 2: voiceSample = v0 - k * v1 - v2; break;
             case 3: voiceSample = v0 - k * v1; break;
+          }
+
+          if (isFourPole) {
+            const u0 = voiceSample;
+            const u1Raw = voice.a1_2 * voice.ic3eq + voice.a2_2 * (u0 - voice.ic4eq);
+            const u1 = u1Raw / (1.0 + 0.14 * Math.abs(u1Raw));
+            const u2 = voice.ic4eq + voice.a2_2 * voice.ic3eq + voice.a3_2 * (u0 - voice.ic4eq);
+            voice.ic3eq = 2.0 * u1 - voice.ic3eq;
+            voice.ic4eq = 2.0 * u2 - voice.ic4eq;
+            switch (filterTypeCode) {
+              case 0: voiceSample = u2; break;
+              case 1: voiceSample = u1; break;
+              case 2: voiceSample = u0 - k2 * u1 - u2; break;
+              case 3: voiceSample = u0 - k2 * u1; break;
+            }
           }
         }
 
@@ -775,21 +967,19 @@ export class PhosphorDSPKernel {
               break;
             }
             case 2: // fuzz
-              sat = (1.35 * sVal) / Math.sqrt(1.0 + sVal * sVal * 0.75);
+              sat = Math.tanh(sVal * 1.35);
               break;
             case 3: // warm
-              if (sVal > 1.25) sat = 1.0;
-              else if (sVal < -1.25) sat = -1.0;
-              else sat = sVal - (sVal * sVal * sVal) * 0.2;
+              sat = Math.tanh(sVal * 0.85) * 1.15;
               break;
           }
 
-          voiceSample = (sat * wetSatMix + voiceSample * dryBassAnchor) * driveBoost;
+          voiceSample = (sat * wetSatMix + voiceSample * dryBassAnchor) * drivePostComp;
         }
 
-        const amp = voiceSample * voice.envLevel * voice.velocity;
-        sampleSumL += amp;
-        sampleSumR += amp;
+        const amp = voiceSample * voice.envLevel * voice.velGain;
+        sampleSumL += amp * voice.panL;
+        sampleSumR += amp * voice.panR;
       }
 
       const lfoAmpGain = (isLfoActive && lfoTargetCode === 2)
@@ -815,6 +1005,28 @@ export class PhosphorDSPKernel {
           eqR2[b] = b2 * finalR - a2 * yR;
           finalR = yR;
         }
+      }
+
+      // Filtro DC Blocker de 1 polo (R = 0.9975)
+      const dcR = 0.9975;
+      const dcL = finalL - this.dcPrevInL + dcR * this.dcPrevOutL;
+      this.dcPrevInL = finalL;
+      this.dcPrevOutL = dcL;
+      finalL = dcL;
+
+      const dcRight = finalR - this.dcPrevInR + dcR * this.dcPrevOutR;
+      this.dcPrevInR = finalR;
+      this.dcPrevOutR = dcRight;
+      finalR = dcRight;
+
+      // Limitador suave transparente (ceiling ±0.98)
+      const absL = finalL < 0 ? -finalL : finalL;
+      if (absL > 0.80) {
+        finalL = (finalL < 0 ? -1 : 1) * (0.80 + 0.18 * Math.tanh((absL - 0.80) / 0.18));
+      }
+      const absR = finalR < 0 ? -finalR : finalR;
+      if (absR > 0.80) {
+        finalR = (finalR < 0 ? -1 : 1) * (0.80 + 0.18 * Math.tanh((absR - 0.80) / 0.18));
       }
 
       outL[s] = finalL;
@@ -897,7 +1109,9 @@ export function renderSynthTrackOffline(
   events: Array<{ note: string; timeSeconds: number; durationSeconds: number; velocity: number }>,
   settings: Partial<SynthSettings>,
   totalDurationSeconds: number,
-  sampleRate = 44100
+  sampleRate = 44100,
+  bpm = 120,
+  includeFx = false
 ): AudioBuffer {
   const totalSamples = Math.ceil(Math.max(1, totalDurationSeconds) * sampleRate);
   const left = new Float32Array(totalSamples);
@@ -909,7 +1123,8 @@ export function renderSynthTrackOffline(
 
   const sortedEvents = [...events].sort((a, b) => a.timeSeconds - b.timeSeconds);
 
-  const kernel = new PhosphorDSPKernel(sampleRate);
+  const kernel = new PhosphorDSPKernel(sampleRate, { useWasm: true, includeFx });
+  kernel.setBpm(bpm);
   kernel.setSettings(settings);
 
   const blockSize = 128;

@@ -3,6 +3,8 @@ import { StageTelemetryHUD } from './StageTelemetryHUD';
 import type { VisualizerMode } from './StageTelemetryHUD';
 import { StageCanvas } from './StageCanvas';
 import { StageExportModal } from './StageExportModal';
+import { useSongStore } from '../../store/songStore';
+import { isTypingTarget, isModalBlockingShortcuts } from '../../core/shortcuts/isTypingTarget';
 
 export const StageVisualizerView: React.FC = () => {
   const [visualizerMode, setVisualizerMode] = useState<VisualizerMode>('oscilloscope');
@@ -10,6 +12,49 @@ export const StageVisualizerView: React.FC = () => {
   const [isControlsVisible, setIsControlsVisible] = useState(true);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const idleTimerRef = useRef<number | null>(null);
+
+  // Sincronizar visibilidad del HUD con el GlobalScrubber en modo Stage Zen
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent('phosphor-stage-hud-visibility', {
+        detail: { visible: isControlsVisible }
+      })
+    );
+  }, [isControlsVisible]);
+
+  useEffect(() => {
+    return () => {
+      window.dispatchEvent(
+        new CustomEvent('phosphor-stage-hud-visibility', {
+          detail: { visible: true }
+        })
+      );
+    };
+  }, []);
+
+  // Atajos 1 / 2 / 3 para cambiar modo de visualización en Stage
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+      if (isExportModalOpen) return;
+      if (isModalBlockingShortcuts(useSongStore.getState())) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      if (e.key === '1') {
+        e.preventDefault();
+        setVisualizerMode('oscilloscope');
+      } else if (e.key === '2') {
+        e.preventDefault();
+        setVisualizerMode('spectrum');
+      } else if (e.key === '3') {
+        e.preventDefault();
+        setVisualizerMode('lissajous');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isExportModalOpen]);
 
   // Ocultar la barra superior tras 2.5 segundos de inactividad del cursor
   const handleMouseMove = () => {

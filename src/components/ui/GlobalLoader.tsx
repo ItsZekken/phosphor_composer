@@ -39,7 +39,7 @@ export const GlobalLoader: React.FC = () => {
 
     const autoBoot = async () => {
       try {
-        await toneEngine.init();
+        await toneEngine.init(false);
 
         // Pre-cargar samples con timeout defensivo para que nada bloquee la apertura
         await Promise.race([
@@ -74,7 +74,7 @@ export const GlobalLoader: React.FC = () => {
     <div
       className="global-curtain-container"
       onClick={() => {
-        toneEngine.init().catch(() => {});
+        toneEngine.init(true).catch(() => {});
         openCurtain();
       }}
       role="button"

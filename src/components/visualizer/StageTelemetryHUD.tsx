@@ -36,60 +36,65 @@ export const StageTelemetryHUD: React.FC<StageTelemetryHUDProps> = React.memo(({
   const setPlaying = useSongStore((state) => state.setPlaying);
   const isLooping = useSongStore((state) => state.isLooping);
   const setLooping = useSongStore((state) => state.setLooping);
-  const currentBeat = useSongStore((state) => state.currentBeat);
   const bpm = useSongStore((state) => state.bpm);
   const liveBpm = useSongStore((state) => state.liveBpm || state.bpm);
   const currentBpm = isPlaying ? liveBpm : bpm;
   const key = useSongStore((state) => state.key);
   const scale = useSongStore((state) => state.scale);
 
-  // Formato Bar.Beat y Tiempo mm:ss sincronizado a tiempo real con el motor de audio
-  const [hudTime, setHudTime] = React.useState({ barStr: '01', beatStr: '1', timeStr: '00:00' });
+  const barRef = React.useRef<HTMLSpanElement | null>(null);
+  const beatRef = React.useRef<HTMLSpanElement | null>(null);
+  const timeRef = React.useRef<HTMLSpanElement | null>(null);
 
+  // Sincronización directa vía refs DOM (0 re-renders de React en barra/beat/tiempo)
   React.useEffect(() => {
-    if (!isPlaying) {
-      const totalBeats = Math.max(0, currentBeat);
+    let animId = 0;
+    let lastBar = -1;
+    let lastBeat = -1;
+    let lastSecInt = -1;
+
+    const writeClock = (totalBeatsInput: number, secondsTotalInput: number) => {
+      const totalBeats = Math.max(0, totalBeatsInput);
       const bar = Math.floor(totalBeats / 4) + 1;
       const beat = (Math.floor(totalBeats) % 4) + 1;
-      const secondsTotal = toneEngine.getLiveSeconds();
-      const mins = Math.floor(secondsTotal / 60);
-      const secs = Math.floor(secondsTotal % 60);
-      setHudTime({
-        barStr: bar.toString().padStart(2, '0'),
-        beatStr: beat.toString(),
-        timeStr: `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-      });
-      return;
-    }
-
-    let animId: number;
-    let lastSecond = -1;
-    let lastBeatInt = -1;
-
-    const tick = () => {
-      const liveBeat = Math.max(0, toneEngine.getLiveBeat());
-      const bar = Math.floor(liveBeat / 4) + 1;
-      const beat = (Math.floor(liveBeat) % 4) + 1;
-      const secondsTotal = Math.max(0, toneEngine.getLiveSeconds());
+      const secondsTotal = Math.max(0, secondsTotalInput);
       const secInt = Math.floor(secondsTotal);
 
-      if (secInt !== lastSecond || beat !== lastBeatInt) {
-        lastSecond = secInt;
-        lastBeatInt = beat;
-        const mins = Math.floor(secondsTotal / 60);
-        const secs = Math.floor(secondsTotal % 60);
-        setHudTime({
-          barStr: bar.toString().padStart(2, '0'),
-          beatStr: beat.toString(),
-          timeStr: `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-        });
+      if (bar !== lastBar) {
+        lastBar = bar;
+        if (barRef.current) barRef.current.textContent = bar.toString().padStart(2, '0');
       }
-      animId = requestAnimationFrame(tick);
+      if (beat !== lastBeat) {
+        lastBeat = beat;
+        if (beatRef.current) beatRef.current.textContent = beat.toString();
+      }
+      if (secInt !== lastSecInt) {
+        lastSecInt = secInt;
+        const mins = Math.floor(secInt / 60);
+        const secs = secInt % 60;
+        if (timeRef.current) {
+          timeRef.current.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+      }
     };
 
+    if (!isPlaying) {
+      writeClock(useSongStore.getState().currentBeat || 0, toneEngine.getLiveSeconds());
+      const unsub = useSongStore.subscribe((state, prev) => {
+        if (!state.isPlaying && state.currentBeat !== prev.currentBeat) {
+          writeClock(state.currentBeat || 0, toneEngine.getLiveSeconds());
+        }
+      });
+      return () => unsub();
+    }
+
+    const tick = () => {
+      writeClock(toneEngine.getLiveBeat(), toneEngine.getLiveSeconds());
+      animId = requestAnimationFrame(tick);
+    };
     animId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animId);
-  }, [isPlaying, currentBeat]);
+  }, [isPlaying]);
 
   const handleTogglePlay = async () => {
     try {
@@ -149,14 +154,14 @@ export const StageTelemetryHUD: React.FC<StageTelemetryHUDProps> = React.memo(({
       <div className="stage-hud-section stage-hud-center">
         {/* Contador de Compás / Beat */}
         <div className="stage-lcd-display">
-          <span className="stage-lcd-segment">{hudTime.barStr}</span>
+          <span ref={barRef} className="stage-lcd-segment">01</span>
           <span className="stage-lcd-dot">.</span>
-          <span className="stage-lcd-segment">{hudTime.beatStr}</span>
+          <span ref={beatRef} className="stage-lcd-segment">1</span>
         </div>
 
         {/* Tiempo transcurrido */}
         <div className="stage-hud-pill">
-          <span className="stage-hud-digits">{hudTime.timeStr}</span>
+          <span ref={timeRef} className="stage-hud-digits">00:00</span>
         </div>
 
         {/* Tonalidad */}
@@ -172,21 +177,21 @@ export const StageTelemetryHUD: React.FC<StageTelemetryHUDProps> = React.memo(({
           <button
             className={`stage-mode-btn ${visualizerMode === 'oscilloscope' ? 'active' : ''}`}
             onClick={() => onSelectMode('oscilloscope')}
-            title="Oscilloscope"
+            title="Oscilloscope (1)"
           >
             <Activity size={14} />
           </button>
           <button
             className={`stage-mode-btn ${visualizerMode === 'spectrum' ? 'active' : ''}`}
             onClick={() => onSelectMode('spectrum')}
-            title="Spectrum"
+            title="Spectrum (2)"
           >
             <AudioLines size={14} />
           </button>
           <button
             className={`stage-mode-btn ${visualizerMode === 'lissajous' ? 'active' : ''}`}
             onClick={() => onSelectMode('lissajous')}
-            title="Phase Scope"
+            title="Phase Scope / Lissajous (3)"
           >
             <Radio size={14} />
           </button>

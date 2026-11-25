@@ -8,6 +8,7 @@ import * as Tone from 'tone';
 import type { ChannelConfig, SynthSettings } from '../../../utils/typeDefinitions';
 import type { MixerGraph } from './MixerGraph';
 import { PhosphorAnalogSynth } from './PhosphorAnalogSynth';
+import { normalizeSynthSettings } from './synthPresets';
 import { PianoSampler, preloadPianoBuffers } from '../pianoSampler';
 
 export class ChannelInstrumentManager {
@@ -15,9 +16,19 @@ export class ChannelInstrumentManager {
   private pianos = new Map<string, PianoSampler>();
   private mixerGraph: MixerGraph;
   private isSustainActive = false;
+  private currentBpm = 120;
 
   constructor(mixerGraph: MixerGraph) {
     this.mixerGraph = mixerGraph;
+  }
+
+  public setBpm(bpm: number) {
+    const safe = Number.isFinite(bpm) && bpm > 0 ? Math.max(20, Math.min(300, bpm)) : 120;
+    if (safe === this.currentBpm) return;
+    this.currentBpm = safe;
+    this.synths.forEach((synth) => {
+      try { synth.setBpm?.(safe); } catch (_) {}
+    });
   }
 
   /**
@@ -27,9 +38,28 @@ export class ChannelInstrumentManager {
     let synth = this.synths.get(channelId);
     if (!synth) {
       const channelNode = this.mixerGraph.getChannelNode(channelId);
-      synth = new PhosphorAnalogSynth(channelId, undefined, channelNode.volumeNode);
-      if (this.isSustainActive) {
-        synth.setSettings({ envelope: { ...synth.getSettings().envelope, release: 2.5 } });
+      try {
+        synth = new PhosphorAnalogSynth(channelId, undefined, channelNode.volumeNode);
+        synth.setBpm(this.currentBpm);
+        if (this.isSustainActive) {
+          synth.setSettings({ envelope: { ...synth.getSettings().envelope, release: 2.5 } });
+        }
+      } catch (_) {
+        let settings = normalizeSynthSettings();
+        synth = {
+          getSettings: () => settings,
+          setSettings: (next: Partial<SynthSettings>) => {
+            settings = normalizeSynthSettings({ ...settings, ...next });
+          },
+          triggerAttackRelease: () => {},
+          triggerAttack: () => {},
+          triggerRelease: () => {},
+          releaseAll: () => {},
+          getWaveformData: (t?: Float32Array) => t || new Float32Array(512),
+          getFrequencyData: (t?: Float32Array) => t || new Float32Array(64),
+          disconnectAnalysers: () => {},
+          dispose: () => {}
+        } as unknown as PhosphorAnalogSynth;
       }
       this.synths.set(channelId, synth);
     }
@@ -113,6 +143,9 @@ export class ChannelInstrumentManager {
         piano.triggerAttackRelease(notes, duration, time, velocity);
         return;
       }
+      if (!piano.isLoading) {
+        piano.load().catch(() => {});
+      }
     }
     const synth = this.getChannelSynth(channelId);
     synth.triggerAttackRelease(notes, duration, time, velocity);
@@ -133,6 +166,9 @@ export class ChannelInstrumentManager {
       if (piano.loaded) {
         piano.keyDown({ note, time, velocity });
         return;
+      }
+      if (!piano.isLoading) {
+        piano.load().catch(() => {});
       }
     }
     const synth = this.getChannelSynth(channelId);

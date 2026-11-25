@@ -19,7 +19,8 @@ export const initialTrackState: TrackState = {
   ],
   activeTrackId: DEFAULT_TRACK_ID,
   clipboardNotes: [],
-  melodyNotes: []
+  melodyNotes: [],
+  pianoRollGridSnap: '1/4'
 };
 
 export const createTrackSlice: SliceCreator<TrackState & TrackActions> = (set, get) => ({
@@ -177,4 +178,35 @@ export const createTrackSlice: SliceCreator<TrackState & TrackActions> = (set, g
   },
 
   setClipboardNotes: (notes) => set({ clipboardNotes: notes }),
+
+  setPianoRollGridSnap: (pianoRollGridSnap) => set({ pianoRollGridSnap }),
+
+  updateMelodyNotesBatch: (updates) => {
+    if (!updates || updates.length === 0) return;
+    const updateMap = new Map(updates.map(u => [u.id, u.changes]));
+    set((state) => {
+      const activeTrack = state.tracks.find(t => t.id === state.activeTrackId);
+      const currentNotes = activeTrack ? activeTrack.notes : state.melodyNotes;
+      const nextNotes = currentNotes.map(n => {
+        const changes = updateMap.get(n.id);
+        return changes ? { ...n, ...changes } : n;
+      });
+      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? { ...t, notes: nextNotes } : t);
+      return { melodyNotes: nextNotes, tracks: nextTracks };
+    });
+    if (get().isAutoSuggestions) get().updateSuggestions();
+  },
+
+  removeMelodyNotesBatch: (ids) => {
+    if (!ids || ids.length === 0) return;
+    const idSet = new Set(ids);
+    set((state) => {
+      const activeTrack = state.tracks.find(t => t.id === state.activeTrackId);
+      const currentNotes = activeTrack ? activeTrack.notes : state.melodyNotes;
+      const nextNotes = currentNotes.filter(n => !idSet.has(n.id));
+      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? { ...t, notes: nextNotes } : t);
+      return { melodyNotes: nextNotes, tracks: nextTracks };
+    });
+    if (get().isAutoSuggestions) get().updateSuggestions();
+  },
 });

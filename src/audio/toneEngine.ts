@@ -8,7 +8,8 @@
 import * as Tone from 'tone';
 import { useSongStore } from '../store/songStore';
 import { NOTE_CLASSES, SCALE_INTERVALS } from '../core/music';
-import { renderSessionToWav, renderSessionToCompressed, scheduleSessionTimeline } from '../core/audio';
+import { renderSessionToWav, renderSessionToCompressed, scheduleStoreTimeline } from '../core/audio';
+import { liveTelemetryBus } from '../core/audio/liveTelemetryBus';
 import { serializeSession } from '../core/session';
 import { MixerGraph, faderToDb } from '../core/audio/engine/MixerGraph';
 import { ChannelInstrumentManager } from '../core/audio/engine/ChannelInstrumentManager';
@@ -17,10 +18,10 @@ import { PreviewManager } from '../core/audio/engine/PreviewManager';
 import { AudioTransport } from '../core/audio/engine/AudioTransport';
 import { AudioTrackEngine } from '../core/audio/engine/AudioTrackEngine';
 import { LookaheadScheduler } from '../core/audio/lookaheadScheduler';
-import { flattenPatternChain, type ChannelConfig, type SynthSettings } from '../utils/typeDefinitions';
+import { normalizePatternChainToLinear, type ChannelConfig, type SynthSettings, type PianoRollTrack } from '../utils/typeDefinitions';
 import type { PatternDef } from '../patterns/patternTypes';
 import { exportStageToMp4 } from '../core/video/stageVideoExporter';
-import { ensurePhosphorWorkletRegistered } from '../core/audio/worklet/PhosphorWorkletNode';
+import { ensurePhosphorWorkletRegistered, getNativeAudioContext } from '../core/audio/worklet/PhosphorWorkletNode';
 
 // Helper debounce simple
 function debounce<T extends (...args: unknown[]) => void>(fn: T, delay: number): T {
@@ -30,6 +31,39 @@ function debounce<T extends (...args: unknown[]) => void>(fn: T, delay: number):
     timer = setTimeout(() => { timer = null; fn(...args); }, delay);
   }) as T;
 }
+
+const didTracksMusicalContentChange = (prev: PianoRollTrack[] | undefined, next: PianoRollTrack[] | undefined): boolean => {
+  if (prev === next) return false;
+  if (!prev || !next) return true;
+  if (prev.length !== next.length) return true;
+  for (let i = 0; i < prev.length; i++) {
+    if (prev[i].id !== next[i].id || prev[i].channelId !== next[i].channelId || prev[i].notes !== next[i].notes) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const didChannelsAudioRoutingChange = (
+  prev: Record<string, ChannelConfig> | undefined,
+  next: Record<string, ChannelConfig> | undefined
+): boolean => {
+  if (prev === next) return false;
+  if (!prev || !next) return true;
+  const prevKeys = Object.keys(prev);
+  const nextKeys = Object.keys(next);
+  if (prevKeys.length !== nextKeys.length) return true;
+  for (let i = 0; i < nextKeys.length; i++) {
+    const id = nextKeys[i];
+    const p = prev[id];
+    const n = next[id];
+    if (!p || !n) return true;
+    if (p.instrument !== n.instrument || p.muted !== n.muted || p.solo !== n.solo) {
+      return true;
+    }
+  }
+  return false;
+};
 
 // Monkeypatch ToneAudioBuffer.load para resolver comodines [mp3|ogg] de Tone.js v15
 if (Tone.ToneAudioBuffer && typeof Tone.ToneAudioBuffer.load === 'function') {
@@ -71,7 +105,7 @@ class ToneEngine {
   private lookaheadScheduler: LookaheadScheduler;
 
   private isInitialized = false;
-  private initPromise: Promise<void> | null = null;
+  private unlockGestureBound = false;
 
   private cachedIsKeyboardMelodyEnabled = false;
   private cachedIsKeyboardChromatic = false;
@@ -86,9 +120,9 @@ class ToneEngine {
   private playheadRafId: number | null = null;
   private syncTimelineDebounced: () => void;
 
-  private activePlaybackChordNotes = new Map<string, number>();
-  private activePlaybackMelodyNotes = new Map<string, number>();
-  private visualNotesTimerId: number | null = null;
+  private cachedPatternChainRef: any = null;
+  private cachedLinearPatternChain: ReturnType<typeof normalizePatternChainToLinear> = [];
+  private cachedSyncedChannelsRef: Record<string, ChannelConfig> | undefined = undefined;
 
   constructor() {
     this.mixerGraph = new MixerGraph();
@@ -97,8 +131,8 @@ class ToneEngine {
     this.audioTrackEngine = new AudioTrackEngine(this.mixerGraph);
     this.previewManager = new PreviewManager({
       instrumentManager: this.instrumentManager,
-      onActiveNotesChange: (notes) => useSongStore.getState().setActiveNotes(notes),
-      onActiveMelodyNotesChange: (notes) => useSongStore.getState().setActiveMelodyNotes(notes)
+      onActiveNotesChange: (notes) => liveTelemetryBus.setManualNotes('harmony', notes),
+      onActiveMelodyNotesChange: (notes) => liveTelemetryBus.setManualNotes('melody', notes)
     });
     this.transportManager = new AudioTransport();
 
@@ -130,8 +164,9 @@ class ToneEngine {
       },
       onTempoChange: (newBpm, beat, audioTime) => {
         this.cachedBpm = newBpm;
-        Tone.Transport.bpm.value = newBpm;
+        try { Tone.Transport.bpm.value = newBpm; } catch (_) {}
         this.transportManager.setBpm(newBpm);
+        this.instrumentManager.setBpm(newBpm);
         useSongStore.getState().setLiveBpm(newBpm);
 
         // Despachar evento global del DOM para toda la aplicación
@@ -143,43 +178,55 @@ class ToneEngine {
         const state = useSongStore.getState();
         if (!state.isPlaying) return;
 
+        const beatsPerMeasure = state.timeSignature === '3/4' ? 3 : state.timeSignature === '6/8' ? 6 : 4;
         let patternIndex = state.currentDrumPatternEdit;
         let localStepIndex = 0;
         let currentChainItemId: string | null = null;
 
         if (!state.isPatternRepeatOn && state.patternChain && state.patternChain.length > 0) {
-          const flatChain = flattenPatternChain(state.patternChain);
-          const totalChainBeats = flatChain.length * 4;
-          if (totalChainBeats > 0) {
-            const wrappedBeat = ((beat % totalChainBeats) + totalChainBeats) % totalChainBeats;
-            const measureIdx = Math.floor(wrappedBeat / 4);
-            const beatInMeasure = wrappedBeat % 4;
-            const step = flatChain[measureIdx];
-            if (step) {
-              patternIndex = step.patternIndex;
-              currentChainItemId = step.originalItemId;
-              const patternLen = state.patternLengths?.[patternIndex] || 16;
-              localStepIndex = Math.min(patternLen - 1, Math.max(0, Math.floor((beatInMeasure / 4) * patternLen)));
+          if (state.patternChain !== this.cachedPatternChainRef) {
+            this.cachedPatternChainRef = state.patternChain;
+            this.cachedLinearPatternChain = normalizePatternChainToLinear(state.patternChain);
+          }
+          const linearClips = this.cachedLinearPatternChain;
+          const loopBeats = Math.max(beatsPerMeasure, this.cachedMaxBeat || beatsPerMeasure);
+          const wrappedBeat = ((beat % loopBeats) + loopBeats) % loopBeats;
+          const currentMeasure = wrappedBeat / beatsPerMeasure;
+          let activeClip: typeof linearClips[number] | undefined;
+          for (let i = 0; i < linearClips.length; i++) {
+            const c = linearClips[i];
+            if (currentMeasure >= c.startMeasure - 1e-6 && currentMeasure < c.startMeasure + c.durationMeasures - 1e-6) {
+              activeClip = c;
+              break;
             }
+          }
+          if (activeClip) {
+            patternIndex = activeClip.patternIndex;
+            currentChainItemId = activeClip.id;
+            const beatInMeasure = wrappedBeat - Math.floor(currentMeasure) * beatsPerMeasure;
+            const patternLen = state.patternLengths?.[patternIndex] || 16;
+            localStepIndex = Math.min(patternLen - 1, Math.max(0, Math.floor((beatInMeasure / beatsPerMeasure) * patternLen)));
+          } else {
+            patternIndex = state.currentDrumPatternEdit;
+            currentChainItemId = null;
+            localStepIndex = -1;
           }
         } else {
           patternIndex = state.currentDrumPatternEdit;
-          const beatInMeasure = ((beat % 4) + 4) % 4;
+          const beatInMeasure = ((beat % beatsPerMeasure) + beatsPerMeasure) % beatsPerMeasure;
           const patternLen = state.patternLengths?.[patternIndex] || 16;
-          localStepIndex = Math.min(patternLen - 1, Math.max(0, Math.floor((beatInMeasure / 4) * patternLen)));
+          localStepIndex = Math.min(patternLen - 1, Math.max(0, Math.floor((beatInMeasure / beatsPerMeasure) * patternLen)));
         }
 
-        if (!state.isPatternRepeatOn) {
-          state.setCurrentChainItemId(currentChainItemId);
-          if (!state.isLiveFollowLocked && state.patternChain && state.patternChain.length > 0) {
+        if (!state.isPatternRepeatOn && !state.isLiveFollowLocked && state.patternChain && state.patternChain.length > 0) {
+          if (state.currentDrumPatternEdit !== patternIndex) {
             state.setCurrentDrumPatternEditLive(patternIndex);
           }
         }
-        if (state.currentDrumPatternEdit === patternIndex || state.activeView === 'visualizer') {
-          state.setPlaybackStep(localStepIndex);
-        } else {
-          state.setPlaybackStep(-1);
-        }
+        const emittedStep = (state.currentDrumPatternEdit === patternIndex || state.activeView === 'visualizer')
+          ? localStepIndex
+          : -1;
+        liveTelemetryBus.emitDrumStep(emittedStep, state.isPatternRepeatOn ? null : currentChainItemId);
       },
       onSongEnd: () => {
         const state = useSongStore.getState();
@@ -194,142 +241,111 @@ class ToneEngine {
     }, 50);
 
     this.ensureStoreSubscribed();
+    this.bindGlobalGestureUnlock();
+  }
+
+  private bindGlobalGestureUnlock() {
+    if (this.unlockGestureBound || typeof window === 'undefined') return;
+    this.unlockGestureBound = true;
+
+    const handleFirstGesture = () => {
+      this.unlockIfSuspended();
+      const rawCtx = Tone.getContext().rawContext as AudioContext;
+      const nativeCtx = getNativeAudioContext(rawCtx);
+      if (nativeCtx?.state === 'running' || rawCtx?.state === 'running') {
+        window.removeEventListener('pointerdown', handleFirstGesture, true);
+        window.removeEventListener('keydown', handleFirstGesture, true);
+        window.removeEventListener('touchstart', handleFirstGesture, true);
+      }
+    };
+
+    window.addEventListener('pointerdown', handleFirstGesture, { capture: true, passive: true });
+    window.addEventListener('keydown', handleFirstGesture, { capture: true, passive: true });
+    window.addEventListener('touchstart', handleFirstGesture, { capture: true, passive: true });
+  }
+
+  public unlockIfSuspended(): void {
+    const rawCtx = Tone.getContext().rawContext as AudioContext;
+    const nativeCtx = getNativeAudioContext(rawCtx);
+
+    if (nativeCtx?.state === 'running' || rawCtx?.state === 'running') {
+      this.isInitialized = true;
+      return;
+    }
+
+    try { Tone.start().catch(() => {}); } catch (_) {}
+    if (rawCtx && rawCtx.state === 'suspended') {
+      try { rawCtx.resume().catch(() => {}); } catch (_) {}
+    }
+    if (nativeCtx && nativeCtx !== rawCtx && nativeCtx.state === 'suspended') {
+      try { nativeCtx.resume().catch(() => {}); } catch (_) {}
+    }
   }
 
   private scheduleVisualNote(note: string, isMelody: boolean, triggerAudioTime: number, durationSeconds: number) {
     if (!note) return;
-    const now = Tone.now();
-    const delayMs = Math.max(0, (triggerAudioTime - now) * 1000);
-    const durationMs = Math.max(80, Math.min(3000, durationSeconds * 1000));
-
-    window.setTimeout(() => {
-      if (!useSongStore.getState().isPlaying) return;
-
-      const map = isMelody ? this.activePlaybackMelodyNotes : this.activePlaybackChordNotes;
-      map.set(note, (map.get(note) || 0) + 1);
-      this.flushVisualNotes();
-
-      window.setTimeout(() => {
-        const count = map.get(note) || 0;
-        if (count <= 1) {
-          map.delete(note);
-        } else {
-          map.set(note, count - 1);
-        }
-        this.flushVisualNotes();
-      }, durationMs);
-    }, delayMs);
-  }
-
-  private flushVisualNotes() {
-    if (this.visualNotesTimerId !== null) return;
-    this.visualNotesTimerId = window.requestAnimationFrame(() => {
-      this.visualNotesTimerId = null;
-      const state = useSongStore.getState();
-      const chordNotes = Array.from(this.activePlaybackChordNotes.keys());
-      const melodyNotes = Array.from(this.activePlaybackMelodyNotes.keys());
-
-      const prevChords = state.activeNotes;
-      let chordsChanged = prevChords.length !== chordNotes.length;
-      if (!chordsChanged) {
-        for (let i = 0; i < chordNotes.length; i++) {
-          if (chordNotes[i] !== prevChords[i]) {
-            chordsChanged = true;
-            break;
-          }
-        }
-      }
-      if (chordsChanged) {
-        state.setActiveNotes(chordNotes);
-      }
-
-      const prevMelody = state.activeMelodyNotes;
-      let melodyChanged = prevMelody.length !== melodyNotes.length;
-      if (!melodyChanged) {
-        for (let i = 0; i < melodyNotes.length; i++) {
-          if (melodyNotes[i] !== prevMelody[i]) {
-            melodyChanged = true;
-            break;
-          }
-        }
-      }
-      if (melodyChanged) {
-        state.setActiveMelodyNotes(melodyNotes);
-      }
-    });
+    liveTelemetryBus.scheduleVisualNote(note, triggerAudioTime, durationSeconds, isMelody ? 'melody' : 'harmony');
   }
 
   public clearActivePlaybackNotes() {
-    this.activePlaybackChordNotes.clear();
-    this.activePlaybackMelodyNotes.clear();
-    const state = useSongStore.getState();
-    if (state.activeNotes.length > 0) state.setActiveNotes([]);
-    if (state.activeMelodyNotes.length > 0) state.setActiveMelodyNotes([]);
+    liveTelemetryBus.clearScheduledNotes();
   }
 
   public async init(interactive = true): Promise<boolean> {
     this.ensureStoreSubscribed();
 
     const rawCtx = Tone.getContext().rawContext as AudioContext;
-    if (this.isInitialized && rawCtx && rawCtx.state === 'running') {
+    const nativeCtx = getNativeAudioContext(rawCtx);
+    const isAlreadyRunning = Boolean(nativeCtx?.state === 'running' || rawCtx?.state === 'running');
+
+    // Siempre disparar registro del worklet en segundo plano (funciona aunque esté suspended)
+    const workletPromise =
+      rawCtx && typeof rawCtx.audioWorklet?.addModule === 'function'
+        ? ensurePhosphorWorkletRegistered(rawCtx).catch(() => false)
+        : Promise.resolve(false);
+
+    if (isAlreadyRunning) {
+      this.isInitialized = true;
+      await Promise.race([workletPromise, new Promise((r) => setTimeout(r, 120))]);
       return true;
     }
 
-    if (this.initPromise) {
-      try {
-        await this.initPromise;
-        const currentCtx = Tone.getContext().rawContext as AudioContext;
-        if (this.isInitialized && currentCtx && currentCtx.state === 'running') {
-          return true;
-        }
-      } catch (_) {}
-    }
-
-    this.initPromise = (async () => {
-      try {
-        if (interactive) {
-          await Tone.start();
-        } else {
-          // En modo no interactivo (autoboot sin user gesture), no bloquear indefinidamente
-          await Promise.race([
-            Tone.start(),
-            new Promise((resolve) => setTimeout(resolve, 80))
-          ]);
-        }
-      } catch (e) {
-        console.warn('Advertencia al iniciar Tone.start():', e);
-      }
-
-      const activeCtx = Tone.getContext().rawContext as AudioContext;
-      if (activeCtx && activeCtx.state === 'suspended') {
-        try {
-          if (interactive) {
-            await activeCtx.resume();
-          } else {
-            await Promise.race([
-              activeCtx.resume(),
-              new Promise((resolve) => setTimeout(resolve, 80))
-            ]);
-          }
-        } catch (_) {}
-      }
-
-      // Pre-registrar módulo AudioWorklet DSP en el contexto de audio
-      try {
-        if (activeCtx && typeof activeCtx.audioWorklet?.addModule === 'function') {
-          await ensurePhosphorWorkletRegistered(activeCtx);
-        }
-      } catch (e) {
-        console.warn('Advertencia al precargar PhosphorWorklet:', e);
-      }
-
-      if (activeCtx && activeCtx.state === 'running') {
+    if (!interactive) {
+      await Promise.race([workletPromise, new Promise((r) => setTimeout(r, 250))]);
+      const runningAfter = Boolean(
+        getNativeAudioContext(Tone.getContext().rawContext)?.state === 'running' ||
+        (Tone.getContext().rawContext as AudioContext)?.state === 'running'
+      );
+      if (runningAfter) {
         this.isInitialized = true;
       }
-    })();
+      return this.isInitialized;
+    }
 
-    await this.initPromise;
-    this.initPromise = null;
+    // Modo interactivo (dentro de user gesture): disparar Tone.start() y resume() SÍNCRONAMENTE en el call stack actual
+    const p1 = (() => {
+      try {
+        return Tone.start().catch(() => {});
+      } catch (_) {
+        return Promise.resolve();
+      }
+    })();
+    const p2 = rawCtx?.state === 'suspended' ? rawCtx.resume().catch(() => {}) : Promise.resolve();
+    const p3 =
+      nativeCtx && nativeCtx !== rawCtx && nativeCtx.state === 'suspended'
+        ? nativeCtx.resume().catch(() => {})
+        : Promise.resolve();
+
+    await Promise.race([
+      Promise.all([p1, p2, p3]),
+      new Promise((resolve) => setTimeout(resolve, 450))
+    ]);
+
+    await Promise.race([workletPromise, new Promise((resolve) => setTimeout(resolve, 200))]);
+
+    const currentRaw = Tone.getContext().rawContext as AudioContext;
+    const currentNative = getNativeAudioContext(currentRaw);
+    this.isInitialized = Boolean(currentNative?.state === 'running' || currentRaw?.state === 'running');
 
     return this.isInitialized;
   }
@@ -342,6 +358,7 @@ class ToneEngine {
     const initialBpm = initialState.bpm || 120;
     this.cachedBpm = initialBpm;
     this.transportManager.setBpm(initialBpm);
+    this.instrumentManager.setBpm(initialBpm);
     try { Tone.Transport.bpm.value = initialBpm; } catch (_) {}
 
     this.cachedIsKeyboardMelodyEnabled = initialState.isKeyboardMelodyEnabled;
@@ -378,6 +395,7 @@ class ToneEngine {
     this.unsubscribeStore = useSongStore.subscribe((state) => {
       this.cachedIsKeyboardMelodyEnabled = state.isKeyboardMelodyEnabled;
       this.cachedIsKeyboardChromatic = state.isKeyboardChromatic;
+      this.cachedKeyboardCenterNote = state.keyboardCenterNote || 'C4';
       this.cachedKey = state.key;
       this.cachedScale = state.scale;
       this.cachedBpm = state.bpm;
@@ -403,7 +421,7 @@ class ToneEngine {
       }
 
       // 2. Piano Roll y Pistas Melódicas
-      if (state.tracks !== prevTracks || state.melodyNotes !== prevMelodyNotes) {
+      if (didTracksMusicalContentChange(prevTracks, state.tracks) || state.melodyNotes !== prevMelodyNotes) {
         prevTracks = state.tracks;
         prevMelodyNotes = state.melodyNotes;
         musicalContentChanged = true;
@@ -449,15 +467,18 @@ class ToneEngine {
         prevBpm = state.bpm;
         this.cachedBpm = state.bpm;
         this.transportManager.setBpm(state.bpm);
+        this.instrumentManager.setBpm(state.bpm);
         try { Tone.Transport.bpm.value = state.bpm; } catch (_) {}
         musicalContentChanged = true;
       }
 
-      // 6. Mezclador (Mute, Solo, Volumen)
+      // 6. Mezclador (sólo reconstruir timeline si cambia instrumento, mute o solo; faders/pan/knobs son instantáneos)
       if (state.channels !== prevChannels) {
+        if (didChannelsAudioRoutingChange(prevChannels, state.channels)) {
+          musicalContentChanged = true;
+        }
         prevChannels = state.channels;
         this.syncChannels(state.channels);
-        musicalContentChanged = true;
       }
 
       // 7. Configuración de Metrónomo
@@ -467,6 +488,9 @@ class ToneEngine {
         state.metroVolume !== prevMetroVolume ||
         state.timeSignature !== prevTimeSignature
       ) {
+        if (state.timeSignature !== prevTimeSignature) {
+          musicalContentChanged = true;
+        }
         prevIsMetronomeActive = state.isMetronomeActive;
         prevMetroSubdivision = state.metroSubdivision;
         prevMetroVolume = state.metroVolume;
@@ -493,7 +517,14 @@ class ToneEngine {
             this.transportManager.start(state.currentBeat, state.bpm, liveSec);
           };
 
-          if (!this.isInitialized) {
+          const rawCtx = Tone.getContext().rawContext as AudioContext;
+          const nativeCtx = getNativeAudioContext(rawCtx);
+          const isRunning = Boolean(nativeCtx?.state === 'running' || rawCtx?.state === 'running');
+
+          if (isRunning) {
+            this.isInitialized = true;
+            doPlay();
+          } else {
             this.init(true).then(() => {
               if (useSongStore.getState().isPlaying) {
                 doPlay();
@@ -502,8 +533,6 @@ class ToneEngine {
               console.error('[ToneEngine] Error al iniciar AudioContext para reproducción:', err);
               useSongStore.getState().setPlaying(false);
             });
-          } else {
-            doPlay();
           }
         } else {
           this.lookaheadScheduler.stop(false);
@@ -515,6 +544,7 @@ class ToneEngine {
       // 9. Modulaciones globales (Swing, Sustain)
       if (state.swing !== prevSwing) {
         prevSwing = state.swing;
+        musicalContentChanged = true;
         try {
           Tone.Transport.swing = state.swing;
           Tone.Transport.swingSubdivision = '16n';
@@ -566,7 +596,7 @@ class ToneEngine {
   }
 
   public getLiveBeat(): number {
-    if (!this.isInitialized) return 0;
+    if (!this.isInitialized && !useSongStore.getState().isPlaying) return useSongStore.getState().currentBeat || 0;
     return this.lookaheadScheduler.getLiveBeat();
   }
 
@@ -624,14 +654,15 @@ class ToneEngine {
     channels?: Record<string, ChannelConfig>,
     drumChannels?: Array<{ id: string; sampleUrl: string; pan?: number }>
   ): Promise<void> {
-    if (!this.isInitialized) await this.init();
+    if (!this.isInitialized) await this.init(false);
     const state = useSongStore.getState();
     const targetChannels = channels || state.channels;
     const targetDrumChannels = drumChannels || state.drumChannels;
 
     if (state.bpm) {
       this.transportManager.setBpm(state.bpm);
-      Tone.Transport.bpm.value = state.bpm;
+      this.instrumentManager.setBpm(state.bpm);
+      try { Tone.Transport.bpm.value = state.bpm; } catch (_) {}
       this.cachedBpm = state.bpm;
     }
     this.syncChannels(targetChannels);
@@ -643,17 +674,34 @@ class ToneEngine {
 
   public syncChannels(channels: Record<string, ChannelConfig>) {
     if (!channels) return;
+    const prev = this.cachedSyncedChannelsRef;
+    this.cachedSyncedChannelsRef = channels;
+
     this.mixerGraph.syncChannels(channels);
-    this.instrumentManager.syncActiveChannels(Object.keys(channels));
-    this.instrumentManager.preloadChannelInstruments(channels);
+
+    const routingChanged = !prev || didChannelsAudioRoutingChange(prev, channels);
+    if (routingChanged) {
+      this.instrumentManager.syncActiveChannels(Object.keys(channels));
+      this.instrumentManager.preloadChannelInstruments(channels);
+      return;
+    }
+
+    // Si solo cambiaron faders/pan/knobs (o undo/redo de synthSettings), no recargar todos los instrumentos
+    for (const [id, ch] of Object.entries(channels)) {
+      if (ch.synthSettings && prev[id]?.synthSettings !== ch.synthSettings && ch.instrument !== 'piano') {
+        this.instrumentManager.updateSynthSettings(ch.synthSettings, id);
+      }
+    }
   }
 
-  public playNotePreview(note: string, channelId: string = 'melody') {
+  public playNotePreview(note: string, channelId: string = 'melody', velocity = 0.8) {
+    this.unlockIfSuspended();
     const isPiano = useSongStore.getState().channels[channelId]?.instrument === 'piano';
-    this.previewManager.playNotePreview(note, channelId, isPiano);
+    this.previewManager.playNotePreview(note, channelId, isPiano, velocity);
   }
 
   public playChordPreview(chordName: string, chordOctaveShift = 0) {
+    this.unlockIfSuspended();
     this.previewManager.playChordPreview(chordName, chordOctaveShift);
   }
 
@@ -666,6 +714,7 @@ class ToneEngine {
       customPatterns?: PatternDef[];
     }
   ) {
+    this.unlockIfSuspended();
     const state = useSongStore.getState();
     this.previewManager.playChordPreviewStart(chordName, {
       pattern: options?.pattern || state.pattern || 'hold',
@@ -679,9 +728,10 @@ class ToneEngine {
     this.previewManager.playChordPreviewStop();
   }
 
-  public startNote(note: string, channelId = 'melody') {
+  public startNote(note: string, channelId = 'melody', velocity = 0.8) {
+    this.unlockIfSuspended();
     const isPiano = useSongStore.getState().channels[channelId]?.instrument === 'piano';
-    this.previewManager.startNote(note, channelId, isPiano);
+    this.previewManager.startNote(note, channelId, isPiano, velocity);
   }
 
   public stopNote(note: string, channelId = 'melody') {
@@ -701,11 +751,10 @@ class ToneEngine {
     this.lookaheadScheduler.stop(true);
     this.transportManager.stop();
     this.silence();
+    liveTelemetryBus.reset();
     const state = useSongStore.getState();
     state.setPlaying(false);
     state.setCurrentBeat(0);
-    state.setPlaybackStep(-1);
-    state.setCurrentChainItemId(null);
     state.setLiveBpm(state.bpm);
   }
 
@@ -715,7 +764,7 @@ class ToneEngine {
   }
 
   public getLiveSeconds(): number {
-    if (!this.isInitialized) return 0;
+    if (!this.isInitialized && !useSongStore.getState().isPlaying) return 0;
     return this.lookaheadScheduler.getLiveSeconds();
   }
 
@@ -726,12 +775,13 @@ class ToneEngine {
   }
 
   public seekToBeat(beat: number) {
-    if (!this.isInitialized) this.init();
+    this.unlockIfSuspended();
     this.lookaheadScheduler.seek(beat);
     this.audioTrackEngine.seek();
     const bpmAtBeat = this.lookaheadScheduler.getLiveBpm();
     this.cachedBpm = bpmAtBeat;
-    Tone.Transport.bpm.value = bpmAtBeat;
+    this.instrumentManager.setBpm(bpmAtBeat);
+    try { Tone.Transport.bpm.value = bpmAtBeat; } catch (_) {}
     const liveSec = this.lookaheadScheduler.getLiveSeconds();
     this.transportManager.seek(beat, bpmAtBeat, liveSec);
     useSongStore.getState().setCurrentBeat(beat);
@@ -839,6 +889,7 @@ class ToneEngine {
   }
 
   public playDrumPreview(channelId: string, customVelocity?: number) {
+    this.unlockIfSuspended();
     const state = useSongStore.getState();
     const channel = state.drumChannels.find((c) => c.id === channelId);
     if (!channel || channel.muted) return;
@@ -858,10 +909,10 @@ class ToneEngine {
     this.cachedBpm = bpm;
 
     this.transportManager.setBpm(bpm);
+    this.instrumentManager.setBpm(bpm);
     try { Tone.Transport.bpm.value = bpm; } catch (_) {}
 
-    const session = serializeSession(state);
-    const scheduled = scheduleSessionTimeline(session, state.customPatterns || []);
+    const scheduled = scheduleStoreTimeline(state);
     this.cachedMaxBeat = scheduled.totalBeats;
 
     this.lookaheadScheduler.setEvents(scheduled, bpm, state.isLooping, state.tempoMarkers);

@@ -1,18 +1,21 @@
 import React from 'react';
 import type { ChordBlock, NoteClass, ScaleType } from '../../../utils/typeDefinitions';
 import { isChordInScale, getChordRomanDegree } from '../../../core/music';
-import { getChordRole } from '../ChordPalette';
+import { getChordRole } from '../chordRoleUtils';
 
 interface TimelineBlockProps {
   block: ChordBlock;
   isSelected: boolean;
   isDragging: boolean;
+  isSliceToolActive?: boolean;
   startBeat: number;
   durationBeats: number;
   beatWidth: number;
   currentKey: NoteClass;
   scale: ScaleType;
   onMouseDown: (e: React.MouseEvent, block: ChordBlock) => void;
+  onMouseMove?: (e: React.MouseEvent, block: ChordBlock) => void;
+  onMouseLeave?: () => void;
   onContextMenu: (e: React.MouseEvent, block: ChordBlock) => void;
   onDoubleClick?: (e: React.MouseEvent, block: ChordBlock) => void;
 }
@@ -21,12 +24,15 @@ export const TimelineBlock: React.FC<TimelineBlockProps> = React.memo(({
   block,
   isSelected,
   isDragging,
+  isSliceToolActive = false,
   startBeat,
   durationBeats,
   beatWidth,
   currentKey,
   scale,
   onMouseDown,
+  onMouseMove,
+  onMouseLeave,
   onContextMenu,
   onDoubleClick
 }) => {
@@ -53,11 +59,13 @@ export const TimelineBlock: React.FC<TimelineBlockProps> = React.memo(({
         width: `${blockWidth}px`,
         height: '52px',
         zIndex: isSelected || isDragging ? 10 : 3,
-        cursor: isDragging ? 'grabbing' : 'grab',
+        cursor: isSliceToolActive ? 'crosshair' : isDragging ? 'grabbing' : 'grab',
         padding: isMicro ? '0.2rem 2px' : isCompact ? '0.25rem 4px' : '0.4rem 0.6rem',
         overflow: 'hidden'
       }}
       onMouseDown={(e) => onMouseDown(e, block)}
+      onMouseMove={(e) => onMouseMove?.(e, block)}
+      onMouseLeave={onMouseLeave}
       onContextMenu={(e) => onContextMenu(e, block)}
       onDoubleClick={(e) => onDoubleClick?.(e, block)}
       title={`${block.chord} (${durationBeats} beats)${romanDegree ? ` · Grado ${romanDegree}` : ''}`}

@@ -40,6 +40,7 @@ export const StageCanvas: React.FC<StageCanvasProps> = React.memo(({ mode }) => 
     const particles: StageParticle[] = [];
     const keyLuminanceMap = new Map<number, KeyLuminanceEntry>();
     const waveformBuffer = new Float32Array(512);
+    const frequencyBuffer = new Float32Array(64);
 
     let animId: number;
     let isFirstFrame = true;
@@ -60,10 +61,12 @@ export const StageCanvas: React.FC<StageCanvasProps> = React.memo(({ mode }) => 
         const isPlaying = store.isPlaying;
         const liveBeat = isPlaying ? toneEngine.getLiveBeat() : (store.currentBeat ?? 0);
         const waveform = toneEngine.getWaveformData(waveformBuffer);
+        const frequency = mode === 'spectrum' ? toneEngine.getFrequencyData(frequencyBuffer) : undefined;
 
         renderStageFrame(ctx, width, height, {
           beat: liveBeat,
           waveform,
+          frequency,
           notes: notesRef.current,
           drumChannels: store.drumChannels,
           patternChain: store.patternChain,

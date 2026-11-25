@@ -1,99 +1,90 @@
+import { useRef, useState, useLayoutEffect, useEffect } from 'react';
+import { LayoutGrid, Music, Grid3X3, AudioWaveform, Sparkles } from 'lucide-react';
 import { useSongStore } from '../../store/songStore';
 
+const VIEWS = [
+  { id: 'chord', label: 'CHORD PALETTE', color: '#60a5fa', shortcut: 'Alt+1', Icon: LayoutGrid },
+  { id: 'piano-roll', label: 'PIANO ROLL', color: '#a78bfa', shortcut: 'Alt+2', Icon: Music },
+  { id: 'sequencer', label: 'DRUM SEQUENCER', color: '#2dd4bf', shortcut: 'Alt+3', Icon: Grid3X3 },
+  { id: 'audio-tracks', label: 'TRACKS', color: '#e5a93c', shortcut: 'Alt+4', Icon: AudioWaveform },
+  { id: 'visualizer', label: 'STAGE', color: '#5a9e7a', shortcut: 'Alt+5', Icon: Sparkles },
+] as const;
+
 export const ViewToggle = () => {
-  const activeView = useSongStore(state => state.activeView);
-  const setActiveView = useSongStore(state => state.setActiveView);
+  const activeView = useSongStore((state) => state.activeView);
+  const setActiveView = useSongStore((state) => state.setActiveView);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [lensStyle, setLensStyle] = useState<{ left: number; width: number }>({ left: 4, width: 0 });
+
+  const syncLens = () => {
+    if (!trackRef.current) return;
+    const activeBtn = trackRef.current.querySelector<HTMLButtonElement>('.optical-glass-btn.active');
+    if (activeBtn) {
+      setLensStyle({
+        left: activeBtn.offsetLeft,
+        width: activeBtn.offsetWidth,
+      });
+    }
+  };
+
+  useLayoutEffect(() => {
+    syncLens();
+  }, [activeView]);
+
+  useEffect(() => {
+    window.addEventListener('resize', syncLens);
+    const el = trackRef.current;
+    const ro = typeof ResizeObserver !== 'undefined' && el ? new ResizeObserver(syncLens) : null;
+    if (ro && el) ro.observe(el);
+    return () => {
+      window.removeEventListener('resize', syncLens);
+      ro?.disconnect();
+    };
+  }, []);
 
   return (
     <div className="view-toggle-container">
       <span className="mock-label" style={{ marginRight: '8px', fontSize: '0.65rem', fontFamily: '"Share Tech Mono", monospace' }}>
         SELECCIONAR VISTA:
       </span>
-      <button
-        className={`toggle-btn ${activeView === 'chord' ? 'active' : ''}`}
-        onClick={() => setActiveView('chord')}
-      >
-        <span style={{ 
-          display: 'inline-block', 
-          width: '6px', 
-          height: '6px', 
-          borderRadius: '50%', 
-          backgroundColor: activeView === 'chord' ? '#82a5f5' : '#3a324a', 
-          marginRight: '8px',
-          boxShadow: activeView === 'chord' ? '0 0 6px #82a5f5, 0 0 10px #82a5f5' : 'none',
-          verticalAlign: 'middle',
-          transition: 'background-color 0.15s'
-        }}></span>
-        CHORD PALETTE
-      </button>
-      <button
-        className={`toggle-btn ${activeView === 'piano-roll' ? 'active' : ''}`}
-        onClick={() => setActiveView('piano-roll')}
-      >
-        <span style={{ 
-          display: 'inline-block', 
-          width: '6px', 
-          height: '6px', 
-          borderRadius: '50%', 
-          backgroundColor: activeView === 'piano-roll' ? '#82a5f5' : '#3a324a', 
-          marginRight: '8px',
-          boxShadow: activeView === 'piano-roll' ? '0 0 6px #82a5f5, 0 0 10px #82a5f5' : 'none',
-          verticalAlign: 'middle',
-          transition: 'background-color 0.15s'
-        }}></span>
-        PIANO ROLL
-      </button>
-      <button
-        className={`toggle-btn ${activeView === 'sequencer' ? 'active' : ''}`}
-        onClick={() => setActiveView('sequencer')}
-      >
-        <span style={{ 
-          display: 'inline-block', 
-          width: '6px', 
-          height: '6px', 
-          borderRadius: '50%', 
-          backgroundColor: activeView === 'sequencer' ? '#82a5f5' : '#3a324a', 
-          marginRight: '8px',
-          boxShadow: activeView === 'sequencer' ? '0 0 6px #82a5f5, 0 0 10px #82a5f5' : 'none',
-          verticalAlign: 'middle',
-          transition: 'background-color 0.15s'
-        }}></span>
-        DRUM SEQUENCER
-      </button>
-      <button
-        className={`toggle-btn ${activeView === 'audio-tracks' ? 'active' : ''}`}
-        onClick={() => setActiveView('audio-tracks')}
-      >
-        <span style={{ 
-          display: 'inline-block', 
-          width: '6px', 
-          height: '6px', 
-          borderRadius: '50%', 
-          backgroundColor: activeView === 'audio-tracks' ? '#e5a93c' : '#3a324a', 
-          marginRight: '8px',
-          boxShadow: activeView === 'audio-tracks' ? '0 0 6px #e5a93c, 0 0 10px #e5a93c' : 'none',
-          verticalAlign: 'middle',
-          transition: 'background-color 0.15s'
-        }}></span>
-        TRACKS
-      </button>
-      <button
-        className={`toggle-btn ${activeView === 'visualizer' ? 'active' : ''}`}
-        onClick={() => setActiveView('visualizer')}
-      >
-        <span style={{ 
-          display: 'inline-block', 
-          width: '6px', 
-          height: '6px', 
-          borderRadius: '50%', 
-          backgroundColor: activeView === 'visualizer' ? '#5a9e7a' : '#3a324a', 
-          marginRight: '8px',
-          boxShadow: activeView === 'visualizer' ? '0 0 6px #5a9e7a, 0 0 10px #5a9e7a' : 'none',
-          verticalAlign: 'middle',
-          transition: 'background-color 0.15s'
-        }}></span>
-        STAGE
-      </button>
+      <div className="optical-glass-track" ref={trackRef}>
+        <div
+          className="optical-glass-lens"
+          style={{
+            left: `${lensStyle.left}px`,
+            width: `${lensStyle.width}px`,
+            opacity: lensStyle.width > 0 ? 1 : 0
+          }}
+        />
+        {VIEWS.map((view) => {
+          const isActive = activeView === view.id;
+          const ViewIcon = view.Icon;
+          return (
+            <button
+              key={view.id}
+              className={`optical-glass-btn ${isActive ? 'active' : ''}`}
+              onClick={() => setActiveView(view.id)}
+              title={`${view.label} (${view.shortcut})`}
+              style={
+                isActive
+                  ? {
+                      textShadow: `0 0 8px ${view.color}aa`,
+                      borderBottom: `2px solid ${view.color}`,
+                      color: '#f3f1f9'
+                    }
+                  : undefined
+              }
+            >
+              <ViewIcon
+                size={12}
+                className="view-tab-icon"
+                style={{ color: isActive ? view.color : 'currentColor', opacity: isActive ? 1 : 0.65 }}
+              />
+              <span>{view.label}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 };

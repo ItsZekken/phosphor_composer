@@ -100,12 +100,6 @@ export async function ensurePhosphorRecorderWorkletRegistered(context?: any): Pr
 
   const promise = (async () => {
     try {
-      if (nativeCtx.state === 'suspended') {
-        try {
-          await nativeCtx.resume();
-        } catch (_) {}
-      }
-
       const blob = new Blob([RECORDER_PROCESSOR_JS], { type: 'application/javascript; charset=utf-8' });
       const blobUrl = URL.createObjectURL(blob);
       await nativeCtx.audioWorklet.addModule(blobUrl);

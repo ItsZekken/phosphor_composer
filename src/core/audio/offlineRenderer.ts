@@ -121,10 +121,11 @@ export async function renderSessionToAudioBuffer(
   };
 
   const preRenderedSynthBuffers = new Map<string, AudioBuffer>();
+  const projectBpm = session.transport.bpm || 120;
   synthEventsByChannel.forEach((events, channelId) => {
     if (!isChannelAudible(channelId)) return;
     const synthSettings = getSynthSettingsForChannel(channelId);
-    const buffer = renderSynthTrackOffline(events, synthSettings, totalDurationSeconds, sampleRate);
+    const buffer = renderSynthTrackOffline(events, synthSettings, totalDurationSeconds, sampleRate, projectBpm, true);
     preRenderedSynthBuffers.set(channelId, buffer);
   });
 
@@ -142,13 +143,18 @@ export async function renderSessionToAudioBuffer(
 
   // 4. Grafo maestro y FX Racks en Tone.Offline (se ejecuta a velocidad nativa C++ en <0.5s al contener pocos nodos)
   const renderedBuffer = await Tone.Offline(async () => {
+    try {
+      Tone.Transport.bpm.value = session.transport.bpm || 120;
+    } catch {}
+
     // 4.1. Grafo Maestro de Audio Offline
     const masterCh = channels['master'];
     const masterVol = masterCh?.volume ?? 80;
     const masterPan = masterCh ? Math.max(-1, Math.min(1, masterCh.pan)) : 0;
     const masterDb = faderToDb(masterVol);
 
-    const masterPanner = new Tone.Panner(masterPan).toDestination();
+    const masterLimiter = new Tone.Limiter(-0.5).toDestination();
+    const masterPanner = new Tone.Panner(masterPan).connect(masterLimiter);
     const masterVolume = new Tone.Volume(masterDb).connect(masterPanner);
     if (masterCh?.muted) {
       masterVolume.mute = true;
@@ -172,6 +178,7 @@ export async function renderSessionToAudioBuffer(
 
     enforceStereo(masterVolume);
     enforceStereo(masterPanner);
+    enforceStereo(masterLimiter);
 
     // 4.2. Nodos de Canales Individuales con soporte de Solo y Mute
     const channelNodes = new Map<string, { volumeNode: Tone.Volume; pannerNode: Tone.Panner }>();
@@ -222,56 +229,15 @@ export async function renderSessionToAudioBuffer(
       return node;
     };
 
-    // 4.3. Inyectar Pistas de Sintetizador Pre-renderizadas con sus Cadenas de Efectos Nativas (Chorus, Delay, Reverb)
+    // 4.3. Inyectar Pistas de Sintetizador Pre-renderizadas (con Chorus, Delay y Reverb WASM ya integrados en DSP)
     // Se inserta la ganancia calibrada de salida (0.6 = -4.4 dB) para paridad acústica total con PhosphorAnalogSynth en tiempo real
     preRenderedSynthBuffers.forEach((audioBuffer, channelId) => {
       const chNode = getChannelNode(channelId);
-      const synthSettings = getSynthSettingsForChannel(channelId);
-      const fx = synthSettings.fx;
-
-      const isChorusActive = Boolean(fx?.chorus?.enabled && (fx.chorus.mix ?? 0) > 0.01);
-      const isDelayActive = Boolean(fx?.delay?.enabled && (fx.delay.mix ?? 0) > 0.01);
-      const isReverbActive = Boolean(fx?.reverb?.enabled && (fx.reverb.mix ?? 0) > 0.01);
-
-      // Etapa calibrada de salida (replica el outputNode de PhosphorAnalogSynth a 0.6)
       const outputCalibrationGain = new Tone.Gain(0.6).connect(chNode.volumeNode);
       enforceStereo(outputCalibrationGain);
-      let fxInput: Tone.ToneAudioNode = outputCalibrationGain;
-
-      if (isReverbActive) {
-        const reverb = new Tone.Freeverb({
-          roomSize: Math.max(0.1, Math.min(0.9, (fx?.reverb?.decay ?? 1.8) / 4)),
-          dampening: 3000,
-          wet: fx!.reverb.mix ?? 0.15
-        }).connect(fxInput);
-        enforceStereo(reverb);
-        fxInput = reverb;
-      }
-
-      if (isDelayActive) {
-        const delay = new Tone.FeedbackDelay({
-          delayTime: fx?.delay?.time ?? '8n',
-          feedback: Math.min(0.85, fx?.delay?.feedback ?? 0.25),
-          wet: fx!.delay.mix ?? 0.2
-        }).connect(fxInput);
-        enforceStereo(delay);
-        fxInput = delay;
-      }
-
-      if (isChorusActive) {
-        const chorus = new Tone.Chorus({
-          frequency: fx?.chorus?.rate ?? 1.5,
-          delayTime: 3.5,
-          depth: fx?.chorus?.depth ?? 0.4,
-          wet: fx!.chorus.mix ?? 0.3
-        }).connect(fxInput);
-        enforceStereo(chorus);
-        try { chorus.start(0); } catch {}
-        fxInput = chorus;
-      }
 
       const toneBuffer = new Tone.ToneAudioBuffer(audioBuffer);
-      const source = new Tone.ToneBufferSource(toneBuffer).connect(fxInput);
+      const source = new Tone.ToneBufferSource(toneBuffer).connect(outputCalibrationGain);
       enforceStereo(source);
       source.start(0);
     });

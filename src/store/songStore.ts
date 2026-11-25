@@ -74,6 +74,10 @@ export const useSongStore = create<SongStore>()(
           ...initialMixerState,
           ...initialUIState,
           ...initialAudioTrackState,
+          projectTitle: 'Sin título',
+          lastSavedAt: null,
+          commandPaletteMode: 'closed',
+          isCrtEnabled: get().isCrtEnabled,
           bpm: 100,
           isAutoKey: false,
           detectedKey: null,
@@ -85,7 +89,7 @@ export const useSongStore = create<SongStore>()(
         get().updateSuggestions();
       },
 
-      importSong: (sessionInput: unknown) => {
+      importSong: (sessionInput: unknown, fallbackTitle?: string) => {
         const { session } = deserializeSession(sessionInput);
         const activeTrack = session.tracks.find((t) => t.id === session.activeTrackId) || session.tracks[0];
         const activeMelodyNotes = activeTrack ? activeTrack.notes : [];
@@ -97,7 +101,15 @@ export const useSongStore = create<SongStore>()(
             ? (Object.values(rawDrumChannels) as any)
             : DEFAULT_DRUM_CHANNELS);
 
+        const rawTitle = session.metadata?.title?.trim();
+        const isGenericTitle =
+          !rawTitle || /^phosphor (project|composition)/i.test(rawTitle) || rawTitle === 'Sin título';
+        const resolvedTitle = !isGenericTitle
+          ? rawTitle
+          : (fallbackTitle?.trim() || 'Sin título');
+
         set({
+          projectTitle: resolvedTitle,
           bpm: session.transport.bpm,
           tempoMarkers: session.transport.tempoMarkers || [],
           key: session.transport.key,
@@ -105,6 +117,7 @@ export const useSongStore = create<SongStore>()(
           isAutoKey: session.transport.isAutoKey,
           detectedKey: null,
           timeSignature: session.transport.timeSignature,
+          swing: session.transport.swing ?? 0,
           pattern: session.harmony.defaultPattern,
           chordBlocks: session.harmony.chordBlocks,
           styleMarkers: session.harmony.styleMarkers,
@@ -154,7 +167,6 @@ export const useSongStore = create<SongStore>()(
         scale: state.scale,
         chordBlocks: state.chordBlocks,
         chordGridSnap: state.chordGridSnap,
-        chordTimelineViewport: state.chordTimelineViewport,
         tracks: state.tracks,
         styleMarkers: state.styleMarkers,
         timeSignature: state.timeSignature,
@@ -163,10 +175,27 @@ export const useSongStore = create<SongStore>()(
         drumChannels: state.drumChannels,
         patternLengths: state.patternLengths,
         patternChain: state.patternChain,
-        drumTimelineViewport: state.drumTimelineViewport,
         audioTracks: state.audioTracks,
         audioClips: state.audioClips,
       }),
+      equality: (pastState, currentState) => {
+        const keys = Object.keys(pastState) as Array<keyof typeof pastState>;
+        for (const k of keys) {
+          if (k === 'tracks') {
+            if (pastState.tracks.length !== currentState.tracks.length) return false;
+            for (let i = 0; i < pastState.tracks.length; i++) {
+              const a = pastState.tracks[i];
+              const b = currentState.tracks[i];
+              if (a.id !== b.id || a.name !== b.name || a.channelId !== b.channelId || a.color !== b.color || a.notes !== b.notes) {
+                return false;
+              }
+            }
+            continue;
+          }
+          if (pastState[k] !== currentState[k]) return false;
+        }
+        return true;
+      }
     }
   )
 );

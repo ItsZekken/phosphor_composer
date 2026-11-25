@@ -7,11 +7,19 @@
 import * as Tone from 'tone';
 import type { MixerGraph } from './MixerGraph';
 
+interface DrumChannelNodeEntry {
+  volumeNode: Tone.Volume;
+  pannerNode: Tone.Panner;
+  lastPan: number;
+}
+
 export class DrumSoundManager {
   private activeSources = new Set<Tone.ToneBufferSource>();
-  private drumChannelNodes = new Map<string, { volumeNode: Tone.Volume; pannerNode: Tone.Panner }>();
+  private activeNativeSources = new Set<AudioBufferSourceNode>();
+  private drumChannelNodes = new Map<string, DrumChannelNodeEntry>();
   private drumSynths = new Map<string, Tone.MembraneSynth | Tone.NoiseSynth | Tone.MetalSynth>();
   private bufferCache = new Map<string, Tone.ToneAudioBuffer>();
+  private nativeBufferCache = new Map<string, AudioBuffer>();
   private loadingPromises = new Map<string, Promise<Tone.ToneAudioBuffer | null>>();
   private mixerGraph: MixerGraph;
 
@@ -63,9 +71,10 @@ export class DrumSoundManager {
         nativePanner.pan.value = clampedPan;
       }
 
-      node = { volumeNode, pannerNode };
+      node = { volumeNode, pannerNode, lastPan: clampedPan };
       this.drumChannelNodes.set(channelId, node);
-    } else {
+    } else if (Math.abs(clampedPan - node.lastPan) > 1e-4) {
+      node.lastPan = clampedPan;
       try { node.pannerNode.pan.cancelScheduledValues(0); } catch (_) {}
       node.pannerNode.pan.value = clampedPan;
       const nativePanner = (node.pannerNode as any).output || (node.pannerNode as any)._panner;
@@ -102,6 +111,10 @@ export class DrumSoundManager {
           sampleUrl,
           () => {
             this.bufferCache.set(sampleUrl, buffer);
+            const rawBuf = (buffer as any).get?.() || (buffer as any)._buffer;
+            if (rawBuf && typeof rawBuf.getChannelData === 'function') {
+              this.nativeBufferCache.set(sampleUrl, rawBuf);
+            }
             this.loadingPromises.delete(sampleUrl);
             resolve(buffer);
           },
@@ -173,10 +186,42 @@ export class DrumSoundManager {
 
     if (cachedBuffer && (cachedBuffer as any).loaded) {
       try {
+        const gainFactor = Math.max(0, Math.min(4, Math.pow(10, volDb / 20)));
+        const audioCtx = Tone.getContext().rawContext as AudioContext;
+        let nativeBuf = this.nativeBufferCache.get(sampleUrl);
+        if (!nativeBuf) {
+          const rawBuf = (cachedBuffer as any).get?.() || (cachedBuffer as any)._buffer;
+          if (rawBuf && typeof rawBuf.getChannelData === 'function') {
+            nativeBuf = rawBuf;
+            this.nativeBufferCache.set(sampleUrl, rawBuf);
+          }
+        }
+
+        if (
+          audioCtx &&
+          nativeBuf &&
+          typeof audioCtx.createBufferSource === 'function' &&
+          typeof audioCtx.createGain === 'function'
+        ) {
+          const src = audioCtx.createBufferSource();
+          src.buffer = nativeBuf;
+          const gainNode = audioCtx.createGain();
+          gainNode.gain.value = gainFactor;
+          src.connect(gainNode);
+          Tone.connect(gainNode, channelNode.volumeNode);
+          const startAt = time !== undefined ? Math.max(audioCtx.currentTime, time) : audioCtx.currentTime;
+          src.start(startAt);
+          this.activeNativeSources.add(src);
+          src.onended = () => {
+            this.activeNativeSources.delete(src);
+            try { src.disconnect(); gainNode.disconnect(); } catch (_) {}
+          };
+          return;
+        }
+
         const source = new Tone.ToneBufferSource(cachedBuffer);
         source.connect(channelNode.volumeNode);
 
-        const gainFactor = Tone.dbToGain(volDb);
         source.start(time, 0, undefined, gainFactor);
 
         this.activeSources.add(source);
@@ -230,6 +275,14 @@ export class DrumSoundManager {
    * Detiene inmediatamente todas las muestras de batería activas al pausar/detener la reproducción.
    */
   public stopAll() {
+    this.activeNativeSources.forEach((src) => {
+      try {
+        src.stop();
+        src.disconnect();
+      } catch (_) {}
+    });
+    this.activeNativeSources.clear();
+
     this.activeSources.forEach((source) => {
       try {
         source.stop();
@@ -257,6 +310,7 @@ export class DrumSoundManager {
       try { buf.dispose(); } catch (_) {}
     });
     this.bufferCache.clear();
+    this.nativeBufferCache.clear();
     this.loadingPromises.clear();
   }
 }

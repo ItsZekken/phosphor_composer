@@ -10,7 +10,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "patterns": "node scripts/processPatterns.mjs"
+    "patterns": "node scripts/processPatterns.mjs",
+    "wasm": "tsx scripts/build-phosphor-wasm.ts"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",

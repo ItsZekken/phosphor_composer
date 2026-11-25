@@ -1,5 +1,6 @@
 import type { SliceCreator, DrumState, DrumActions } from '../types';
 import type { DrumChannel, PatternChainItem } from '../../utils/typeDefinitions';
+import { normalizePatternChainItems } from '../../utils/typeDefinitions';
 import { PRESET_DRUM_KITS, findMatchingKitId, inferCategoryFromChannel } from '../../constants/drumKits';
 import { generateId } from '../../utils/idGenerator';
 
@@ -34,7 +35,7 @@ export const initialDrumState: DrumState = {
   currentChainItemId: null,
 };
 
-export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set) => ({
+export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set, get) => ({
   ...initialDrumState,
 
   selectDrumKit: (kitId) => set((state) => {
@@ -144,10 +145,14 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set) => (
 
     let nextChain = state.patternChain;
     if (becameActive && state.patternChain.length === 0) {
-      const hasAnyInChain = state.patternChain.some(i => i.patternIndex === patternIndex || i.items?.some(sub => sub.patternIndex === patternIndex));
-      if (!hasAnyInChain) {
-        nextChain = [...state.patternChain, { id: generateId('chain'), type: 'pattern', patternIndex, repeatCount: 1 }];
-      }
+      nextChain = [{
+        id: generateId('chain'),
+        type: 'pattern',
+        patternIndex,
+        startMeasure: 0,
+        durationMeasures: 1,
+        repeatCount: 1
+      }];
     }
 
     return {
@@ -268,24 +273,12 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set) => (
 
     const nextLengths = (state.patternLengths || []).filter((_, idx) => idx !== targetIndex);
 
-    const nextChain: PatternChainItem[] = state.patternChain
-      .map(item => {
-        if (item.type === 'group' && item.items) {
-          const reindexedItems = item.items
-            .map(sub => {
-              if (sub.patternIndex === undefined || sub.patternIndex < 0) return sub;
-              if (sub.patternIndex === targetIndex) return { ...sub, patternIndex: Math.max(0, targetIndex - 1) };
-              if (sub.patternIndex > targetIndex) return { ...sub, patternIndex: sub.patternIndex - 1 };
-              return sub;
-            });
-          return { ...item, items: reindexedItems };
-        } else {
-          if (item.patternIndex === undefined || item.patternIndex < 0) return item;
-          if (item.patternIndex === targetIndex) return { ...item, patternIndex: Math.max(0, targetIndex - 1) };
-          if (item.patternIndex > targetIndex) return { ...item, patternIndex: item.patternIndex - 1 };
-          return item;
-        }
-      });
+    const nextChain: PatternChainItem[] = normalizePatternChainItems(state.patternChain).map(item => {
+      if (item.patternIndex === undefined || item.patternIndex < 0) return item;
+      if (item.patternIndex === targetIndex) return { ...item, patternIndex: Math.max(0, targetIndex - 1) };
+      if (item.patternIndex > targetIndex) return { ...item, patternIndex: item.patternIndex - 1 };
+      return item;
+    });
 
     const newEditIndex = Math.max(0, Math.min(totalPatterns - 2, state.userDrumPatternEdit >= targetIndex ? state.userDrumPatternEdit - 1 : state.userDrumPatternEdit));
 
@@ -329,54 +322,32 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set) => (
   }),
 
   selectAllChainItems: () => set((state) => {
-    const allIds: string[] = [];
-    state.patternChain.forEach(item => {
-      allIds.push(item.id);
-      if (item.type === 'group' && item.items) {
-        item.items.forEach(sub => allIds.push(sub.id));
-      }
-    });
-    return { selectedChainIds: allIds };
+    const linear = normalizePatternChainItems(state.patternChain);
+    return { selectedChainIds: linear.map(item => item.id) };
   }),
 
   copySelectedChainItems: () => set((state) => {
     if (state.selectedChainIds.length === 0) return state;
-    const copied: PatternChainItem[] = [];
-    state.patternChain.forEach(item => {
-      if (state.selectedChainIds.includes(item.id)) {
-        copied.push(JSON.parse(JSON.stringify(item)));
-      } else if (item.type === 'group' && item.items) {
-        const selectedSub = item.items.filter(sub => state.selectedChainIds.includes(sub.id));
-        selectedSub.forEach(sub => copied.push(JSON.parse(JSON.stringify(sub))));
-      }
-    });
+    const linear = normalizePatternChainItems(state.patternChain);
+    const copied = linear
+      .filter(item => state.selectedChainIds.includes(item.id))
+      .map(item => ({ ...item }));
     return { chainClipboard: copied };
   }),
 
   cutSelectedChainItems: () => set((state) => {
     if (state.selectedChainIds.length === 0) return state;
+    const linear = normalizePatternChainItems(state.patternChain);
     const copied: PatternChainItem[] = [];
     const nextChain: PatternChainItem[] = [];
 
-    state.patternChain.forEach(item => {
+    for (const item of linear) {
       if (state.selectedChainIds.includes(item.id)) {
-        copied.push(JSON.parse(JSON.stringify(item)));
-      } else if (item.type === 'group' && item.items) {
-        const remainingSub: PatternChainItem[] = [];
-        item.items.forEach(sub => {
-          if (state.selectedChainIds.includes(sub.id)) {
-            copied.push(JSON.parse(JSON.stringify(sub)));
-          } else {
-            remainingSub.push(sub);
-          }
-        });
-        if (remainingSub.length > 0) {
-          nextChain.push({ ...item, items: remainingSub });
-        }
+        copied.push({ ...item });
       } else {
         nextChain.push(item);
       }
-    });
+    }
 
     return {
       chainClipboard: copied,
@@ -388,137 +359,71 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set) => (
   pasteChainItems: (targetId) => set((state) => {
     if (!state.chainClipboard || state.chainClipboard.length === 0) return state;
 
-    const clonedItems: PatternChainItem[] = state.chainClipboard.map(item => {
-      const clone = JSON.parse(JSON.stringify(item));
-      clone.id = generateId(clone.type === 'group' ? 'group' : 'chain');
-      if (clone.type === 'group' && clone.items) {
-        clone.items = clone.items.map((sub: any) => ({ ...sub, id: generateId('chain') }));
-      }
-      return clone;
-    });
+    const linearClip = normalizePatternChainItems(state.chainClipboard);
+    if (linearClip.length === 0) return state;
 
-    const newIds = clonedItems.map(i => i.id);
-    const nextChain = [...state.patternChain];
+    const linearExisting = normalizePatternChainItems(state.patternChain);
+    const beatsPerMeasure = state.timeSignature === '3/4' ? 3 : state.timeSignature === '6/8' ? 6 : 4;
+    const minStart = Math.min(...linearClip.map(i => i.startMeasure ?? 0));
 
+    let targetBaseMeasure = Math.max(0, Math.round(((state.currentBeat || 0) / beatsPerMeasure) * 4) / 4);
     if (targetId) {
-      const targetIndex = nextChain.findIndex(i => i.id === targetId);
-      if (targetIndex !== -1) {
-        nextChain.splice(targetIndex + 1, 0, ...clonedItems);
-      } else {
-        nextChain.push(...clonedItems);
+      const targetItem = linearExisting.find(i => i.id === targetId);
+      if (targetItem) {
+        targetBaseMeasure = (targetItem.startMeasure ?? 0) + (targetItem.durationMeasures ?? targetItem.repeatCount ?? 1);
       }
-    } else {
-      nextChain.push(...clonedItems);
+    } else if (targetBaseMeasure === 0 && linearExisting.length > 0 && state.currentBeat === 0) {
+      targetBaseMeasure = linearExisting.reduce((m, i) => Math.max(m, (i.startMeasure ?? 0) + (i.durationMeasures ?? 1)), 0);
     }
 
+    const pasted: PatternChainItem[] = linearClip.map(item => ({
+      ...item,
+      id: generateId('chain'),
+      startMeasure: targetBaseMeasure + ((item.startMeasure ?? 0) - minStart)
+    }));
+
+    const nextChain = [...linearExisting, ...pasted].sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0));
     return {
       patternChain: nextChain,
-      selectedChainIds: newIds
+      selectedChainIds: pasted.map(i => i.id)
     };
   }),
 
   duplicateSelectedChainItems: () => set((state) => {
     if (state.selectedChainIds.length === 0) return state;
+    const linear = normalizePatternChainItems(state.patternChain);
+    const selected = linear.filter(i => state.selectedChainIds.includes(i.id));
+    if (selected.length === 0) return state;
 
-    const nextChain: PatternChainItem[] = [];
-    const newSelectedIds: string[] = [];
+    const minStart = Math.min(...selected.map(i => i.startMeasure ?? 0));
+    const maxEnd = selected.reduce((m, i) => Math.max(m, (i.startMeasure ?? 0) + (i.durationMeasures ?? 1)), 0);
+    const span = Math.max(0.25, maxEnd - minStart);
 
-    state.patternChain.forEach(item => {
-      nextChain.push(item);
-      if (state.selectedChainIds.includes(item.id)) {
-        const clone = JSON.parse(JSON.stringify(item));
-        clone.id = generateId(clone.type === 'group' ? 'group' : 'chain');
-        if (clone.type === 'group' && clone.items) {
-          clone.items = clone.items.map((sub: any) => ({ ...sub, id: generateId('chain') }));
-        }
-        nextChain.push(clone);
-        newSelectedIds.push(clone.id);
-      } else if (item.type === 'group' && item.items) {
-        const newGroupItems: PatternChainItem[] = [];
-        item.items.forEach(sub => {
-          newGroupItems.push(sub);
-          if (state.selectedChainIds.includes(sub.id)) {
-            const subClone = { ...sub, id: generateId('chain') };
-            newGroupItems.push(subClone);
-            newSelectedIds.push(subClone.id);
-          }
-        });
-        nextChain[nextChain.length - 1] = { ...item, items: newGroupItems };
-      }
-    });
+    const clones: PatternChainItem[] = selected.map(i => ({
+      ...i,
+      id: generateId('chain'),
+      startMeasure: (i.startMeasure ?? 0) + span
+    }));
 
+    const nextChain = [...linear, ...clones].sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0));
     return {
       patternChain: nextChain,
-      selectedChainIds: newSelectedIds.length > 0 ? newSelectedIds : state.selectedChainIds
+      selectedChainIds: clones.map(c => c.id)
     };
   }),
 
   deleteSelectedChainItems: () => set((state) => {
     if (state.selectedChainIds.length === 0) return state;
-    const nextChain: PatternChainItem[] = [];
-
-    state.patternChain.forEach(item => {
-      if (!state.selectedChainIds.includes(item.id)) {
-        if (item.type === 'group' && item.items) {
-          const remaining = item.items.filter(sub => !state.selectedChainIds.includes(sub.id));
-          if (remaining.length > 0) {
-            nextChain.push({ ...item, items: remaining });
-          }
-        } else {
-          nextChain.push(item);
-        }
-      }
-    });
-
+    const linear = normalizePatternChainItems(state.patternChain);
+    const nextChain = linear.filter(item => !state.selectedChainIds.includes(item.id));
     return {
       patternChain: nextChain,
       selectedChainIds: []
     };
   }),
 
-  groupSelectedChainItems: () => set((state) => {
-    if (state.selectedChainIds.length <= 1) return state;
-    const selectedTopLevel = state.patternChain.filter(i => state.selectedChainIds.includes(i.id));
-    if (selectedTopLevel.length <= 1) return state;
-
-    const firstIndex = state.patternChain.findIndex(i => state.selectedChainIds.includes(i.id));
-    const newGroup: PatternChainItem = {
-      id: generateId('group'),
-      type: 'group',
-      repeatCount: 1,
-      items: selectedTopLevel.map(i => i.type === 'group' ? (i.items || []) : [i]).flat()
-    };
-
-    const nextChain = state.patternChain.filter(i => !state.selectedChainIds.includes(i.id));
-    nextChain.splice(firstIndex, 0, newGroup);
-
-    return {
-      patternChain: nextChain,
-      selectedChainIds: [newGroup.id]
-    };
-  }),
-
-  ungroupSelectedChainItems: () => set((state) => {
-    if (state.selectedChainIds.length === 0) return state;
-    const nextChain: PatternChainItem[] = [];
-    const newSelected: string[] = [];
-
-    state.patternChain.forEach(item => {
-      if (state.selectedChainIds.includes(item.id) && item.type === 'group' && item.items) {
-        item.items.forEach(sub => {
-          nextChain.push(sub);
-          newSelected.push(sub.id);
-        });
-      } else {
-        nextChain.push(item);
-      }
-    });
-
-    return {
-      patternChain: nextChain,
-      selectedChainIds: newSelected.length > 0 ? newSelected : state.selectedChainIds
-    };
-  }),
+  groupSelectedChainItems: () => set((state) => state),
+  ungroupSelectedChainItems: () => set((state) => state),
 
   setDrumTimelineViewport: (viewport) => set((state) => ({
     drumTimelineViewport: { ...state.drumTimelineViewport, ...viewport }
@@ -528,38 +433,180 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set) => (
     drumTimelineViewport: { ...state.drumTimelineViewport, scrollLeft: 0 }
   })),
 
-  addChainItem: (patternIndex, repeatCount = 1) => set((state) => ({
-    patternChain: [...state.patternChain, {
+  addChainItem: (patternIndex, durationMeasures = 1, startMeasure) => set((state) => {
+    if (patternIndex < 0) return state;
+    const linear = normalizePatternChainItems(state.patternChain);
+    const maxEnd = linear.reduce((m, i) => Math.max(m, (i.startMeasure ?? 0) + (i.durationMeasures ?? 1)), 0);
+    const resolvedStart = typeof startMeasure === 'number' ? Math.max(0, startMeasure) : maxEnd;
+    const dur = Math.max(0.25, durationMeasures);
+
+    const newItem: PatternChainItem = {
       id: generateId('chain'),
-      type: patternIndex === -1 ? 'rest' : 'pattern',
+      type: 'pattern',
       patternIndex,
-      repeatCount
-    }]
-  })),
+      startMeasure: resolvedStart,
+      durationMeasures: dur,
+      repeatCount: Math.max(1, Math.round(dur))
+    };
 
-  updateChainItem: (id, updates) => set((state) => ({
-    patternChain: state.patternChain.map(item => {
-      if (item.id === id) return { ...item, ...updates };
-      if (item.type === 'group' && item.items) {
-        return {
-          ...item,
-          items: item.items.map(sub => sub.id === id ? { ...sub, ...updates } : sub)
-        };
-      }
-      return item;
-    })
-  })),
+    return {
+      patternChain: [...linear, newItem].sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0)),
+      selectedChainIds: [newItem.id]
+    };
+  }),
 
-  removeChainItem: (id) => set((state) => ({
-    patternChain: state.patternChain.filter(item => {
-      if (item.id === id) return false;
-      if (item.type === 'group' && item.items) {
-        item.items = item.items.filter(sub => sub.id !== id);
+  addChainItemsBatch: (clips) => {
+    if (!clips || clips.length === 0) return [];
+    const linear = normalizePatternChainItems(get().patternChain);
+    const created: PatternChainItem[] = clips.map(c => {
+      const dur = Math.max(0.25, c.durationMeasures);
+      return {
+        id: generateId('chain'),
+        type: 'pattern' as const,
+        patternIndex: Math.max(0, c.patternIndex),
+        startMeasure: Math.max(0, c.startMeasure),
+        durationMeasures: dur,
+        repeatCount: Math.max(1, Math.round(dur))
+      };
+    });
+    const newIds = created.map(c => c.id);
+    set({
+      patternChain: [...linear, ...created].sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0)),
+      selectedChainIds: newIds
+    });
+    return newIds;
+  },
+
+  updateChainItem: (id, updates) => set((state) => {
+    const linear = normalizePatternChainItems(state.patternChain);
+    const nextChain = linear.map(item => {
+      if (item.id !== id) return item;
+      const merged = { ...item, ...updates };
+      if (updates.durationMeasures !== undefined) {
+        merged.repeatCount = Math.max(1, Math.round(updates.durationMeasures));
+      } else if (updates.repeatCount !== undefined) {
+        merged.durationMeasures = Math.max(0.25, updates.repeatCount);
       }
-      return true;
-    }),
-    selectedChainIds: state.selectedChainIds.filter(selectedId => selectedId !== id)
-  })),
+      return merged;
+    }).sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0));
+    return { patternChain: nextChain };
+  }),
+
+  updateChainItemsBatch: (updates) => set((state) => {
+    if (!updates || updates.length === 0) return state;
+    const map = new Map(updates.map(u => [u.id, u.changes]));
+    const linear = normalizePatternChainItems(state.patternChain);
+    const nextChain = linear.map(item => {
+      const chg = map.get(item.id);
+      if (!chg) return item;
+      const merged = { ...item, ...chg };
+      if (chg.durationMeasures !== undefined) {
+        merged.repeatCount = Math.max(1, Math.round(chg.durationMeasures));
+      } else if (chg.repeatCount !== undefined) {
+        merged.durationMeasures = Math.max(0.25, chg.repeatCount);
+      }
+      return merged;
+    }).sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0));
+    return { patternChain: nextChain };
+  }),
+
+  splitChainItem: (id, splitMeasure) => set((state) => {
+    const linear = normalizePatternChainItems(state.patternChain);
+    const target = linear.find(i => i.id === id);
+    if (!target) return state;
+    const start = target.startMeasure ?? 0;
+    const dur = target.durationMeasures ?? target.repeatCount ?? 1;
+    const end = start + dur;
+    if (splitMeasure <= start + 0.125 || splitMeasure >= end - 0.125) return state;
+
+    const firstDur = splitMeasure - start;
+    const secondDur = end - splitMeasure;
+    const secondItem: PatternChainItem = {
+      id: generateId('chain'),
+      type: 'pattern',
+      patternIndex: target.patternIndex ?? 0,
+      startMeasure: splitMeasure,
+      durationMeasures: secondDur,
+      repeatCount: Math.max(1, Math.round(secondDur))
+    };
+
+    const nextChain = [
+      ...linear.map(i => i.id === id ? {
+        ...i,
+        durationMeasures: firstDur,
+        repeatCount: Math.max(1, Math.round(firstDur))
+      } : i),
+      secondItem
+    ].sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0));
+
+    return {
+      patternChain: nextChain,
+      selectedChainIds: [id, secondItem.id]
+    };
+  }),
+
+  makeChainItemUnique: (id) => {
+    const state = get();
+    const linear = normalizePatternChainItems(state.patternChain);
+    const target = linear.find(i => i.id === id);
+    if (!target) return null;
+
+    const sourceIndex = Math.max(0, target.patternIndex ?? 0);
+    const sourceLen = state.patternLengths?.[sourceIndex] || 16;
+    const nextChannels = state.drumChannels.map(ch => {
+      const nextPatterns = [...ch.patterns];
+      const sourcePat = nextPatterns[sourceIndex] || Array.from({ length: sourceLen }).map(() => ({ isActive: false, velocity: 0.8 }));
+      nextPatterns.push(sourcePat.map(s => ({ ...s })));
+      return { ...ch, patterns: nextPatterns };
+    });
+    const newPatternIndex = (nextChannels[0]?.patterns.length ?? 1) - 1;
+    const nextLengths = [...(state.patternLengths || []), sourceLen];
+
+    const nextChain = linear.map(item =>
+      item.id === id ? { ...item, patternIndex: newPatternIndex } : item
+    );
+
+    set({
+      drumChannels: nextChannels,
+      patternLengths: nextLengths,
+      patternChain: nextChain,
+      userDrumPatternEdit: newPatternIndex,
+      currentDrumPatternEdit: newPatternIndex,
+      isLiveFollowLocked: state.isPlaying ? true : state.isLiveFollowLocked
+    });
+    return newPatternIndex;
+  },
+
+  fillChainToSong: (patternIndex, targetMeasures) => set(() => {
+    const dur = Math.max(1, Math.ceil(targetMeasures));
+    const item: PatternChainItem = {
+      id: generateId('chain'),
+      type: 'pattern',
+      patternIndex: Math.max(0, patternIndex),
+      startMeasure: 0,
+      durationMeasures: dur,
+      repeatCount: dur
+    };
+    return {
+      patternChain: [item],
+      isPatternRepeatOn: false,
+      selectedChainIds: [item.id]
+    };
+  }),
+
+  clearPatternChain: () => set({
+    patternChain: [],
+    selectedChainIds: [],
+    currentChainItemId: null
+  }),
+
+  removeChainItem: (id) => set((state) => {
+    const linear = normalizePatternChainItems(state.patternChain);
+    return {
+      patternChain: linear.filter(item => item.id !== id),
+      selectedChainIds: state.selectedChainIds.filter(selectedId => selectedId !== id)
+    };
+  }),
 
   moveChainItem: (fromIndex, toIndex) => set((state) => {
     if (fromIndex < 0 || fromIndex >= state.patternChain.length || toIndex < 0 || toIndex >= state.patternChain.length) return state;

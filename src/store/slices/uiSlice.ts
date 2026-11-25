@@ -49,6 +49,9 @@ const savedSettings = typeof window !== 'undefined' ? loadSavedUserSettings() : 
 
 export const initialUIState: UIState = {
   activeView: 'chord',
+  projectTitle: 'Sin título',
+  lastSavedAt: null,
+  commandPaletteMode: 'closed',
   activeNotes: [],
   activeMelodyNotes: [],
   instrumentType: 'synth',
@@ -68,6 +71,9 @@ export const createUISlice: SliceCreator<UIState & UIActions> = (set, get) => ({
   ...initialUIState,
 
   setActiveView: (activeView) => set({ activeView }),
+  setProjectTitle: (projectTitle) => set({ projectTitle: projectTitle.trim() || 'Sin título' }),
+  setLastSavedAt: (lastSavedAt) => set({ lastSavedAt }),
+  setCommandPaletteMode: (commandPaletteMode) => set({ commandPaletteMode }),
   setActiveNotes: (activeNotes) => set({ activeNotes }),
   setActiveMelodyNotes: (activeMelodyNotes) => set({ activeMelodyNotes }),
   setInstrumentType: (instrumentType) => set((state) => {

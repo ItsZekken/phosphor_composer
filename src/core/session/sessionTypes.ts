@@ -31,6 +31,7 @@ export interface TransportState {
   bpm: number;
   tempoMarkers?: TempoMarker[];
   timeSignature: TimeSignature;
+  swing?: number;
   key: NoteClass;
   scale: ScaleType;
   isAutoKey: boolean;
@@ -41,7 +42,7 @@ export interface HarmonyState {
   styleMarkers: StyleMarker[];
   chordOctaveShift: number;
   defaultPattern: string;
-  chordGridSnap?: '1' | '1/2' | '1/4';
+  chordGridSnap?: '1' | '1/2' | '1/4' | 'off';
   chordTimelineViewport?: { scrollLeft: number; zoomLevel: number };
 }
 

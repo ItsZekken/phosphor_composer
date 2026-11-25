@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 import { toneEngine } from '../../audio/toneEngine';
 
 interface SharedTimelineRulerProps {
@@ -18,14 +18,111 @@ export const SharedTimelineRuler: React.FC<SharedTimelineRulerProps> = React.mem
   setCurrentBeat,
   beatsPerMeasure = 4
 }) => {
-  const handleRulerClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const isScrubbingRef = useRef(false);
+
+  const drawRuler = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const width = canvasWidth;
+    const height = 22;
+
+    if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+    }
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, width, height);
+
+    ctx.textBaseline = 'middle';
+
+    for (let b = 0; b <= TOTAL_BEATS; b++) {
+      const isMeasureStart = b % beatsPerMeasure === 0;
+      const x = b * beatWidth;
+
+      if (isMeasureStart) {
+        const measureNumber = Math.floor(b / beatsPerMeasure) + 1;
+
+        // Línea principal de compás
+        ctx.strokeStyle = 'rgba(255, 216, 117, 0.45)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, height);
+        ctx.stroke();
+
+        // Número de compás c.${bar}
+        ctx.font = 'bold 10px "Share Tech Mono", monospace';
+        ctx.fillStyle = '#ffd875';
+        ctx.fillText(`c.${measureNumber}`, x + 4, 11);
+        const mWidth = ctx.measureText(`c.${measureNumber}`).width;
+
+        // Pulso inicial (b.${beat})
+        if (beatWidth >= 24) {
+          ctx.font = '9px "Share Tech Mono", monospace';
+          ctx.fillStyle = 'rgba(255, 216, 117, 0.55)';
+          ctx.fillText(`(b.${b})`, x + 4 + mWidth + 4, 11);
+        }
+      } else {
+        // Línea de pulso intermedia
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, 8);
+        ctx.lineTo(x + 0.5, height);
+        ctx.stroke();
+
+        // Número de pulso
+        if (beatWidth >= 16) {
+          ctx.font = '9px "Share Tech Mono", monospace';
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+          ctx.fillText(`${b}`, x + 4, 11);
+        }
+      }
+    }
+
+    ctx.restore();
+  }, [canvasWidth, TOTAL_BEATS, beatWidth, beatsPerMeasure]);
+
+  useEffect(() => {
+    drawRuler();
+  }, [drawRuler]);
+
+  const updateBeatFromPointer = (clientX: number, target: HTMLElement) => {
+    const rect = target.getBoundingClientRect();
+    const clickX = clientX - rect.left;
     const clickBeat = clickX / beatWidth;
     const snappedBeat = Math.round(clickBeat / 0.25) * 0.25;
     const targetBeat = Math.max(0, Math.min(TOTAL_BEATS, snappedBeat));
     setCurrentBeat(targetBeat);
     toneEngine.seekToBeat(targetBeat);
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    isScrubbingRef.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    updateBeatFromPointer(e.clientX, e.currentTarget);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isScrubbingRef.current) return;
+    updateBeatFromPointer(e.clientX, e.currentTarget);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isScrubbingRef.current) return;
+    isScrubbingRef.current = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch (_) {}
   };
 
   return (
@@ -40,7 +137,7 @@ export const SharedTimelineRuler: React.FC<SharedTimelineRulerProps> = React.mem
         position: 'sticky', 
         top: 0, 
         zIndex: 10,
-        backgroundColor: '#121614',
+        backgroundColor: '#1c1924',
         borderBottom: '2px solid var(--border-color)',
         display: 'flex',
         flexDirection: 'column',
@@ -50,9 +147,21 @@ export const SharedTimelineRuler: React.FC<SharedTimelineRulerProps> = React.mem
         cursor: 'pointer',
         flexShrink: 0
       }}
-      onClick={handleRulerClick}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
     >
-      <div className="ruler-chords-layer" style={{ height: '18px', position: 'relative', width: '100%', borderBottom: '1px dashed rgba(0, 229, 255, 0.1)', overflow: 'hidden' }}>
+      {/* Carril Superior de Bloques de Acordes (20px) */}
+      <div 
+        className="ruler-chords-layer" 
+        style={{ 
+          height: '20px', 
+          position: 'relative', 
+          width: '100%', 
+          borderBottom: '1px solid rgba(255, 216, 117, 0.2)', 
+          overflow: 'hidden' 
+        }}
+      >
         {chordBlocks.map((block) => (
           <div
             key={block.id}
@@ -65,13 +174,13 @@ export const SharedTimelineRuler: React.FC<SharedTimelineRulerProps> = React.mem
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: 'rgba(0, 229, 255, 0.04)',
-              borderRight: '1px solid rgba(0, 229, 255, 0.15)',
+              backgroundColor: 'rgba(132, 112, 204, 0.22)',
+              borderRight: '1px solid rgba(255, 216, 117, 0.65)',
               fontFamily: "'Share Tech Mono', monospace",
               fontSize: '0.68rem',
-              color: 'var(--accent)',
-              textShadow: '0 0 4px rgba(0, 229, 255, 0.3)',
-              fontWeight: 'bold'
+              color: '#ffd875',
+              fontWeight: 'bold',
+              boxSizing: 'border-box'
             }}
             title={`Acorde: ${block.chord}`}
           >
@@ -80,44 +189,24 @@ export const SharedTimelineRuler: React.FC<SharedTimelineRulerProps> = React.mem
         ))}
       </div>
 
-      <div className="ruler-beats-layer" style={{ height: '24px', position: 'relative', width: '100%' }}>
-        {Array.from({ length: TOTAL_BEATS }).map((_, b) => {
-          const isMeasureStart = b % beatsPerMeasure === 0;
-          const measureNumber = Math.floor(b / beatsPerMeasure) + 1;
-          return (
-            <div
-              key={b}
-              style={{
-                position: 'absolute',
-                left: `${b * beatWidth}px`,
-                width: `${beatWidth}px`,
-                height: '100%',
-                borderLeft: isMeasureStart ? '1px solid rgba(0, 229, 255, 0.3)' : '1px solid rgba(255,255,255,0.05)',
-                paddingLeft: '6px',
-                paddingTop: '3px',
-                display: 'flex',
-                alignItems: 'baseline',
-                gap: '4px',
-                boxSizing: 'border-box'
-              }}
-            >
-              {isMeasureStart ? (
-                <>
-                  <span style={{ fontSize: '0.72rem', fontWeight: 'bold', fontFamily: "'Share Tech Mono', monospace", color: 'var(--text-primary)' }}>
-                    c.{measureNumber}
-                  </span>
-                  <span style={{ fontSize: '0.55rem', color: 'var(--text-secondary)', fontFamily: "'Share Tech Mono', monospace" }}>
-                    (b.{b})
-                  </span>
-                </>
-              ) : (
-                <span style={{ fontSize: '0.55rem', color: 'var(--text-secondary)', fontFamily: "'Share Tech Mono', monospace" }}>
-                  {b}
-                </span>
-              )}
-            </div>
-          );
-        })}
+      {/* Carril Inferior de Compases y Pulsos en Canvas (22px) */}
+      <div 
+        className="ruler-beats-layer" 
+        style={{ 
+          height: '22px', 
+          position: 'relative', 
+          width: '100%',
+          overflow: 'hidden'
+        }}
+      >
+        <canvas
+          ref={canvasRef}
+          style={{ 
+            width: `${canvasWidth}px`, 
+            height: '22px', 
+            display: 'block' 
+          }}
+        />
       </div>
     </div>
   );

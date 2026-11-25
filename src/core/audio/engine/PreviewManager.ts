@@ -261,23 +261,25 @@ export class PreviewManager {
     this.ctx.onActiveNotesChange(Array.from(this.activeNotesSet));
   }
 
-  public playNotePreview(noteName: string, channelId = 'melody', usePiano = false) {
+  public playNotePreview(noteName: string, channelId = 'melody', usePiano = false, velocity = 0.8) {
     try {
       const now = Tone.now();
-      this.ctx.instrumentManager.triggerAttackRelease(channelId, usePiano, noteName, '8n', now, 0.8);
+      const safeVel = Math.max(0.05, Math.min(1, velocity));
+      this.ctx.instrumentManager.triggerAttackRelease(channelId, usePiano, noteName, '8n', now, safeVel);
       this.trackNote(noteName, 0.3, undefined, channelId);
     } catch (e) {
       console.warn('Error tocando nota preview:', e);
     }
   }
 
-  public startNote(noteName: string, channelId = 'melody', usePiano = false) {
+  public startNote(noteName: string, channelId = 'melody', usePiano = false, velocity = 0.8) {
     try {
       this.activePressedNotes.add(noteName);
       this.activePressedNotesList = this.activePressedNotesList.filter((n) => n !== noteName);
       this.activePressedNotesList.push(noteName);
 
-      this.ctx.instrumentManager.keyDown(channelId, usePiano, noteName, Tone.now(), 0.8);
+      const safeVel = Math.max(0.05, Math.min(1, velocity));
+      this.ctx.instrumentManager.keyDown(channelId, usePiano, noteName, Tone.now(), safeVel);
       this.trackNoteStart(noteName);
     } catch (e) {
       console.warn('Error starting note:', e);

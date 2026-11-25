@@ -1,65 +1,89 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo, useCallback } from 'react';
 import { useSongStore } from '../../../store/songStore';
+import type { PianoRollGridSnap } from '../../../store/types';
 import { toneEngine } from '../../../audio/toneEngine';
-import { NOTE_CLASSES } from '../../../core/music';
+import type { ChordBlock, MelodyNote } from '../../../utils/typeDefinitions';
+import {
+  MAX_MIDI,
+  NOTE_COUNT,
+  getSnapStepBeats,
+  midiToNoteName,
+  hexToRgba,
+  computeChordTonesMap,
+  type EphemeralDragState,
+  type LassoRect,
+  type TempNote
+} from '../utils/pianoRollUtils';
 
-const MIN_MIDI = 24; // C1
-const MAX_MIDI = 96; // C7
-const NOTE_COUNT = MAX_MIDI - MIN_MIDI + 1;
-const GRID_SNAP = 0.25; // Semicorcheas
+const PR_BLACK_KEY_MASK = new Uint8Array([0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0]);
+const rgbaColorCache = new Map<string, string>();
+const sortedPrNotesCache = new WeakMap<MelodyNote[], { sorted: MelodyNote[]; maxDur: number }>();
 
-function midiToNoteName(midi: number): string {
-  const noteIndex = ((midi % 12) + 12) % 12;
-  const octave = Math.floor(midi / 12) - 1;
-  return `${NOTE_CLASSES[noteIndex]}${octave}`;
+function hexToRgbaCached(hex: string, alpha: number): string {
+  const roundedAlpha = Math.round(alpha * 100) / 100;
+  const key = `${hex}|${roundedAlpha}`;
+  let hit = rgbaColorCache.get(key);
+  if (!hit) {
+    hit = hexToRgba(hex, roundedAlpha);
+    if (rgbaColorCache.size > 512) rgbaColorCache.clear();
+    rgbaColorCache.set(key, hit);
+  }
+  return hit;
 }
 
-function hexToRgba(hex: string, alpha: number): string {
-  if (!hex || !hex.startsWith('#')) return `rgba(104, 128, 173, ${alpha})`;
-  let h = hex.slice(1);
-  if (h.length === 3) h = h.split('').map(c => c + c).join('');
-  const num = parseInt(h, 16);
-  if (isNaN(num)) return `rgba(104, 128, 173, ${alpha})`;
-  const r = (num >> 16) & 255;
-  const g = (num >> 8) & 255;
-  const b = num & 255;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+function getSortedPrNotes(notes: MelodyNote[]): { sorted: MelodyNote[]; maxDur: number } {
+  let cached = sortedPrNotesCache.get(notes);
+  if (!cached) {
+    let maxDur = 0.25;
+    for (let i = 0; i < notes.length; i++) {
+      if (notes[i].durationBeats > maxDur) maxDur = notes[i].durationBeats;
+    }
+    const sorted = notes.slice().sort((a, b) => a.startBeat - b.startBeat);
+    cached = { sorted, maxDur };
+    sortedPrNotesCache.set(notes, cached);
+  }
+  return cached;
 }
 
-export interface LassoRect {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-}
-
-export interface TempNote {
-  midi: number;
-  startBeat: number;
-  durationBeats: number;
+function prLowerBoundBeat(notes: MelodyNote[], beat: number): number {
+  let lo = 0;
+  let hi = notes.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (notes[mid].startBeat < beat) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }
 
 interface PianoRollCanvasProps {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
+  contentWrapperRef: React.RefObject<HTMLDivElement | null>;
+  containerRef: React.RefObject<HTMLDivElement | null>;
   beatWidth: number;
   rowHeight: number;
   canvasWidth: number;
   canvasHeight: number;
   TOTAL_BEATS: number;
+  beatsPerMeasure: number;
+  chordBlocks: ChordBlock[];
   selectedNoteIds: string[];
   lassoRect: LassoRect | null;
   tempNote: TempNote | null;
   scalePitchClasses: Set<number>;
   rootMidiMod: number;
   isScaleHighlightActive: boolean;
-  handleMouseDown: (e: React.MouseEvent<HTMLCanvasElement>) => void;
-  handleMouseMoveIdle: (e: React.MouseEvent<HTMLCanvasElement>) => void;
+  isGhostNotesActive: boolean;
+  isChordHighlightActive: boolean;
+  gridSnap: PianoRollGridSnap;
+  ephemeralDragRef: React.RefObject<EphemeralDragState | null>;
+  renderTrigger: number;
+  handleMouseDown: (e: React.MouseEvent<HTMLDivElement>) => void;
+  handleMouseMoveIdle: (e: React.MouseEvent<HTMLDivElement>) => void;
 }
 
 /**
- * Componente de aguja láser de reproducción aislado y de ultra alto rendimiento.
- * Utiliza aceleración por hardware (transform) y se actualiza a 60 FPS sin provocar
- * el redibujado de la cuadrícula o notas del lienzo principal.
+ * Aguja láser de reproducción aislada a 60 FPS sin provocar redibujados del lienzo.
  */
 export const PianoRollPlayhead: React.FC<{ beatWidth: number; height: number }> = React.memo(({ beatWidth, height }) => {
   const playheadRef = useRef<HTMLDivElement | null>(null);
@@ -84,7 +108,6 @@ export const PianoRollPlayhead: React.FC<{ beatWidth: number; height: number }> 
     let prevBeat = useSongStore.getState().currentBeat;
     let prevIsPlaying = useSongStore.getState().isPlaying;
 
-    // Suscripción al store para actualizar inmediatamente cuando cambia beat manualmente o se pausa
     const unsub = useSongStore.subscribe((state) => {
       if (state.currentBeat !== prevBeat || state.isPlaying !== prevIsPlaying) {
         const wasPlaying = prevIsPlaying;
@@ -130,46 +153,172 @@ export const PianoRollPlayhead: React.FC<{ beatWidth: number; height: number }> 
   );
 });
 
+const RULER_HEIGHT = 42;
+
 export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
   canvasRef,
+  contentWrapperRef,
+  containerRef,
   beatWidth,
   rowHeight,
   canvasWidth,
   canvasHeight,
   TOTAL_BEATS,
+  beatsPerMeasure,
+  chordBlocks,
   selectedNoteIds = [],
   lassoRect,
   tempNote,
   scalePitchClasses,
   rootMidiMod,
   isScaleHighlightActive,
+  isGhostNotesActive,
+  isChordHighlightActive,
+  gridSnap,
+  ephemeralDragRef,
+  renderTrigger,
   handleMouseDown,
   handleMouseMoveIdle
 }) => {
+  const gridCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const stickyViewportRef = useRef<HTMLDivElement | null>(null);
+  const viewportSizeRef = useRef<{ width: number; height: number }>({ width: 1200, height: 600 });
+
   const melodyNotes = useSongStore(state => state.melodyNotes || []);
   const tracks = useSongStore(state => state.tracks || []);
   const activeTrackId = useSongStore(state => state.activeTrackId);
   const activeTrack = tracks.find(t => t.id === activeTrackId);
   const activeColor = activeTrack?.color || '#6880ad';
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
+  const chordSpans = useMemo(
+    () => (isChordHighlightActive ? computeChordTonesMap(chordBlocks) : []),
+    [chordBlocks, isChordHighlightActive]
+  );
+
+  // Mantener refs actualizados para redibujado imperativo en scroll sin re-renders
+  const drawGridParamsRef = useRef({
+    beatWidth,
+    rowHeight,
+    canvasWidth,
+    canvasHeight,
+    TOTAL_BEATS,
+    beatsPerMeasure,
+    scalePitchClasses,
+    rootMidiMod,
+    isScaleHighlightActive,
+    isChordHighlightActive,
+    gridSnap,
+    chordSpans
+  });
+  drawGridParamsRef.current = {
+    beatWidth,
+    rowHeight,
+    canvasWidth,
+    canvasHeight,
+    TOTAL_BEATS,
+    beatsPerMeasure,
+    scalePitchClasses,
+    rootMidiMod,
+    isScaleHighlightActive,
+    isChordHighlightActive,
+    gridSnap,
+    chordSpans
+  };
+
+  const drawNotesParamsRef = useRef({
+    melodyNotes,
+    tracks,
+    activeTrackId,
+    activeColor,
+    beatWidth,
+    rowHeight,
+    canvasWidth,
+    canvasHeight,
+    selectedNoteIds,
+    lassoRect,
+    tempNote,
+    isGhostNotesActive,
+    renderTrigger
+  });
+  drawNotesParamsRef.current = {
+    melodyNotes,
+    tracks,
+    activeTrackId,
+    activeColor,
+    beatWidth,
+    rowHeight,
+    canvasWidth,
+    canvasHeight,
+    selectedNoteIds,
+    lassoRect,
+    tempNote,
+    isGhostNotesActive,
+    renderTrigger
+  };
+
+  const getViewportMetrics = useCallback(() => {
+    const container = containerRef.current;
+    const { width: vw, height: vh } = viewportSizeRef.current;
+    const { canvasWidth: cw, canvasHeight: ch } = drawGridParamsRef.current;
+    const drawWidth = Math.max(1, Math.min(cw, vw));
+    const drawHeight = Math.max(1, Math.min(ch, vh));
+    const scrollLeft = container ? container.scrollLeft : 0;
+    const scrollTop = container ? container.scrollTop : 0;
+    const offsetX = Math.max(0, Math.min(scrollLeft, Math.max(0, cw - drawWidth)));
+    const offsetY = Math.max(0, Math.min(scrollTop, Math.max(0, ch - drawHeight)));
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    return { drawWidth, drawHeight, offsetX, offsetY, dpr };
+  }, [containerRef]);
+
+  const drawGrid = useCallback(() => {
+    const canvas = gridCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.fillStyle = '#0b0910';
-    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+    const {
+      beatWidth: bw,
+      rowHeight: rh,
+      TOTAL_BEATS: totalBeats,
+      beatsPerMeasure: bpmMeasure,
+      scalePitchClasses: scalePcs,
+      rootMidiMod: rootPc,
+      isScaleHighlightActive: scaleActive,
+      isChordHighlightActive: chordActive,
+      gridSnap: snap,
+      chordSpans: spans
+    } = drawGridParamsRef.current;
 
-    // 1. Dibujar cuadrícula horizontal y fondo por filas (Scale Highlighting)
-    for (let i = 0; i < NOTE_COUNT; i++) {
+    const { drawWidth, drawHeight, offsetX, offsetY, dpr } = getViewportMetrics();
+    const targetW = Math.ceil(drawWidth * dpr);
+    const targetH = Math.ceil(drawHeight * dpr);
+
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+      canvas.width = targetW;
+      canvas.height = targetH;
+      canvas.style.width = `${drawWidth}px`;
+      canvas.style.height = `${drawHeight}px`;
+    }
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#0b0910';
+    ctx.fillRect(0, 0, drawWidth, drawHeight);
+    ctx.translate(-offsetX, -offsetY);
+
+    const firstRow = Math.max(0, Math.floor(offsetY / rh));
+    const lastRow = Math.min(NOTE_COUNT - 1, Math.ceil((offsetY + drawHeight) / rh));
+    const startBeat = Math.max(0, offsetX / bw);
+    const endBeat = Math.min(totalBeats, (offsetX + drawWidth) / bw);
+
+    // 1. Filas horizontales y Scale Highlighting (batch stroke paths en 2 pasadas)
+    for (let i = firstRow; i <= lastRow; i++) {
       const midi = MAX_MIDI - i;
       const pitchClass = ((midi % 12) + 12) % 12;
-      const isBlack = [1, 3, 6, 8, 10].includes(pitchClass);
-      const inScale = scalePitchClasses?.has(pitchClass) ?? false;
-      const isRoot = pitchClass === rootMidiMod;
+      const isBlack = PR_BLACK_KEY_MASK[pitchClass] === 1;
+      const inScale = scalePcs?.has(pitchClass) ?? false;
+      const isRoot = pitchClass === rootPc;
 
-      if (isScaleHighlightActive) {
+      if (scaleActive) {
         if (isRoot) {
           ctx.fillStyle = '#1c162e';
         } else if (inScale) {
@@ -181,113 +330,384 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
         ctx.fillStyle = isBlack ? '#13111c' : '#1a1726';
       }
 
-      ctx.fillRect(0, i * rowHeight, canvasWidth, rowHeight);
-
-      // Línea divisoria horizontal
-      ctx.strokeStyle = isRoot ? 'rgba(255, 216, 117, 0.18)' : 'rgba(255, 255, 255, 0.035)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(0, (i + 1) * rowHeight);
-      ctx.lineTo(canvasWidth, (i + 1) * rowHeight);
-      ctx.stroke();
+      const rowY = i * rh;
+      ctx.fillRect(offsetX, rowY, drawWidth, rh);
     }
 
-    // 2. Dibujar cuadrícula vertical de compases y subdivisiones
-    const subdivs = TOTAL_BEATS / GRID_SNAP;
-    for (let step = 0; step <= subdivs; step++) {
-      const beat = step * GRID_SNAP;
-      const x = beat * beatWidth;
-      const isMeasure = Math.abs(beat % 4) < 0.001;
-      const isBeat = Math.abs(beat % 1) < 0.001;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.035)';
+    ctx.beginPath();
+    for (let i = firstRow; i <= lastRow; i++) {
+      const midi = MAX_MIDI - i;
+      const pitchClass = ((midi % 12) + 12) % 12;
+      if (pitchClass === rootPc) continue;
+      const lineY = (i + 1) * rh;
+      ctx.moveTo(offsetX, lineY);
+      ctx.lineTo(offsetX + drawWidth, lineY);
+    }
+    ctx.stroke();
 
-      if (isMeasure) {
-        ctx.strokeStyle = 'rgba(112, 96, 176, 0.28)';
-        ctx.lineWidth = 1.5;
-      } else if (isBeat) {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
-        ctx.lineWidth = 1;
-      } else {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.025)';
-        ctx.lineWidth = 0.5;
+    ctx.strokeStyle = 'rgba(255, 216, 117, 0.18)';
+    ctx.beginPath();
+    for (let i = firstRow; i <= lastRow; i++) {
+      const midi = MAX_MIDI - i;
+      const pitchClass = ((midi % 12) + 12) % 12;
+      if (pitchClass !== rootPc) continue;
+      const lineY = (i + 1) * rh;
+      ctx.moveTo(offsetX, lineY);
+      ctx.lineTo(offsetX + drawWidth, lineY);
+    }
+    ctx.stroke();
+
+    // 2. Resaltado armónico compás por compás según Chord Timeline (Chord Tones)
+    if (chordActive && spans.length > 0) {
+      for (const span of spans) {
+        if (span.endBeat <= startBeat || span.startBeat >= endBeat) continue;
+        const sx1 = Math.max(offsetX, span.startBeat * bw);
+        const sx2 = Math.min(offsetX + drawWidth, span.endBeat * bw);
+        const sw = sx2 - sx1;
+        if (sw <= 0) continue;
+
+        for (let i = firstRow; i <= lastRow; i++) {
+          const midi = MAX_MIDI - i;
+          const pc = ((midi % 12) + 12) % 12;
+          if (pc === span.rootPc) {
+            ctx.fillStyle = 'rgba(255, 216, 117, 0.095)';
+            ctx.fillRect(sx1, i * rh, sw, rh);
+          } else if (span.chordPcs.has(pc)) {
+            ctx.fillStyle = 'rgba(116, 168, 224, 0.065)';
+            ctx.fillRect(sx1, i * rh, sw, rh);
+          }
+        }
+
+        const boundaryX = span.startBeat * bw;
+        if (boundaryX >= offsetX && boundaryX <= offsetX + drawWidth) {
+          ctx.strokeStyle = 'rgba(255, 216, 117, 0.16)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(boundaryX, offsetY);
+          ctx.lineTo(boundaryX, offsetY + drawHeight);
+          ctx.stroke();
+        }
       }
-
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, canvasHeight);
-      ctx.stroke();
     }
 
+    // 3. Líneas verticales en exactamente 3 pasadas (Subdivisión / Pulso / Compás)
+    const snapStep = getSnapStepBeats(snap);
+    const drawStep = snap === 'off' ? 0.25 : snapStep;
+    const firstStep = Math.max(0, Math.floor(startBeat / drawStep) - 1);
+    const lastStep = Math.min(Math.ceil(totalBeats / drawStep), Math.ceil(endBeat / drawStep) + 1);
 
-    // 4. Dibujar nota temporal en creación por arrastre
-    if (tempNote) {
-      const row = MAX_MIDI - tempNote.midi;
-      if (row >= 0 && row < NOTE_COUNT) {
-        const x = tempNote.startBeat * beatWidth;
-        const y = row * rowHeight;
-        const width = tempNote.durationBeats * beatWidth;
+    // Pasada 3a: Subdivisiones
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.028)';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    for (let step = firstStep; step <= lastStep; step++) {
+      const beat = step * drawStep;
+      if (Math.abs(beat - Math.round(beat)) < 0.002) continue;
+      const x = beat * bw;
+      ctx.moveTo(x, offsetY);
+      ctx.lineTo(x, offsetY + drawHeight);
+    }
+    ctx.stroke();
+
+    // Pasada 3b: Pulsos (Beats no compás)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.075)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let step = firstStep; step <= lastStep; step++) {
+      const beat = step * drawStep;
+      const nearestBeat = Math.round(beat);
+      if (Math.abs(beat - nearestBeat) >= 0.002) continue;
+      if ((((nearestBeat % bpmMeasure) + bpmMeasure) % bpmMeasure) === 0) continue;
+      const x = beat * bw;
+      ctx.moveTo(x, offsetY);
+      ctx.lineTo(x, offsetY + drawHeight);
+    }
+    ctx.stroke();
+
+    // Pasada 3c: Compases (Measures)
+    ctx.strokeStyle = 'rgba(112, 96, 176, 0.34)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let step = firstStep; step <= lastStep; step++) {
+      const beat = step * drawStep;
+      const nearestBeat = Math.round(beat);
+      if (Math.abs(beat - nearestBeat) >= 0.002) continue;
+      if ((((nearestBeat % bpmMeasure) + bpmMeasure) % bpmMeasure) !== 0) continue;
+      const x = beat * bw;
+      ctx.moveTo(x, offsetY);
+      ctx.lineTo(x, offsetY + drawHeight);
+    }
+    ctx.stroke();
+  }, [getViewportMetrics]);
+
+  const drawNotes = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const {
+      melodyNotes: notes,
+      tracks: allTracks,
+      activeTrackId: curTrackId,
+      activeColor: color,
+      beatWidth: bw,
+      rowHeight: rh,
+      selectedNoteIds: selIds,
+      lassoRect: lasso,
+      tempNote: creatingNote,
+      isGhostNotesActive: ghostActive
+    } = drawNotesParamsRef.current;
+
+    const { drawWidth, drawHeight, offsetX, offsetY, dpr } = getViewportMetrics();
+    const targetW = Math.ceil(drawWidth * dpr);
+    const targetH = Math.ceil(drawHeight * dpr);
+
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+      canvas.width = targetW;
+      canvas.height = targetH;
+      canvas.style.width = `${drawWidth}px`;
+      canvas.style.height = `${drawHeight}px`;
+    }
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, drawWidth, drawHeight);
+    ctx.translate(-offsetX, -offsetY);
+
+    const firstRow = Math.max(0, Math.floor(offsetY / rh) - 1);
+    const lastRow = Math.min(NOTE_COUNT - 1, Math.ceil((offsetY + drawHeight) / rh) + 1);
+    const startBeat = Math.max(0, offsetX / bw - 1);
+    const endBeat = (offsetX + drawWidth) / bw + 1;
+
+    const ephemeral = ephemeralDragRef.current;
+    const overrides = ephemeral?.overrides;
+
+    // A. Multi-track Ghost Notes (culling binario O(log N) por pista)
+    if (ghostActive && allTracks.length > 1) {
+      for (const track of allTracks) {
+        if (track.id === curTrackId || !track.notes || track.notes.length === 0) continue;
+        const ghostFill = hexToRgbaCached(track.color || '#7c8bb5', 0.14);
+        const ghostStroke = hexToRgbaCached(track.color || '#7c8bb5', 0.34);
+
+        const { sorted: sortedGhost, maxDur: ghostMaxDur } = getSortedPrNotes(track.notes);
+        let gIdx = prLowerBoundBeat(sortedGhost, startBeat - ghostMaxDur);
+        ctx.fillStyle = ghostFill;
+        ctx.strokeStyle = ghostStroke;
+        ctx.lineWidth = 1;
+        for (; gIdx < sortedGhost.length; gIdx++) {
+          const gNote = sortedGhost[gIdx];
+          if (gNote.startBeat > endBeat) break;
+          if (gNote.startBeat + gNote.durationBeats < startBeat) continue;
+          const row = MAX_MIDI - gNote.midi;
+          if (row < firstRow || row > lastRow) continue;
+
+          const gx = gNote.startBeat * bw;
+          const gy = row * rh;
+          const gw = Math.max(8, gNote.durationBeats * bw);
+
+          ctx.fillRect(gx + 1, gy + 2, gw - 2, rh - 4);
+          ctx.strokeRect(gx + 1, gy + 2, gw - 2, rh - 4);
+        }
+      }
+    }
+
+    ctx.font = 'bold 10px monospace';
+
+    // B. Nota temporal en creación por arrastre
+    if (creatingNote) {
+      const row = MAX_MIDI - creatingNote.midi;
+      if (row >= firstRow && row <= lastRow) {
+        const x = creatingNote.startBeat * bw;
+        const y = row * rh;
+        const width = Math.max(8, creatingNote.durationBeats * bw);
 
         ctx.fillStyle = 'rgba(255, 216, 117, 0.4)';
         ctx.strokeStyle = '#ffd875';
         ctx.lineWidth = 1.5;
-        
-        ctx.fillRect(x + 1, y + 1, width - 2, rowHeight - 2);
-        ctx.strokeRect(x + 1, y + 1, width - 2, rowHeight - 2);
+
+        ctx.fillRect(x + 1, y + 1, width - 2, rh - 2);
+        ctx.strokeRect(x + 1, y + 1, width - 2, rh - 2);
 
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 10px monospace';
-        ctx.fillText(midiToNoteName(tempNote.midi), x + 5, y + (rowHeight / 2 + 3.5));
+        ctx.fillText(midiToNoteName(creatingNote.midi), x + 5, y + (rh / 2 + 3.5));
       }
     }
 
-    // 5. Dibujar notas reales
-    (melodyNotes || []).forEach((note) => {
+    // C. Notas reales de la pista activa fusionadas con overrides efímeros (búsqueda binaria O(log N))
+    const selectedSet = new Set(selIds);
+    const { sorted: sortedActiveNotes, maxDur: activeMaxDur } = getSortedPrNotes(notes);
+    const hasOverrides = Boolean(overrides && overrides.size > 0);
+    const drawnIds = hasOverrides ? new Set<string>() : null;
+
+    const drawSingleNote = (note: MelodyNote) => {
+      if (note.startBeat + note.durationBeats < startBeat || note.startBeat > endBeat) return;
       const row = MAX_MIDI - note.midi;
-      if (row >= 0 && row < NOTE_COUNT) {
-        const x = note.startBeat * beatWidth;
-        const y = row * rowHeight;
-        const width = Math.max(8, note.durationBeats * beatWidth);
-        const isSelected = selectedNoteIds.includes(note.id);
-        const vel = note.velocity ?? 0.8;
+      if (row < firstRow || row > lastRow) return;
 
-        const gradient = ctx.createLinearGradient(x, y, x + width, y);
-        if (isSelected) {
-          gradient.addColorStop(0, '#ffd875');
-          gradient.addColorStop(1, '#e5be52');
-        } else {
-          const alpha = 0.55 + vel * 0.45;
-          gradient.addColorStop(0, hexToRgba(activeColor, alpha));
-          gradient.addColorStop(1, hexToRgba(activeColor, Math.max(0.2, alpha * 0.85)));
-        }
-        ctx.fillStyle = gradient;
-        ctx.fillRect(x + 1, y + 1, width - 2, rowHeight - 2);
+      const x = note.startBeat * bw;
+      const y = row * rh;
+      const width = Math.max(8, note.durationBeats * bw);
+      const isSelected = selectedSet.has(note.id);
+      const vel = note.velocity ?? 0.8;
 
-        // Borde y tiradores visuales
-        ctx.strokeStyle = isSelected ? '#ffffff' : hexToRgba(activeColor, 0.7);
-        ctx.lineWidth = isSelected ? 1.5 : 1;
-        ctx.strokeRect(x + 1, y + 1, width - 2, rowHeight - 2);
+      if (isSelected) {
+        ctx.fillStyle = '#ffd875';
+      } else {
+        const alpha = 0.45 + vel * 0.55;
+        ctx.fillStyle = hexToRgbaCached(color, alpha);
+      }
+      ctx.fillRect(x + 1, y + 1, width - 2, rh - 2);
 
-        // Indicadores sutiles de tiradores duales si está seleccionada
-        if (isSelected && width > 24) {
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(x + 1, y + 2, 2, rowHeight - 4);
-          ctx.fillRect(x + width - 3, y + 2, 2, rowHeight - 4);
-        }
+      // Bisel superior sutil
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+      ctx.fillRect(x + 1, y + 1, width - 2, 1);
 
-        // Texto del nombre de la nota
+      // Barra interna de velocity en la base
+      const velBarWidth = Math.max(4, (width - 4) * vel);
+      ctx.fillStyle = isSelected ? '#1a1726' : '#ffd875';
+      ctx.fillRect(x + 2, y + rh - 3, velBarWidth, 2);
+
+      // Borde exterior
+      ctx.strokeStyle = isSelected ? '#ffffff' : hexToRgbaCached(color, 0.78);
+      ctx.lineWidth = isSelected ? 1.5 : 1;
+      ctx.strokeRect(x + 1, y + 1, width - 2, rh - 2);
+
+      // Tiradores duales si está seleccionada
+      if (isSelected && width > 24) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(x + 1, y + 2, 2, rh - 4);
+        ctx.fillRect(x + width - 3, y + 2, 2, rh - 4);
+      }
+
+      if (width > 20) {
         ctx.fillStyle = isSelected ? '#111111' : '#ffffff';
-        ctx.font = 'bold 10px monospace';
-        if (width > 20) {
-          ctx.fillText(note.note, x + 5, y + (rowHeight / 2 + 3.5));
+        ctx.fillText(note.note || midiToNoteName(note.midi), x + 5, y + (rh / 2 + 3.5));
+      }
+    };
+
+    let nIdx = prLowerBoundBeat(sortedActiveNotes, startBeat - activeMaxDur);
+    for (; nIdx < sortedActiveNotes.length; nIdx++) {
+      const rawNote = sortedActiveNotes[nIdx];
+      if (rawNote.startBeat > endBeat) break;
+      const override = overrides?.get(rawNote.id);
+      if (override) {
+        drawnIds!.add(rawNote.id);
+        drawSingleNote({ ...rawNote, ...override });
+      } else {
+        drawSingleNote(rawNote);
+      }
+    }
+
+    // Asegurar notas arrastradas desde fuera hacia dentro del viewport visible
+    if (hasOverrides && overrides) {
+      overrides.forEach((ov, id) => {
+        if (drawnIds!.has(id)) return;
+        const base = notes.find((n) => n.id === id);
+        if (base) drawSingleNote({ ...base, ...ov });
+      });
+    }
+
+    // D. Clones al vuelo (Shift + Drag)
+    const clonedPreview = ephemeral?.clonedPreviewNotes;
+    if (clonedPreview && clonedPreview.length > 0) {
+      ctx.save();
+      ctx.setLineDash([3, 2]);
+      for (const cNote of clonedPreview) {
+        if (cNote.startBeat + cNote.durationBeats < startBeat || cNote.startBeat > endBeat) continue;
+        const row = MAX_MIDI - cNote.midi;
+        if (row < firstRow || row > lastRow) continue;
+
+        const cx = cNote.startBeat * bw;
+        const cy = row * rh;
+        const cw = Math.max(8, cNote.durationBeats * bw);
+
+        ctx.fillStyle = 'rgba(255, 216, 117, 0.55)';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.fillRect(cx + 1, cy + 1, cw - 2, rh - 2);
+        ctx.strokeRect(cx + 1, cy + 1, cw - 2, rh - 2);
+
+        if (cw > 20) {
+          ctx.fillStyle = '#111111';
+          ctx.font = 'bold 10px monospace';
+          ctx.fillText(cNote.note || midiToNoteName(cNote.midi), cx + 5, cy + (rh / 2 + 3.5));
         }
       }
-    });
+      ctx.restore();
+    }
 
-    // 6. Dibujar Lasso Rect (Área de Selección con Clic Derecho)
-    if (lassoRect) {
-      const lx = Math.min(lassoRect.x1, lassoRect.x2);
-      const ly = Math.min(lassoRect.y1, lassoRect.y2);
-      const lw = Math.abs(lassoRect.x2 - lassoRect.x1);
-      const lh = Math.abs(lassoRect.y2 - lassoRect.y1);
+    // E. Línea láser de corte (Slice Tool) e intersecciones
+    const sliceLine = ephemeral?.sliceLine;
+    if (sliceLine) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 90, 95, 0.45)';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(sliceLine.x1, sliceLine.y1);
+      ctx.lineTo(sliceLine.x2, sliceLine.y2);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#ff6b6b';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 3]);
+      ctx.beginPath();
+      ctx.moveTo(sliceLine.x1, sliceLine.y1);
+      ctx.lineTo(sliceLine.x2, sliceLine.y2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      if (ephemeral?.sliceCuts) {
+        for (const cut of ephemeral.sliceCuts) {
+          ctx.fillStyle = '#ffffff';
+          ctx.strokeStyle = '#ff4757';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(cut.x, cut.y, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+
+    // F. Readout HUD flotante (durante drag/slice/etc.)
+    const readout = ephemeral?.activeReadout;
+    if (readout) {
+      ctx.save();
+      ctx.font = 'bold 10px monospace';
+      const textMetrics = ctx.measureText(readout.text);
+      const pillWidth = textMetrics.width + 12;
+      const pillHeight = 16;
+
+      const px = Math.max(offsetX + 4, Math.min(offsetX + drawWidth - pillWidth - 4, readout.x));
+      const py = Math.max(offsetY + 4, Math.min(offsetY + drawHeight - pillHeight - 4, readout.y - 20));
+
+      ctx.fillStyle = 'rgba(20, 18, 28, 0.95)';
+      ctx.strokeStyle = '#ffd875';
+      ctx.lineWidth = 1;
+
+      ctx.beginPath();
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(px, py, pillWidth, pillHeight, 3);
+      } else {
+        ctx.rect(px, py, pillWidth, pillHeight);
+      }
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffd875';
+      ctx.fillText(readout.text, px + 6, py + 11.5);
+      ctx.restore();
+    }
+
+    // G. Lasso Rect (Selección con clic derecho)
+    if (lasso) {
+      const lx = Math.min(lasso.x1, lasso.x2);
+      const ly = Math.min(lasso.y1, lasso.y2);
+      const lw = Math.abs(lasso.x2 - lasso.x1);
+      const lh = Math.abs(lasso.y2 - lasso.y1);
 
       ctx.fillStyle = 'rgba(255, 216, 117, 0.12)';
       ctx.strokeStyle = 'rgba(255, 216, 117, 0.85)';
@@ -297,10 +717,35 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
       ctx.strokeRect(lx, ly, lw, lh);
       ctx.setLineDash([]);
     }
+  }, [canvasRef, ephemeralDragRef, getViewportMetrics]);
 
+  // Redibujo ante cambios de configuración de la cuadrícula
+  useEffect(() => {
+    drawGrid();
   }, [
-    canvasRef,
+    drawGrid,
+    canvasWidth,
+    canvasHeight,
+    rowHeight,
+    beatWidth,
+    scalePitchClasses,
+    rootMidiMod,
+    isScaleHighlightActive,
+    isChordHighlightActive,
+    gridSnap,
+    TOTAL_BEATS,
+    beatsPerMeasure,
+    chordSpans
+  ]);
+
+  // Redibujo ante cambios de notas, selección o overrides efímeros
+  useEffect(() => {
+    drawNotes();
+  }, [
+    drawNotes,
     melodyNotes,
+    tracks,
+    activeTrackId,
     canvasWidth,
     canvasHeight,
     selectedNoteIds,
@@ -308,22 +753,63 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
     tempNote,
     rowHeight,
     beatWidth,
-    scalePitchClasses,
-    rootMidiMod,
-    isScaleHighlightActive,
     activeColor,
-    TOTAL_BEATS
+    isGhostNotesActive,
+    renderTrigger
   ]);
 
-  const handleTouchCanvas = (e: React.TouchEvent<HTMLCanvasElement>) => {
+  // Sincronización virtual 120 FPS ante scroll y resize del contenedor sin re-renders en React
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateSize = () => {
+      const w = Math.max(100, container.clientWidth);
+      const h = Math.max(100, container.clientHeight - RULER_HEIGHT);
+      viewportSizeRef.current = { width: w, height: h };
+      if (stickyViewportRef.current) {
+        stickyViewportRef.current.style.width = `${Math.min(canvasWidth, w)}px`;
+        stickyViewportRef.current.style.height = `${Math.min(canvasHeight, h)}px`;
+      }
+      drawGrid();
+      drawNotes();
+    };
+
+    let rafId = 0;
+    const handleScroll = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        drawGrid();
+        drawNotes();
+      });
+    };
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateSize();
+    });
+
+    updateSize();
+    resizeObserver.observe(container);
+    container.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      resizeObserver.disconnect();
+      container.removeEventListener('scroll', handleScroll);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [containerRef, canvasWidth, canvasHeight, drawGrid, drawNotes]);
+
+  const handleTouchCanvas = (e: React.TouchEvent<HTMLDivElement>) => {
     if (e.touches.length !== 1) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
+    const wrapper = contentWrapperRef.current;
+    if (!wrapper) return;
+    const rect = wrapper.getBoundingClientRect();
     const touchX = e.touches[0].clientX - rect.left;
     const touchY = e.touches[0].clientY - rect.top;
 
-    const clickBeat = Math.floor((touchX / beatWidth) / GRID_SNAP) * GRID_SNAP;
+    const snapStep = getSnapStepBeats(gridSnap);
+    const clickBeat = Math.floor((touchX / beatWidth) / snapStep) * snapStep;
     const clickedRow = Math.floor(touchY / rowHeight);
     const clickMidi = MAX_MIDI - clickedRow;
 
@@ -351,22 +837,56 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
   };
 
   return (
-    <div style={{ position: 'relative', width: `${canvasWidth}px`, height: `${canvasHeight}px`, flexShrink: 0 }}>
-      <canvas
-        ref={canvasRef}
-        width={canvasWidth}
-        height={canvasHeight}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMoveIdle}
-        onTouchStart={handleTouchCanvas}
-        onContextMenu={e => e.preventDefault()}
-        style={{ 
-          display: 'block', 
-          width: `${canvasWidth}px`, 
-          height: `${canvasHeight}px`,
-          flexShrink: 0 
+    <div
+      ref={contentWrapperRef}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMoveIdle}
+      onTouchStart={handleTouchCanvas}
+      onContextMenu={e => e.preventDefault()}
+      style={{
+        position: 'relative',
+        width: `${canvasWidth}px`,
+        height: `${canvasHeight}px`,
+        flexShrink: 0,
+        cursor: 'crosshair',
+        userSelect: 'none'
+      }}
+    >
+      {/* Ventana sticky virtual: mantiene ambos canvas en el área visible a resolución Retina 2x */}
+      <div
+        ref={stickyViewportRef}
+        style={{
+          position: 'sticky',
+          top: `${RULER_HEIGHT}px`,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          overflow: 'hidden'
         }}
-      />
+      >
+        <canvas
+          ref={gridCanvasRef}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            display: 'block',
+            pointerEvents: 'none'
+          }}
+        />
+        <canvas
+          ref={canvasRef}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            display: 'block',
+            pointerEvents: 'none'
+          }}
+        />
+      </div>
+
       <PianoRollPlayhead beatWidth={beatWidth} height={canvasHeight} />
     </div>
   );

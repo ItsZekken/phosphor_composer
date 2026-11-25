@@ -34,6 +34,7 @@ export class PhosphorAnalogSynth {
   // Nodo AudioWorklet (Motor de síntesis DSP en el hilo de audio nativo del SO)
   private workletNode: PhosphorWorkletNode | null = null;
   private isWorkletSupported = false;
+  private usingIntegratedWorklet = false;
 
   // Oscilador Principal 1 (Fallback Tone.PolySynth)
   private osc1Synth: Tone.PolySynth | null = null;
@@ -50,16 +51,16 @@ export class PhosphorAnalogSynth {
   private noiseSynth: Tone.NoiseSynth | null = null;
   private noiseGain: Tone.Gain | null = null;
 
-  // Sumador de Mezcla y Salida Calibrada
-  private mixerSumNode: Tone.Gain;
-  private fxInputNode: Tone.Gain;
+  // Sumador de Mezcla y Salida Calibrada (Fallback bajo demanda)
+  private mixerSumNode: Tone.Gain | null = null;
+  private fxInputNode: Tone.Gain | null = null;
   public outputNode: Tone.Gain;
 
-  // Nodos DSP con True Dynamic Bypass (creados e insertados solo cuando están activos)
+  // Nodos DSP con True Dynamic Bypass (creados e insertados solo en fallback)
   private vibratoNode: Tone.Vibrato | null = null;
   private driveNode: Tone.Distortion | null = null;
-  private filterNode: Tone.Filter;
-  private lfoAmpNode: Tone.Gain;
+  private filterNode: Tone.Filter | null = null;
+  private lfoAmpNode: Tone.Gain | null = null;
   private chorusNode: Tone.Chorus | null = null;
   private delayNode: Tone.FeedbackDelay | null = null;
   private reverbNode: Tone.Freeverb | null = null;
@@ -91,26 +92,7 @@ export class PhosphorAnalogSynth {
       this.outputNode.connect(destinationNode);
     }
 
-    // 2. Bus de entrada al FX Rack (compartido por AudioWorklet en tiempo real y síntesis fallback offline)
-    this.fxInputNode = new Tone.Gain(1.0);
-
-    // 3. Sumador de mezcla y nodo de ganancia LFO Amp (Tremolo) para síntesis fallback
-    this.mixerSumNode = new Tone.Gain(1.0);
-    this.lfoAmpNode = new Tone.Gain(1.0);
-
-    // 4. Filtro VCF base para fallback
-    const filter = this.settings.filter;
-    this.filterNode = new Tone.Filter({
-      frequency: filter.enabled ? Math.max(20, Math.min(20000, filter.frequency)) : 20000,
-      type: filter.enabled ? filter.type : 'lowpass',
-      Q: filter.enabled ? filter.Q : 1,
-      rolloff: filter.rolloff === -24 ? -24 : -12
-    });
-
-    // 5. Construir el grafo de audio (fallback pre-FX -> fxInputNode -> FX Rack -> outputNode)
-    this.rebuildAudioGraph();
-
-    // 6. Detección infalible de contexto offline vs tiempo real
+    // 2. Detección de contexto offline vs tiempo real antes de construir grafo Tone fallback
     const rawContext = Tone.getContext().rawContext as any;
     const isOffline = Boolean(
       Tone.getContext().isOffline ||
@@ -124,29 +106,74 @@ export class PhosphorAnalogSynth {
     if (this.isWorkletSupported) {
       try {
         this.workletNode = new PhosphorWorkletNode(this.id, rawContext);
-        // Conectar la salida del AudioWorklet directamente al bus del FX Rack
-        this.workletNode.connect(this.fxInputNode);
+        if (this.workletNode.hasIntegratedFx) {
+          // Conexión directa zero-overhead: AudioWorklet WASM+FX -> outputNode (cero nodos Tone.js intermedios)
+          this.usingIntegratedWorklet = true;
+          this.workletNode.connect(this.outputNode);
+          this.workletNode.setSettings(this.settings);
+          this.outputNode.gain.value = this.getOutputGain(this.settings.masterGain);
+          return;
+        }
+        this.ensureFallbackGraph();
+        this.rebuildAudioGraph();
+        this.workletNode.connect(this.fxInputNode!);
         this.workletNode.setSettings(this.settings);
       } catch (err) {
         console.warn(`[PhosphorAnalogSynth] Falló AudioWorklet para ${this.id}, operando en fallback PolySynth:`, err);
         this.workletNode = null;
         this.isWorkletSupported = false;
+        this.usingIntegratedWorklet = false;
+        this.ensureFallbackGraph();
+        this.rebuildAudioGraph();
       }
+    } else {
+      this.ensureFallbackGraph();
+      this.rebuildAudioGraph();
     }
+
+    // Evitar doble escalado de masterGain cuando el AudioWorklet DSP lo aplica internamente
+    this.outputNode.gain.value = this.getOutputGain(this.settings.masterGain);
 
     // Si estamos en render offline, inicializar inmediatamente las voces de fallback para el timeline
     if (isOffline) {
       this.initFallbackSynths();
     }
 
-    // 7. Sincronizar LFO
+    // 7. Sincronizar LFO fallback
     this.applyLFO();
+  }
+
+  public setBpm(bpm: number) {
+    this.workletNode?.setBpm(bpm);
+  }
+
+  private ensureFallbackGraph() {
+    if (!this.fxInputNode) this.fxInputNode = new Tone.Gain(1.0);
+    if (!this.mixerSumNode) this.mixerSumNode = new Tone.Gain(1.0);
+    if (!this.lfoAmpNode) this.lfoAmpNode = new Tone.Gain(1.0);
+    if (!this.filterNode) {
+      const filter = this.settings.filter;
+      this.filterNode = new Tone.Filter({
+        frequency: filter.enabled ? Math.max(20, Math.min(20000, filter.frequency)) : 20000,
+        type: filter.enabled ? filter.type : 'lowpass',
+        Q: filter.enabled ? filter.Q : 1,
+        rolloff: filter.rolloff === -24 ? -24 : -12
+      });
+    }
+  }
+
+  private getOutputGain(masterGain?: number): number {
+    if (this.isWorkletSupported && this.workletNode) {
+      return 0.6;
+    }
+    return 0.6 * (masterGain ?? 1.0);
   }
 
   private initFallbackSynths() {
     if (this.osc1Synth) return;
+    this.ensureFallbackGraph();
     this.osc1Gain = new Tone.Gain(this.settings.osc1?.volume ?? 0.8);
-    this.osc1Gain.connect(this.mixerSumNode);
+    this.osc1Gain.connect(this.mixerSumNode!);
 
     this.osc1Synth = new Tone.PolySynth(Tone.Synth, {
       oscillator: { type: this.mapWaveType(this.settings.osc1?.waveType || 'triangle') },
@@ -172,19 +199,20 @@ export class PhosphorAnalogSynth {
    * Si un efecto está apagado o su mix es 0, queda completamente desconectado del grafo Web Audio (0% CPU).
    */
   private rebuildAudioGraph() {
-    if (this.isDisposed) return;
+    if (this.isDisposed || this.usingIntegratedWorklet) return;
+    this.ensureFallbackGraph();
 
     // Desconectar etapas intermedias de fallback y FX
-    try { this.mixerSumNode.disconnect(); } catch (_) {}
+    try { this.mixerSumNode!.disconnect(); } catch (_) {}
     if (this.vibratoNode) try { this.vibratoNode.disconnect(); } catch (_) {}
     if (this.driveNode) try { this.driveNode.disconnect(); } catch (_) {}
-    try { this.filterNode.disconnect(); } catch (_) {}
-    try { this.lfoAmpNode.disconnect(); } catch (_) {}
+    try { this.filterNode!.disconnect(); } catch (_) {}
+    try { this.lfoAmpNode!.disconnect(); } catch (_) {}
     if (this.eqLowNode) try { this.eqLowNode.disconnect(); } catch (_) {}
     if (this.eqLowMidNode) try { this.eqLowMidNode.disconnect(); } catch (_) {}
     if (this.eqHighMidNode) try { this.eqHighMidNode.disconnect(); } catch (_) {}
     if (this.eqHighNode) try { this.eqHighNode.disconnect(); } catch (_) {}
-    try { this.fxInputNode.disconnect(); } catch (_) {}
+    try { this.fxInputNode!.disconnect(); } catch (_) {}
     if (this.chorusNode) try { this.chorusNode.disconnect(); } catch (_) {}
     if (this.delayNode) try { this.delayNode.disconnect(); } catch (_) {}
     if (this.reverbNode) try { this.reverbNode.disconnect(); } catch (_) {}
@@ -194,7 +222,7 @@ export class PhosphorAnalogSynth {
     this.currentLfoTarget = 'none';
 
     // --- PARTE 1: CADENA PRE-FX DE FALLBACK (Osciladores -> VCF/Drive/Amp/EQ -> fxInputNode) ---
-    let fallbackChain: Tone.ToneAudioNode = this.mixerSumNode;
+    let fallbackChain: Tone.ToneAudioNode = this.mixerSumNode!;
 
     // 0. Etapa de Modulación de Tono / Pitch Vibrato (Solo si LFO pitch activo y depth > 0.01)
     const lfo = this.settings.lfo;
@@ -236,7 +264,7 @@ export class PhosphorAnalogSynth {
     }
 
     // 2. Etapa de Filtro VCF (Solo si filter.enabled === true)
-    if (filter.enabled) {
+    if (filter.enabled && this.filterNode) {
       this.filterNode.type = filter.type;
       this.filterNode.rolloff = filter.rolloff === -24 ? -24 : -12;
       this.filterNode.frequency.value = Math.max(20, Math.min(20000, filter.frequency));
@@ -246,8 +274,10 @@ export class PhosphorAnalogSynth {
     }
 
     // 3. Etapa de Modulación de Amplitud (LFO Amp Tremolo)
-    fallbackChain.connect(this.lfoAmpNode);
-    fallbackChain = this.lfoAmpNode;
+    if (this.lfoAmpNode) {
+      fallbackChain.connect(this.lfoAmpNode);
+      fallbackChain = this.lfoAmpNode;
+    }
 
     // 3.5. Ecualizador Gráfico 4-Bandas (Fallback Offline)
     const eq = this.settings.eq;
@@ -274,11 +304,11 @@ export class PhosphorAnalogSynth {
     }
 
     // La síntesis de fallback se conecta al bus de entrada de efectos
-    fallbackChain.connect(this.fxInputNode);
+    fallbackChain.connect(this.fxInputNode!);
 
     // --- PARTE 2: FX RACK UNIFICADO (fxInputNode -> Chorus -> Delay -> Reverb -> outputNode) ---
     // Tanto el AudioWorklet en tiempo real como la síntesis fallback offline pasan por este rack
-    let fxChain: Tone.ToneAudioNode = this.fxInputNode;
+    let fxChain: Tone.ToneAudioNode = this.fxInputNode!;
 
     // 4. Etapa de Chorus (Solo si chorus.enabled && mix > 0.01)
     const fx = this.settings.fx;
@@ -309,13 +339,13 @@ export class PhosphorAnalogSynth {
       if (!this.delayNode) {
         this.delayNode = new Tone.FeedbackDelay({
           delayTime: fx?.delay?.time ?? '8n',
-          feedback: Math.min(0.85, fx?.delay?.feedback ?? 0.25),
-          wet: fx!.delay.mix ?? 0.2
+          feedback: Math.min(0.75, fx?.delay?.feedback ?? 0.25),
+          wet: Math.min(0.55, fx!.delay.mix ?? 0.2)
         });
       } else {
         this.delayNode.delayTime.value = fx?.delay?.time ?? '8n' as any;
-        this.delayNode.feedback.value = Math.min(0.85, fx?.delay?.feedback ?? 0.25);
-        this.delayNode.wet.value = fx!.delay.mix ?? 0.2;
+        this.delayNode.feedback.value = Math.min(0.75, fx?.delay?.feedback ?? 0.25);
+        this.delayNode.wet.value = Math.min(0.55, fx!.delay.mix ?? 0.2);
       }
       fxChain.connect(this.delayNode);
       fxChain = this.delayNode;
@@ -327,11 +357,12 @@ export class PhosphorAnalogSynth {
       if (!this.reverbNode) {
         this.reverbNode = new Tone.Freeverb({
           roomSize: Math.max(0.1, Math.min(0.9, (fx?.reverb?.decay ?? 1.8) / 4)),
-          dampening: 3000,
+          dampening: 2400,
           wet: fx!.reverb.mix ?? 0.15
         });
       } else {
         this.reverbNode.roomSize.value = Math.max(0.1, Math.min(0.9, (fx?.reverb?.decay ?? 1.8) / 4));
+        this.reverbNode.dampening = 2400;
         this.reverbNode.wet.value = fx!.reverb.mix ?? 0.15;
       }
       fxChain.connect(this.reverbNode);
@@ -343,12 +374,13 @@ export class PhosphorAnalogSynth {
   }
 
   private syncSecondarySources() {
+    if (!this.mixerSumNode) return;
     // OSC 2
     const osc2 = this.settings.osc2;
     if (osc2 && osc2.enabled && (osc2.volume ?? 0) > 0) {
       if (!this.osc2Synth) {
         this.osc2Gain = new Tone.Gain(osc2.volume);
-        this.osc2Gain.connect(this.mixerSumNode);
+        this.osc2Gain.connect(this.mixerSumNode!);
         this.osc2Synth = new Tone.PolySynth(Tone.Synth, {
           oscillator: { type: this.mapWaveType(osc2.waveType || 'sawtooth') },
           envelope: { ...this.settings.envelope },
@@ -368,7 +400,7 @@ export class PhosphorAnalogSynth {
     if (sub && sub.enabled && (sub.volume ?? 0) > 0) {
       if (!this.subSynth) {
         this.subGain = new Tone.Gain(sub.volume);
-        this.subGain.connect(this.mixerSumNode);
+        this.subGain.connect(this.mixerSumNode!);
         this.subSynth = new Tone.PolySynth(Tone.Synth, {
           oscillator: { type: this.mapWaveType(sub.waveType || 'sine') },
           envelope: { ...this.settings.envelope },
@@ -388,7 +420,7 @@ export class PhosphorAnalogSynth {
     if (noise && noise.enabled && (noise.volume ?? 0) > 0) {
       if (!this.noiseSynth) {
         this.noiseGain = new Tone.Gain(noise.volume * 0.4);
-        this.noiseGain.connect(this.mixerSumNode);
+        this.noiseGain.connect(this.mixerSumNode!);
         this.noiseSynth = new Tone.NoiseSynth({
           noise: { type: (noise.type || 'white') as any },
           envelope: {
@@ -420,6 +452,10 @@ export class PhosphorAnalogSynth {
       // 0. Actualizar AudioWorklet DSP si está activo
       if (this.workletNode) {
         this.workletNode.setSettings(next);
+        if (this.usingIntegratedWorklet) {
+          // Fast path: toda la síntesis, filtro, drive, LFO, EQ y FX viven en el kernel WASM integrado
+          return;
+        }
       }
 
       // 1. Oscilador 1 (Fallback Tone.PolySynth)
@@ -499,7 +535,7 @@ export class PhosphorAnalogSynth {
         this.rebuildAudioGraph();
       } else {
         // Actualizaciones continuas de parámetros si el grafo ya está conectado
-        if (fNext.enabled) {
+        if (fNext.enabled && this.filterNode) {
           if (fPrev.frequency !== fNext.frequency) {
             this.filterNode.frequency.rampTo(Math.max(20, Math.min(20000, fNext.frequency)), 0.02);
           }
@@ -531,7 +567,7 @@ export class PhosphorAnalogSynth {
           if (fxPrev?.reverb?.decay !== fxNext.reverb.decay) this.reverbNode.roomSize.rampTo(Math.max(0.1, Math.min(0.9, fxNext.reverb.decay / 4)), 0.02);
         }
         if (prev.masterGain !== next.masterGain && this.currentLfoTarget !== 'amp') {
-          this.outputNode.gain.rampTo(0.6 * (next.masterGain ?? 1.0), 0.02);
+          this.outputNode.gain.rampTo(this.getOutputGain(next.masterGain), 0.02);
         }
       }
 
@@ -592,7 +628,7 @@ export class PhosphorAnalogSynth {
     if (this.outputNode && this.currentLfoTarget !== 'none') {
       try {
         this.outputNode.gain.cancelScheduledValues(0);
-        this.outputNode.gain.value = 0.6 * (this.settings.masterGain ?? 1.0);
+        this.outputNode.gain.value = this.getOutputGain(this.settings.masterGain);
       } catch (_) {}
     }
 
@@ -600,6 +636,7 @@ export class PhosphorAnalogSynth {
   }
 
   private applyLFO() {
+    if (this.usingIntegratedWorklet) return;
     try {
       const lfo = this.settings.lfo;
       if (!lfo || !lfo.enabled || (lfo.depth ?? 0) <= 0) {
@@ -652,7 +689,7 @@ export class PhosphorAnalogSynth {
         this.lfoNode.type = waveType as any;
       }
 
-      if (newTarget === 'cutoff' && this.settings.filter.enabled) {
+      if (newTarget === 'cutoff' && this.settings.filter.enabled && this.filterNode) {
         const baseCutoff = Math.max(50, Math.min(18000, this.settings.filter.frequency || 5000));
         const minCutoff = Math.max(20, baseCutoff * Math.pow(0.5, depth * 3.5));
         const maxCutoff = Math.min(20000, baseCutoff * Math.pow(2.0, depth * 3.5));
@@ -665,7 +702,7 @@ export class PhosphorAnalogSynth {
           this.lfoNode.connect(this.filterNode.frequency);
           this.currentLfoTarget = 'cutoff';
         }
-      } else if (newTarget === 'amp') {
+      } else if (newTarget === 'amp' && this.lfoAmpNode) {
         this.lfoNode.min = Math.max(0, 1.0 - depth);
         this.lfoNode.max = 1.0;
 
@@ -699,8 +736,8 @@ export class PhosphorAnalogSynth {
     const triggerTime = time !== undefined ? time : Tone.now();
     const durSec = typeof duration === 'number' ? duration : Tone.Time(duration).toSeconds();
 
-    // 0. Si el AudioWorklet está soportado, delegar directamente al motor DSP del SO (Zero CPU en JS thread)
-    if (this.workletNode && this.isWorkletSupported) {
+    // 0. Si el AudioWorklet está listo, delegar directamente al motor DSP del SO (Zero CPU en JS thread)
+    if (this.workletNode && this.isWorkletSupported && this.workletNode.ready) {
       this.workletNode.triggerAttackRelease(noteArray, durSec, triggerTime, velocity);
       return;
     }
@@ -750,7 +787,7 @@ export class PhosphorAnalogSynth {
     const noteArray = Array.isArray(notes) ? notes : [notes];
     const triggerTime = time !== undefined ? time : Tone.now();
 
-    if (this.workletNode && this.isWorkletSupported) {
+    if (this.workletNode && this.isWorkletSupported && this.workletNode.ready) {
       this.workletNode.triggerAttack(noteArray, triggerTime, velocity);
       return;
     }
@@ -787,7 +824,7 @@ export class PhosphorAnalogSynth {
     if (this.isDisposed) return;
     const triggerTime = time !== undefined ? time : Tone.now();
 
-    if (this.workletNode && this.isWorkletSupported) {
+    if (this.workletNode && this.isWorkletSupported && this.workletNode.ready) {
       this.workletNode.triggerRelease(notes, triggerTime);
       return;
     }
@@ -827,7 +864,7 @@ export class PhosphorAnalogSynth {
     if (this.isDisposed) return;
     const triggerTime = time !== undefined ? time : Tone.now();
 
-    if (this.workletNode && this.isWorkletSupported) {
+    if (this.workletNode && this.isWorkletSupported && this.workletNode.ready) {
       this.workletNode.allNotesOff(triggerTime);
     }
 
@@ -964,11 +1001,11 @@ export class PhosphorAnalogSynth {
       this.noiseGain = null;
     }
 
-    try { this.mixerSumNode.dispose(); } catch (_) {}
-    try { this.fxInputNode.dispose(); } catch (_) {}
+    if (this.mixerSumNode) try { this.mixerSumNode.dispose(); } catch (_) {}
+    if (this.fxInputNode) try { this.fxInputNode.dispose(); } catch (_) {}
     if (this.driveNode) try { this.driveNode.dispose(); } catch (_) {}
-    try { this.filterNode.dispose(); } catch (_) {}
-    try { this.lfoAmpNode.dispose(); } catch (_) {}
+    if (this.filterNode) try { this.filterNode.dispose(); } catch (_) {}
+    if (this.lfoAmpNode) try { this.lfoAmpNode.dispose(); } catch (_) {}
     if (this.eqLowNode) try { this.eqLowNode.dispose(); } catch (_) {}
     if (this.eqLowMidNode) try { this.eqLowMidNode.dispose(); } catch (_) {}
     if (this.eqHighMidNode) try { this.eqHighMidNode.dispose(); } catch (_) {}

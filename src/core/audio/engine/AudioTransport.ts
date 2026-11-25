@@ -32,23 +32,39 @@ export class AudioTransport {
   }
 
   public setBpm(bpm: number) {
-    Tone.Transport.bpm.value = bpm;
+    try {
+      if (Tone.Transport?.bpm) {
+        Tone.Transport.bpm.value = bpm;
+      }
+    } catch (_) {}
   }
 
   public setLoop(loop: boolean, start = 0, endSeconds = 4) {
-    Tone.Transport.loop = loop;
-    Tone.Transport.loopStart = start;
-    Tone.Transport.loopEnd = endSeconds;
+    try {
+      if (Tone.Transport) {
+        Tone.Transport.loop = loop;
+        Tone.Transport.loopStart = start;
+        Tone.Transport.loopEnd = endSeconds;
+      }
+    } catch (_) {}
   }
 
   public setSwing(swingPercent: number) {
-    Tone.Transport.swing = Math.max(0, Math.min(1, swingPercent / 100));
-    Tone.Transport.swingSubdivision = '16n';
+    try {
+      if (Tone.Transport) {
+        Tone.Transport.swing = Math.max(0, Math.min(1, swingPercent / 100));
+        Tone.Transport.swingSubdivision = '16n';
+      }
+    } catch (_) {}
   }
 
   public setMetroVolume(volumePercent: number) {
-    const gain = volumePercent / 100;
-    this.metroSynth.volume.value = gain === 0 ? -Infinity : Tone.gainToDb(gain);
+    try {
+      const gain = volumePercent / 100;
+      if (this.metroSynth?.volume) {
+        this.metroSynth.volume.value = gain === 0 ? -Infinity : Tone.gainToDb(gain);
+      }
+    } catch (_) {}
   }
 
   public triggerMetroClick(frequency: number, volumeFactor: number, time: number) {

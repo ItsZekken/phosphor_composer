@@ -1,13 +1,19 @@
 import React, { useEffect, useState, Suspense } from 'react';
 import { Header } from './components/layout/Header';
 import { ViewToggle } from './components/layout/ViewToggle';
+import { GlobalScrubber } from './components/layout/GlobalScrubber';
 import { useSongStore } from './store/songStore';
 import { toneEngine } from './audio/toneEngine';
 import { loadCustomPatterns } from './patterns/patternLoader';
 import { PianoVisualizer } from './components/piano-roll/PianoVisualizer';
 import { CRTOverlay } from './components/ui/CRTOverlay';
 import { GlobalLoader } from './components/ui/GlobalLoader';
+import { ToastContainer } from './components/ui/ToastContainer';
+import { GlobalDropZone } from './components/ui/GlobalDropZone';
+import { CommandPaletteModal } from './components/ui/CommandPaletteModal';
 import { exportSessionToJson } from './core/session';
+import { isTypingTarget, isModalBlockingShortcuts } from './core/shortcuts/isTypingTarget';
+import { notify } from './core/ui/toastBus';
 
 // Carga bajo demanda (Code-Splitting) para optimizar memoria y tiempo de carga inicial
 const ChordPlayerView = React.lazy(() => import('./components/chord-player/ChordPlayerView').then(m => ({ default: m.ChordPlayerView })));
@@ -25,6 +31,26 @@ export default function App() {
   const isCrtEnabled = useSongStore(state => state.isCrtEnabled);
 
   const [isLoaded, setIsLoaded] = useState(false);
+  const [hasVisitedPianoRoll, setHasVisitedPianoRoll] = useState(false);
+
+  const isChordView = activeView === 'chord';
+  const isPianoRollView = activeView === 'piano-roll' || (activeView as string) === 'piano';
+
+  useEffect(() => {
+    if (isPianoRollView) {
+      setHasVisitedPianoRoll(true);
+    }
+  }, [isPianoRollView]);
+
+  // Pre-montaje Keep-Alive en tiempo de inactividad (idle) para que alternar entre Chord y Piano Roll tome 0ms
+  useEffect(() => {
+    const idleTimer = window.setTimeout(() => {
+      setHasVisitedPianoRoll(true);
+    }, 1200);
+    return () => {
+      window.clearTimeout(idleTimer);
+    };
+  }, []);
 
   // 0. Cargar sesión guardada desde localStorage e inicializar patrones custom
   useEffect(() => {
@@ -43,23 +69,61 @@ export default function App() {
     });
   }, [setCustomPatterns]);
 
-  // Guardar estado reactivamente en localStorage con debounce (solo ante cambios en el modelo musical)
+  // Guardar estado reactivamente en localStorage con debounce (ante cualquier cambio real en slices musicales)
   useEffect(() => {
     if (!isLoaded) return;
     let timeoutId: number;
-    let prevModelKey = '';
+
+    const getMusicalSnapshot = (state: ReturnType<typeof useSongStore.getState>) => ({
+      projectTitle: state.projectTitle,
+      bpm: state.bpm,
+      tempoMarkers: state.tempoMarkers,
+      key: state.key,
+      scale: state.scale,
+      timeSignature: state.timeSignature,
+      swing: state.swing,
+      pattern: state.pattern,
+      chordBlocks: state.chordBlocks,
+      styleMarkers: state.styleMarkers,
+      chordOctaveShift: state.chordOctaveShift,
+      chordGridSnap: state.chordGridSnap,
+      tracks: state.tracks,
+      activeTrackId: state.activeTrackId,
+      melodyNotes: state.melodyNotes,
+      drumChannels: state.drumChannels,
+      patternLengths: state.patternLengths,
+      patternChain: state.patternChain,
+      isPatternRepeatOn: state.isPatternRepeatOn,
+      activeDrumKitId: state.activeDrumKitId,
+      channels: state.channels,
+      channelOrder: state.channelOrder,
+      audioTracks: state.audioTracks,
+      audioClips: state.audioClips,
+      audioLatencyCalibrationMs: state.audioLatencyCalibrationMs,
+    });
+
+    let prevRefs = getMusicalSnapshot(useSongStore.getState());
+    const musicalKeys = Object.keys(prevRefs) as Array<keyof typeof prevRefs>;
 
     const unsubscribe = useSongStore.subscribe((state) => {
-      const clipsSignature = (state.audioClips || []).map(c => `${c.id}:${c.trackId}:${c.startBeat}:${c.durationSeconds}:${c.isMuted}`).join('|');
-      const currentModelKey = `${state.bpm}_${state.key}_${state.scale}_${state.tracks.length}_${state.chordBlocks.length}_${state.drumChannels.length}_${state.patternChain.length}_${state.pattern}_${(state.audioTracks || []).length}_${clipsSignature}`;
-      if (currentModelKey === prevModelKey) return;
-      prevModelKey = currentModelKey;
+      const nextRefs = getMusicalSnapshot(state);
+      let changed = false;
+      for (const k of musicalKeys) {
+        if (nextRefs[k] !== prevRefs[k]) {
+          changed = true;
+          break;
+        }
+      }
+      if (!changed) return;
+      prevRefs = nextRefs;
 
       clearTimeout(timeoutId);
       timeoutId = window.setTimeout(() => {
         try {
-          const sessionJson = exportSessionToJson(state);
+          const currentState = useSongStore.getState();
+          const sessionJson = exportSessionToJson(currentState);
           localStorage.setItem('phosphor_session', sessionJson);
+          currentState.setLastSavedAt(Date.now());
         } catch (e) {
           console.warn("Error guardando sesión en localStorage", e);
         }
@@ -71,27 +135,127 @@ export default function App() {
     };
   }, [isLoaded]);
 
-  // 1. Atajos de teclado estilo DAW
+  // 1. Atajos de teclado unificados estilo DAW
   useEffect(() => {
+    const VIEW_SHORTCUTS: Record<string, 'chord' | 'piano-roll' | 'sequencer' | 'audio-tracks' | 'visualizer'> = {
+      '1': 'chord',
+      '2': 'piano-roll',
+      '3': 'sequencer',
+      '4': 'audio-tracks',
+      '5': 'visualizer'
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLSelectElement ||
-        e.target instanceof HTMLTextAreaElement
-      ) {
+      if (isTypingTarget(e.target)) {
         return;
       }
 
       const store = useSongStore.getState();
+      const keyLower = e.key.toLowerCase();
+      const isCtrlOrCmd = e.ctrlKey || e.metaKey;
 
-      const isUndoRedo = (e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y');
-      const isSystemModifier = (e.ctrlKey || e.metaKey || e.altKey) && !isUndoRedo;
-
-      if (isSystemModifier) {
-        return; // Permitir que el navegador maneje atajos nativos como Ctrl+R
+      // Escape: Cierre unificado descendente de modales y cajones globales
+      if (e.key === 'Escape') {
+        if (store.commandPaletteMode !== 'closed') {
+          e.preventDefault();
+          store.setCommandPaletteMode('closed');
+          return;
+        }
+        if (store.isSynthModalOpen) {
+          e.preventDefault();
+          store.setSynthModalOpen(false);
+          return;
+        }
+        if (store.isSettingsOpen) {
+          e.preventDefault();
+          store.setSettingsOpen(false);
+          return;
+        }
+        if (store.isMixerOpen) {
+          e.preventDefault();
+          store.setMixerOpen(false);
+          return;
+        }
+        // Dejar pasar Escape al editor activo para cerrar popovers/herramientas/selección
+        return;
       }
 
-      if (e.shiftKey && e.key.toLowerCase() === 'm') {
+      // Paleta de Comandos (Ctrl+K)
+      if (isCtrlOrCmd && !e.altKey && !e.shiftKey && keyLower === 'k') {
+        e.preventDefault();
+        store.setCommandPaletteMode(store.commandPaletteMode === 'commands' ? 'closed' : 'commands');
+        return;
+      }
+
+      // Guardar / Exportar (Ctrl+S abre modal; Ctrl+Shift+S descarga .phos rápido)
+      if (isCtrlOrCmd && !e.altKey && keyLower === 's') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          window.dispatchEvent(new CustomEvent('phosphor-quick-save-phos'));
+        } else {
+          window.dispatchEvent(new CustomEvent('phosphor-open-save-modal'));
+        }
+        return;
+      }
+
+      // Abrir / Importar archivo (Ctrl+O)
+      if (isCtrlOrCmd && !e.altKey && !e.shiftKey && keyLower === 'o') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('phosphor-open-import-file'));
+        return;
+      }
+
+      // Cambio rápido de vista con Alt + 1..5
+      if (e.altKey && !isCtrlOrCmd && !e.shiftKey && VIEW_SHORTCUTS[e.key]) {
+        e.preventDefault();
+        store.setActiveView(VIEW_SHORTCUTS[e.key]);
+        return;
+      }
+
+      // Deshacer / Rehacer unificados (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y)
+      if (isCtrlOrCmd && !e.altKey && keyLower === 'z') {
+        e.preventDefault();
+        const temporal = useSongStore.temporal.getState();
+        if (e.shiftKey) {
+          if (temporal.futureStates.length > 0) {
+            temporal.redo();
+            notify.info('Acción rehecha', undefined, 1600);
+          }
+        } else {
+          if (temporal.pastStates.length > 0) {
+            temporal.undo();
+            notify.info('Acción deshecha', undefined, 1600);
+          }
+        }
+        return;
+      }
+
+      if (isCtrlOrCmd && !e.altKey && !e.shiftKey && keyLower === 'y') {
+        e.preventDefault();
+        const temporal = useSongStore.temporal.getState();
+        if (temporal.futureStates.length > 0) {
+          temporal.redo();
+          notify.info('Acción rehecha', undefined, 1600);
+        }
+        return;
+      }
+
+      if (isCtrlOrCmd || e.altKey) {
+        return; // Permitir atajos locales de cada vista o nativos del navegador
+      }
+
+      // Guía rápida de atajos (?)
+      if (e.key === '?') {
+        e.preventDefault();
+        store.setCommandPaletteMode(store.commandPaletteMode === 'shortcuts' ? 'closed' : 'shortcuts');
+        return;
+      }
+
+      if (isModalBlockingShortcuts(store)) {
+        return;
+      }
+
+      if (e.shiftKey && keyLower === 'm') {
         e.preventDefault();
         store.setMixerOpen(!store.isMixerOpen);
         return;
@@ -99,8 +263,7 @@ export default function App() {
 
       if (e.key === ' ') {
         e.preventDefault();
-        toneEngine.init().then(() => {
-          // Obtener el estado fresco dentro de la promesa
+        toneEngine.init(true).then(() => {
           const currentStore = useSongStore.getState();
           currentStore.setPlaying(!currentStore.isPlaying);
         }).catch((err) => {
@@ -122,7 +285,7 @@ export default function App() {
           if (el) el.scrollLeft = 0;
         } else if (currentStore.activeView === 'sequencer') {
           currentStore.resetDrumTimelineScroll();
-          const el = document.querySelector('.pattern-chain-track-wrapper');
+          const el = document.querySelector('.drum-linear-viewport') || document.querySelector('.pattern-chain-track-wrapper');
           if (el) el.scrollLeft = 0;
         } else if (currentStore.activeView === 'audio-tracks') {
           const el = document.querySelector('.audio-timeline-viewport');
@@ -131,26 +294,35 @@ export default function App() {
         }
       };
 
-      if (e.key.toLowerCase() === 'w' && !e.shiftKey) {
-        // En modo teclado melódico + cromático, W es Do#4, así que se desactiva como parada de reproducción
-        if (store.isKeyboardMelodyEnabled && store.isKeyboardChromatic) {
-          // Dejar pasar al trigger de la nota
-        } else {
+      if (e.key === 'Home') {
+        e.preventDefault();
+        handleStopAndResetCurrentView();
+        return;
+      }
+
+      if (keyLower === 'w' && !e.shiftKey) {
+        if (!(store.isKeyboardMelodyEnabled && store.isKeyboardChromatic)) {
           e.preventDefault();
           handleStopAndResetCurrentView();
           return;
         }
       }
 
-      // Atajo alternativo para detener/reiniciar (Q) cuando W está ocupado por la nota Do#
-      if (e.key.toLowerCase() === 'q' && store.isKeyboardMelodyEnabled && store.isKeyboardChromatic && !e.shiftKey) {
+      if (keyLower === 'q' && store.isKeyboardMelodyEnabled && store.isKeyboardChromatic && !e.shiftKey) {
         e.preventDefault();
         handleStopAndResetCurrentView();
         return;
       }
 
+      // K: Alternar metrónomo global (cuando el teclado QWERTY melódico está desactivado)
+      if (keyLower === 'k' && !e.shiftKey && !store.isKeyboardMelodyEnabled) {
+        e.preventDefault();
+        store.setMetronomeActive(!store.isMetronomeActive);
+        return;
+      }
+
       // Atajo R: En vista 'audio-tracks' controla la grabación; en las demás alterna bucle (Loop)
-      if (e.key.toLowerCase() === 'r' && !e.shiftKey) {
+      if (keyLower === 'r' && !e.shiftKey) {
         e.preventDefault();
         if (store.activeView === 'audio-tracks') {
           if (store.isRecordingAudio) {
@@ -164,39 +336,27 @@ export default function App() {
         return;
       }
 
-      // En vista 'audio-tracks', Shift+R permite alternar bucle
-      if (e.key.toLowerCase() === 'r' && e.shiftKey && store.activeView === 'audio-tracks') {
+      if (keyLower === 'r' && e.shiftKey && store.activeView === 'audio-tracks') {
         e.preventDefault();
         store.setLooping(!store.isLooping);
         return;
       }
 
-      if (e.shiftKey && e.key === 'ArrowUp') {
+      // Transponer canción completa en vista Acordes SOLO cuando no hay acordes seleccionados
+      if (e.shiftKey && e.key === 'ArrowUp' && store.activeView === 'chord' && (store.selectedChordIds || []).length === 0) {
         e.preventDefault();
         store.transposeSong(1);
         return;
       }
 
-      if (e.shiftKey && e.key === 'ArrowDown') {
+      if (e.shiftKey && e.key === 'ArrowDown' && store.activeView === 'chord' && (store.selectedChordIds || []).length === 0) {
         e.preventDefault();
         store.transposeSong(-1);
         return;
       }
 
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
-        e.preventDefault();
-        useSongStore.temporal.getState().undo();
-        return;
-      }
-
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
-        e.preventDefault();
-        useSongStore.temporal.getState().redo();
-        return;
-      }
-
       // Atajo 'F' para alternar pantalla completa exclusivamente en la vista STAGE
-      if (store.activeView === 'visualizer' && e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (store.activeView === 'visualizer' && keyLower === 'f') {
         e.preventDefault();
         if (!document.fullscreenElement) {
           document.documentElement.requestFullscreen?.().catch(() => {});
@@ -207,9 +367,8 @@ export default function App() {
       }
 
       // Teclado virtual melódico: SOLO activo en vistas 'chord' y 'piano-roll'
-      // Libera todas las teclas alfabéticas (A-Z) en 'sequencer', 'audio-tracks' y 'visualizer'
       if (store.activeView === 'chord' || store.activeView === 'piano-roll') {
-        toneEngine.init();
+        toneEngine.init(true);
         toneEngine.handleKeyDown(e);
       }
     };
@@ -261,14 +420,27 @@ export default function App() {
             <ViewToggle />
             <main className="app-main">
               <Suspense fallback={<div className="view-loading-fallback" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-secondary)' }}>Cargando vista...</div>}>
-                {activeView === 'chord' && <ChordPlayerView />}
-                {activeView === 'piano-roll' && <PianoRollView />}
+                <div style={{ display: isChordView ? 'contents' : 'none' }}>
+                  <ChordPlayerView />
+                </div>
+
+                {hasVisitedPianoRoll && (
+                  <div style={{ display: isPianoRollView ? 'contents' : 'none' }}>
+                    <PianoRollView />
+                  </div>
+                )}
+
                 {activeView === 'sequencer' && <DrumSequencerView />}
                 {activeView === 'audio-tracks' && <AudioTracksView />}
                 {activeView === 'visualizer' && <StageVisualizerView />}
               </Suspense>
             </main>
+            <GlobalScrubber />
           </div>
+
+          <GlobalDropZone />
+          <ToastContainer />
+          <CommandPaletteModal />
 
           <Suspense fallback={null}>
             <SettingsPanel />
@@ -279,5 +451,4 @@ export default function App() {
     </div>
     </>
   );
-
 }

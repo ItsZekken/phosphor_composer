@@ -30,6 +30,10 @@ const processPatternsPlugin = () => ({
 // https://vite.dev/config/
 export default defineConfig({
   base: '/',
+  server: {
+    port: 5180,
+    strictPort: true
+  },
   plugins: [react(), processPatternsPlugin()],
   build: {
     chunkSizeWarningLimit: 600,

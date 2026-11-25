@@ -11,10 +11,10 @@ import {
   Mic,
   Upload,
   Scissors,
-  Sliders
+  Sliders,
+  Magnet
 } from 'lucide-react';
 import { useSongStore } from '../../store/songStore';
-import type { AudioSnapGrid } from '../../utils/typeDefinitions';
 import { UnifiedToolbar } from '../shared/UnifiedToolbar';
 import { PhysicalZoomControl } from '../shared/PhysicalZoomControl';
 import { CustomSelect } from '../ui/CustomSelect';
@@ -163,14 +163,7 @@ export const AudioTracksToolbar: React.FC = () => {
     )
   }));
 
-  const snapOptions: { id: AudioSnapGrid; label: string }[] = [
-    { id: 'bar', label: 'BAR' },
-    { id: 'beat', label: '1/1' },
-    { id: '1/2', label: '1/2' },
-    { id: '1/4', label: '1/4' },
-    { id: '1/8', label: '1/8' },
-    { id: 'off', label: 'OFF' }
-  ];
+  
 
   return (
     <UnifiedToolbar
@@ -257,7 +250,7 @@ export const AudioTracksToolbar: React.FC = () => {
           >
             <Mic size={13} style={{ color: isRecordingAudio ? '#ef4444' : 'inherit' }} />
             <span>{isRecordingAudio ? 'DETENER' : 'GRABAR'}</span>
-            <span className={`physical-led-dot ${isRecordingAudio ? 'lit-red' : ''}`} />
+            {isRecordingAudio && <span className="physical-led-dot lit-red" />}
           </button>
 
           {/* Botón Importar Archivo de Audio */}
@@ -293,26 +286,38 @@ export const AudioTracksToolbar: React.FC = () => {
 
           {/* Bandeja segmentada física de Snap magnético */}
           <div className="physical-segment-tray" title="Ajuste magnético a la cuadrícula (Snap)">
-            <span
-              style={{
-                fontSize: '0.62rem',
-                fontFamily: "'Share Tech Mono', monospace",
-                color: 'var(--text-secondary)',
-                padding: '0 4px'
-              }}
+            <button
+              type="button"
+              className={`physical-segment-btn ${audioSnapGrid !== 'off' ? 'active' : ''}`}
+              onClick={() => setAudioSnapGrid(audioSnapGrid === 'off' ? '1/4' : 'off')}
+              title={audioSnapGrid === 'off' ? 'Activar ajuste magnético (Snap)' : 'Desactivar ajuste magnético (Snap)'}
             >
-              SNAP:
-            </span>
-            {snapOptions.map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                className={`physical-segment-btn ${audioSnapGrid === opt.id ? 'active' : ''}`}
-                onClick={() => setAudioSnapGrid(opt.id)}
-              >
-                {opt.label}
-              </button>
-            ))}
+              <Magnet size={12} />
+            </button>
+            <button
+              type="button"
+              className={`physical-segment-btn ${audioSnapGrid === 'beat' ? 'active' : ''}`}
+              onClick={() => setAudioSnapGrid('beat')}
+              title="Ajuste a 1 compás / beat"
+            >
+              1
+            </button>
+            <button
+              type="button"
+              className={`physical-segment-btn ${audioSnapGrid === '1/2' ? 'active' : ''}`}
+              onClick={() => setAudioSnapGrid('1/2')}
+              title="Ajuste a 1/2 beat"
+            >
+              1/2
+            </button>
+            <button
+              type="button"
+              className={`physical-segment-btn ${audioSnapGrid === '1/4' ? 'active' : ''}`}
+              onClick={() => setAudioSnapGrid('1/4')}
+              title="Ajuste a 1/4 beat"
+            >
+              1/4
+            </button>
           </div>
         </>
       }

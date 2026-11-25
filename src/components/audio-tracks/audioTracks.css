@@ -660,32 +660,39 @@
 
 /* WATERMARK DE ESTADO VACÍO */
 .audio-tracks-empty-watermark {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  position: sticky;
+  left: 0;
+  width: 100%;
+  margin: 2.5rem auto 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
   pointer-events: none;
-  opacity: 0.45;
+  opacity: 0.92;
   user-select: none;
   max-width: 480px;
   padding: 1.5rem;
 }
 
 .audio-tracks-empty-watermark .watermark-icon {
-  font-size: 2rem;
-  color: var(--accent);
-  margin-bottom: 0.5rem;
-  animation: pulse-subtle 3s infinite ease-in-out;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  background: rgba(229, 169, 60, 0.08);
+  border: 1px solid rgba(229, 169, 60, 0.28);
+  color: #e5a93c;
+  margin-bottom: 0.75rem;
+  box-shadow: 0 0 18px rgba(229, 169, 60, 0.14);
 }
 
 .audio-tracks-empty-watermark .watermark-title {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   font-weight: 700;
   letter-spacing: 0.1em;
   color: #e5a93c;
@@ -696,11 +703,55 @@
   font-family: 'Outfit', sans-serif;
   font-size: 0.78rem;
   color: var(--text-secondary);
-  line-height: 1.4;
+  line-height: 1.45;
+  margin-bottom: 0.95rem;
 }
 
 .audio-tracks-empty-watermark .watermark-subtitle strong {
   color: #fff;
+}
+
+.audio-tracks-empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.audio-empty-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 13px;
+  border-radius: 5px;
+  border: 1px solid rgba(229, 169, 60, 0.35);
+  background: linear-gradient(180deg, rgba(44, 39, 56, 0.92) 0%, rgba(28, 25, 36, 0.96) 100%);
+  color: var(--text-primary);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
+}
+
+.audio-empty-action-btn:hover {
+  border-color: #e5a93c;
+  background: rgba(229, 169, 60, 0.14);
+  box-shadow: 0 0 14px rgba(229, 169, 60, 0.22);
+  transform: translateY(-1px);
+}
+
+.audio-empty-action-btn.record-btn {
+  border-color: rgba(239, 83, 80, 0.45);
+  color: #fca5a5;
+}
+
+.audio-empty-action-btn.record-btn:hover {
+  border-color: #ef5350;
+  background: rgba(239, 83, 80, 0.16);
+  color: #fff;
+  box-shadow: 0 0 14px rgba(239, 83, 80, 0.28);
 }
 
 @keyframes pulse-subtle {

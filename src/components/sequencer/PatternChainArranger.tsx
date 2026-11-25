@@ -1,744 +1,121 @@
-import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useSongStore } from '../../store/songStore';
 import { useShallow } from 'zustand/react/shallow';
 import { ContextMenuContainer } from '../ui/ContextMenuContainer';
-import { 
-  Folder, 
-  Link as LinkIcon, 
-  Plus, 
-  ZoomIn, 
-  ZoomOut, 
-  Copy, 
-  Scissors, 
-  Clipboard, 
-  Layers, 
-  Trash2, 
-  Ungroup, 
-  Group,
-  Play,
-  VolumeX
+import { ConfirmModal } from '../ui/ConfirmModal';
+import { PhysicalZoomControl } from '../shared/PhysicalZoomControl';
+import { useTimelineNavigation } from '../../hooks/useTimelineNavigation';
+import { isTypingTarget, isModalBlockingShortcuts } from '../../core/shortcuts/isTypingTarget';
+import { toneEngine } from '../../audio/toneEngine';
+import { liveTelemetryBus } from '../../core/audio/liveTelemetryBus';
+import { normalizePatternChainToLinear, type LinearDrumClip } from '../../utils/typeDefinitions';
+import {
+  Copy,
+  Scissors,
+  Clipboard,
+  Layers,
+  Trash2,
+  Magnet,
+  Maximize2,
+  Repeat,
+  Wand2,
+  Sparkles,
+  Play
 } from 'lucide-react';
-import type { PatternChainItem } from '../../utils/typeDefinitions';
 
-import {
-  DndContext,
-  DragOverlay,
-  closestCorners,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  useDroppable
-} from '@dnd-kit/core';
-import type {
-  DragStartEvent,
-  DragOverEvent,
-  DragEndEvent,
-} from '@dnd-kit/core';
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  horizontalListSortingStrategy,
-  useSortable
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-
-const colors = [
-  'var(--reposo)',
-  'var(--tension)',
-  'var(--subdominante)',
-  'var(--spicy)',
-  'var(--exotic)',
-  'var(--accent)',
-  '#68b5a0',
-  '#d6706e',
-  '#7d98b3',
-  '#c4a852',
-  '#a270b5',
-  '#6fa882',
+const PATTERN_PALETTE = [
+  '#5a9e7a', // P1 Reposo Verde
+  '#d4a843', // P2 Ámbar
+  '#5e87d6', // P3 Azul
+  '#c45d9c', // P4 Magenta
+  '#8c73e6', // P5 Violeta
+  '#45b8ac', // P6 Turquesa
+  '#e06c6c', // P7 Coral
+  '#7d98b3', // P8 Acero
+  '#b8a04b', // P9 Ocre
+  '#a270b5', // P10 Orquídea
+  '#6fa882', // P11 Menta
+  '#e5a93c'  // P12 Oro
 ];
 
-interface DroppableConnectorProps {
+type DrumSnapGrid = '1' | '0.5' | '0.25' | 'off';
+
+interface DragClipState {
   id: string;
-  index: number;
-  isPlaying: boolean;
-  isPatternRepeatOn: boolean;
-  activeId: string | null;
+  mode: 'move' | 'resize_left' | 'resize_right';
+  isCloneDrag: boolean;
+  initialStartMeasure: number;
+  initialDurationMeasures: number;
+  currentStartMeasure: number;
+  currentDurationMeasures: number;
+  snapshots: Map<string, LinearDrumClip>;
 }
 
-const DroppableConnector: React.FC<DroppableConnectorProps> = ({ id, index, isPlaying, isPatternRepeatOn, activeId }) => {
-  const { setNodeRef, isOver } = useDroppable({
-    id,
-    data: { type: 'connector', insertIndex: index + 1 }
-  });
-
-  const isDraggingAny = Boolean(activeId);
-
-  return (
-    <div
-      ref={setNodeRef}
-      className={`chain-connector ${isPlaying && !isPatternRepeatOn ? 'active-pulse' : ''} ${isOver ? 'drop-target-active' : ''}`}
-      style={{
-        position: 'relative',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: isDraggingAny ? '0 10px' : '0 2px',
-        transition: 'all 0.15s ease',
-        cursor: isDraggingAny ? 'copy' : 'default',
-        minWidth: isOver ? '52px' : isDraggingAny ? '36px' : '24px'
-      }}
-    >
-      <svg
-        className="chain-link-svg"
-        viewBox="0 0 40 20"
-        style={{
-          width: isOver ? '48px' : '36px',
-          height: '18px',
-          transition: 'all 0.15s ease'
-        }}
-      >
-        <path 
-          d="M 0 10 Q 10 0, 20 10 T 40 10" 
-          className="chain-cord-path"
-          style={{
-            stroke: isOver ? '#ffd875' : undefined,
-            strokeWidth: isOver ? 3 : 2
-          }}
-        />
-        <circle
-          cx="20"
-          cy="10"
-          r={isOver ? 5 : 3}
-          className="chain-node-dot"
-          style={{
-            fill: isOver ? '#ffd875' : undefined,
-            stroke: isOver ? '#ffd875' : undefined
-          }}
-        />
-      </svg>
-      {isOver && (
-        <div style={{
-          position: 'absolute',
-          top: '-18px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background: '#ffd875',
-          color: '#0a0812',
-          fontSize: '0.62rem',
-          fontWeight: 800,
-          fontFamily: "'Outfit', system-ui, sans-serif",
-          padding: '1px 6px',
-          borderRadius: '3px',
-          pointerEvents: 'none',
-          whiteSpace: 'nowrap',
-          zIndex: 100,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.5)'
-        }}>
-          INSERTAR AQUÍ
-        </div>
-      )}
-    </div>
-  );
-};
-
-const DroppableStartZone: React.FC<{ activeId: string | null }> = ({ activeId }) => {
-  const { setNodeRef, isOver } = useDroppable({
-    id: 'connector-start',
-    data: { type: 'connector', insertIndex: 0 }
-  });
-
-  if (!activeId) return null;
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={{
-        width: isOver ? '42px' : '16px',
-        alignSelf: 'stretch',
-        borderRadius: '6px',
-        border: isOver ? '2px dashed #ffd875' : '1px dashed rgba(255,255,255,0.2)',
-        background: isOver ? 'rgba(255, 216, 117, 0.15)' : 'transparent',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        transition: 'all 0.15s ease',
-        position: 'relative',
-        flexShrink: 0,
-        marginRight: '4px'
-      }}
-    >
-      {isOver && (
-        <div style={{
-          position: 'absolute',
-          top: '-18px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background: '#ffd875',
-          color: '#0a0812',
-          fontSize: '0.62rem',
-          fontWeight: 800,
-          fontFamily: "'Outfit', system-ui, sans-serif",
-          padding: '1px 6px',
-          borderRadius: '3px',
-          pointerEvents: 'none',
-          whiteSpace: 'nowrap',
-          zIndex: 100,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.5)'
-        }}>
-          AL INICIO
-        </div>
-      )}
-    </div>
-  );
-};
-
-const DroppableEndZone: React.FC<{ activeId: string | null; count: number }> = ({ activeId, count }) => {
-  const { setNodeRef, isOver } = useDroppable({
-    id: 'connector-end',
-    data: { type: 'connector', insertIndex: count }
-  });
-
-  if (!activeId) return null;
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={{
-        width: isOver ? '52px' : '20px',
-        minHeight: '64px',
-        alignSelf: 'stretch',
-        borderRadius: '6px',
-        border: isOver ? '2px dashed #ffd875' : '1px dashed rgba(255,255,255,0.2)',
-        background: isOver ? 'rgba(255, 216, 117, 0.15)' : 'transparent',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        transition: 'all 0.15s ease',
-        position: 'relative',
-        flexShrink: 0,
-        marginLeft: '4px'
-      }}
-    >
-      {isOver && (
-        <div style={{
-          position: 'absolute',
-          top: '-18px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background: '#ffd875',
-          color: '#0a0812',
-          fontSize: '0.62rem',
-          fontWeight: 800,
-          fontFamily: "'Outfit', system-ui, sans-serif",
-          padding: '1px 6px',
-          borderRadius: '3px',
-          pointerEvents: 'none',
-          whiteSpace: 'nowrap',
-          zIndex: 100,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.5)'
-        }}>
-          AL FINAL
-        </div>
-      )}
-    </div>
-  );
-};
-
-interface SortablePatternItemProps {
-  item: PatternChainItem;
-  totalPatterns: number;
-  isInsideGroup?: boolean;
-  parentGroupId?: string;
-  isCurrentPlaying: boolean;
-  isSelected: boolean;
-  zoomLevel: number;
-  updateChainItem: (id: string, updates: Partial<PatternChainItem>) => void;
-  removeChainItem: (id: string) => void;
-  setCurrentDrumPatternEdit: (idx: number) => void;
-  onSelect: (e: React.MouseEvent, id: string) => void;
-  onContextMenu: (e: React.MouseEvent, item: PatternChainItem, parentGroupId?: string) => void;
-  onRemoveFromGroup?: (groupId: string, itemId: string) => void;
-  onUpdateInGroup?: (groupId: string, itemId: string, updates: Partial<PatternChainItem>) => void;
+interface LassoState {
+  isActive: boolean;
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
 }
 
-const SortablePatternItem: React.FC<SortablePatternItemProps> = ({
-  item,
-  totalPatterns,
-  isInsideGroup = false,
-  parentGroupId,
-  isCurrentPlaying,
-  isSelected,
-  zoomLevel,
-  updateChainItem,
-  removeChainItem,
-  setCurrentDrumPatternEdit,
-  onSelect,
-  onContextMenu,
-  onRemoveFromGroup,
-  onUpdateInGroup
-}) => {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging
-  } = useSortable({ id: item.id, data: { type: 'pattern', parentGroupId } });
+function startDrumEdgeAutoScroll(
+  viewportRef: React.RefObject<HTMLDivElement | null>,
+  getClientX: () => number,
+  onScrolled: () => void
+): () => void {
+  let rafId = 0;
+  const EDGE_PX = 36;
+  const MAX_SPEED = 14;
 
-  const [isResizingEdge, setIsResizingEdge] = useState(false);
-  const [showPatternPicker, setShowPatternPicker] = useState(false);
-  const [pickerPos, setPickerPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
-  const pickerRef = useRef<HTMLDivElement>(null);
-  const badgeRef = useRef<HTMLDivElement>(null);
-
-  useLayoutEffect(() => {
-    if (!showPatternPicker || !badgeRef.current) return;
-    const rect = badgeRef.current.getBoundingClientRect();
-    const popoverWidth = 216;
-    const numRows = Math.ceil(totalPatterns / 4);
-    // 7px top padding + 28px rest button + 6px gap + (numRows * 28px) + (numRows - 1)*5px gap + 7px bottom padding
-    const popoverHeight = 14 + 28 + 6 + (numRows * 28) + (Math.max(0, numRows - 1) * 5);
-    const vh = window.innerHeight;
-    const vw = window.innerWidth;
-
-    // Calcular si cabe abajo o si debe colocarse arriba del bloque
-    const spaceBelow = vh - rect.bottom;
-    const spaceAbove = rect.top;
-
-    let top = rect.bottom + 4;
-    if (spaceBelow < popoverHeight + 12 && spaceAbove > spaceBelow) {
-      top = Math.max(12, rect.top - popoverHeight - 4);
-    }
-    if (top + popoverHeight > vh - 12) {
-      top = Math.max(12, vh - popoverHeight - 12);
-    }
-
-    let left = rect.left + (rect.width / 2) - (popoverWidth / 2);
-    if (left + popoverWidth > vw - 12) {
-      left = vw - popoverWidth - 12;
-    }
-    if (left < 12) left = 12;
-
-    setPickerPos({ top, left });
-  }, [showPatternPicker, totalPatterns]);
-
-  useEffect(() => {
-    if (!showPatternPicker) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (
-        pickerRef.current && !pickerRef.current.contains(target) &&
-        badgeRef.current && !badgeRef.current.contains(target)
-      ) {
-        setShowPatternPicker(false);
+  const tick = () => {
+    const vp = viewportRef.current;
+    if (vp) {
+      const rect = vp.getBoundingClientRect();
+      const x = getClientX();
+      let dx = 0;
+      if (x < rect.left + EDGE_PX) {
+        dx = -Math.ceil(((rect.left + EDGE_PX - x) / EDGE_PX) * MAX_SPEED);
+      } else if (x > rect.right - EDGE_PX) {
+        dx = Math.ceil(((x - (rect.right - EDGE_PX)) / EDGE_PX) * MAX_SPEED);
       }
-    };
-    const handleScroll = () => {
-      setShowPatternPicker(false);
-    };
-    window.addEventListener('mousedown', handleClickOutside);
-    window.addEventListener('scroll', handleScroll, true);
-    return () => {
-      window.removeEventListener('mousedown', handleClickOutside);
-      window.removeEventListener('scroll', handleScroll, true);
-    };
-  }, [showPatternPicker]);
-
-  const isRest = item.type === 'rest' || item.patternIndex === -1;
-  const patternIdx = isRest ? -1 : (item.patternIndex ?? 0);
-  const patternColor = isRest ? 'rgba(255, 255, 255, 0.32)' : colors[patternIdx % colors.length];
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.35 : 1,
-    '--block-color': patternColor,
-    scale: isInsideGroup ? '0.94' : '1',
-    margin: isInsideGroup ? '0' : undefined,
-    width: `${Math.round(100 * zoomLevel)}px`,
-    minWidth: `${Math.round(100 * zoomLevel)}px`
-  } as React.CSSProperties;
-
-  const handleUpdate = (updates: Partial<PatternChainItem>) => {
-    if (isInsideGroup && parentGroupId && onUpdateInGroup) {
-      onUpdateInGroup(parentGroupId, item.id, updates);
-    } else {
-      updateChainItem(item.id, updates);
-    }
-  };
-
-  const handleRemove = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (isInsideGroup && parentGroupId && onRemoveFromGroup) {
-      onRemoveFromGroup(parentGroupId, item.id);
-    } else {
-      removeChainItem(item.id);
-    }
-  };
-
-  const handleEdgeResizeMouseDown = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    setIsResizingEdge(true);
-    const startX = e.clientX;
-    const initialRepeats = item.repeatCount;
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const deltaX = moveEvent.clientX - startX;
-      const stepWidth = 24 * zoomLevel;
-      const deltaRepeats = Math.round(deltaX / stepWidth);
-      const nextRepeats = Math.max(1, Math.min(64, initialRepeats + deltaRepeats));
-      if (nextRepeats !== item.repeatCount) {
-        handleUpdate({ repeatCount: nextRepeats });
+      if (dx !== 0) {
+        const prev = vp.scrollLeft;
+        vp.scrollLeft = Math.max(0, prev + dx);
+        if (vp.scrollLeft !== prev) {
+          onScrolled();
+        }
       }
-    };
-
-    const handleMouseUp = () => {
-      setIsResizingEdge(false);
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    }
+    rafId = requestAnimationFrame(tick);
   };
 
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      {...listeners}
-      className={`pattern-chain-block ${isRest ? 'is-rest' : ''} ${isCurrentPlaying ? 'playing' : ''} ${isSelected ? 'selected' : ''} ${isResizingEdge ? 'resizing' : ''}`}
-      onClick={(e) => onSelect(e, item.id)}
-      onContextMenu={(e) => onContextMenu(e, item, parentGroupId)}
-    >
-      <div className="block-color-bar" />
-
-      {/* Indicador de Reproducción Activa */}
-      {isCurrentPlaying && (
-        <div className="block-playing-badge" title="Reproduciendo en este momento">
-          <Play size={9} className="playing-icon-pulse" />
-        </div>
-      )}
-
-      <div className="block-content">
-        <div className="block-header">
-          {/* Badge Grande y Clickeable para cambiar patrón o silencio */}
-          <div
-            ref={badgeRef}
-            className="pattern-badge-pill"
-            onPointerDown={(e) => e.stopPropagation()}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowPatternPicker(prev => !prev);
-            }}
-            title={isRest ? 'Silencio — Clic para cambiar' : `Patrón P${patternIdx + 1} — Clic para cambiar`}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '4px',
-              background: isRest ? 'rgba(255, 255, 255, 0.05)' : 'rgba(255, 255, 255, 0.08)',
-              border: `1px solid ${isSelected ? '#ffd875' : isRest ? 'rgba(255, 255, 255, 0.14)' : 'rgba(255, 255, 255, 0.16)'}`,
-              borderLeft: `4px solid ${patternColor}`,
-              color: isRest ? '#c5c1d8' : '#ffffff',
-              borderRadius: '4px',
-              padding: '2px 7px',
-              fontSize: '0.85rem',
-              fontFamily: "'Outfit', system-ui, sans-serif",
-              fontWeight: 700,
-              cursor: 'pointer',
-              userSelect: 'none',
-              flex: 1
-            }}
-          >
-            {isRest ? (
-              <VolumeX size={14} style={{ opacity: 0.9 }} />
-            ) : (
-              `P${patternIdx + 1}`
-            )}
-          </div>
-
-          <div className="block-nav-btns" onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-            <button className="chain-nav-btn remove-btn" onClick={handleRemove} title="Eliminar bloque">✕</button>
-          </div>
-        </div>
-
-        {/* Popover selector de patrón emergente flotante en Portal (sin corte de overflow ni z-order) */}
-        {showPatternPicker && createPortal(
-          <div
-            ref={pickerRef}
-            className="pattern-quick-picker-popover"
-            style={{
-              position: 'fixed',
-              top: `${pickerPos.top}px`,
-              left: `${pickerPos.left}px`,
-              width: '216px',
-              zIndex: 99999
-            }}
-            onPointerDown={(e) => e.stopPropagation()}
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Opción de Silencio */}
-            <button
-              type="button"
-              className={`picker-popover-rest-btn ${isRest ? 'active' : ''}`}
-              onClick={() => {
-                handleUpdate({ type: 'rest', patternIndex: -1 });
-                setShowPatternPicker(false);
-              }}
-              title="Silencio"
-            >
-              <VolumeX size={15} />
-            </button>
-
-            <div className="picker-popover-grid">
-              {Array.from({ length: totalPatterns }).map((_, pI) => (
-                <button
-                  key={pI}
-                  type="button"
-                  className={`picker-popover-cell ${!isRest && pI === patternIdx ? 'active' : ''}`}
-                  style={{ '--btn-color': colors[pI % colors.length] } as React.CSSProperties}
-                  onClick={() => {
-                    handleUpdate({ type: 'pattern', patternIndex: pI });
-                    setCurrentDrumPatternEdit(pI);
-                    setShowPatternPicker(false);
-                  }}
-                  title={`Patrón P${pI + 1}`}
-                >
-                  <span className="picker-dot" />
-                  P{pI + 1}
-                </button>
-              ))}
-            </div>
-          </div>,
-          document.body
-        )}
-
-        <div className="block-repeat-counter" onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            className="repeat-btn"
-            disabled={item.repeatCount <= 1}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleUpdate({ repeatCount: Math.max(1, item.repeatCount - 1) });
-            }}
-          >-</button>
-          <span className="repeat-count-text" title="Veces que se repite el patrón">x{item.repeatCount}</span>
-          <button
-            type="button"
-            className="repeat-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleUpdate({ repeatCount: Math.min(64, item.repeatCount + 1) });
-            }}
-          >+</button>
-        </div>
-      </div>
-
-      {/* Tirador derecho para estirar repeticiones arrastrando */}
-      <div
-        className="chain-block-resize-handle right"
-        title="Arrastra a la derecha para aumentar repeticiones"
-        onPointerDown={(e) => e.stopPropagation()}
-        onMouseDown={handleEdgeResizeMouseDown}
-      />
-    </div>
-  );
-};
-
-interface SortableGroupItemProps {
-  group: PatternChainItem;
-  totalPatterns: number;
-  isPlaying: boolean;
-  isPatternRepeatOn: boolean;
-  isSelected: boolean;
-  selectedChainIds: string[];
-  zoomLevel: number;
-  currentChainItemId: string | null;
-  currentDrumPatternEdit: number;
-  updateChainItem: (id: string, updates: Partial<PatternChainItem>) => void;
-  removeChainItem: (id: string) => void;
-  setCurrentDrumPatternEdit: (idx: number) => void;
-  onSelect: (e: React.MouseEvent, id: string) => void;
-  onContextMenu: (e: React.MouseEvent, item: PatternChainItem, parentGroupId?: string) => void;
+  rafId = requestAnimationFrame(tick);
+  return () => cancelAnimationFrame(rafId);
 }
 
-const SortableGroupItem: React.FC<SortableGroupItemProps> = ({
-  group,
-  totalPatterns,
-  isPlaying,
-  isPatternRepeatOn,
-  isSelected,
-  selectedChainIds,
-  zoomLevel,
-  currentChainItemId,
-  currentDrumPatternEdit,
-  updateChainItem,
-  removeChainItem,
-  setCurrentDrumPatternEdit,
-  onSelect,
-  onContextMenu
-}) => {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging
-  } = useSortable({ id: group.id, data: { type: 'group' } });
-
-  const { setNodeRef: setGroupDropRef, isOver: isOverGroupDrop } = useDroppable({
-    id: `group-inner-${group.id}`,
-    data: { type: 'group-inner', groupId: group.id }
-  });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.35 : 1,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-    padding: '8px 10px',
-    border: isSelected ? '1px solid #ffd875' : isOverGroupDrop ? '1px dashed var(--accent)' : '1px dashed rgba(255, 255, 255, 0.18)',
-    boxShadow: isSelected ? '0 0 16px rgba(255, 216, 117, 0.4)' : isOverGroupDrop ? '0 0 12px rgba(0, 229, 255, 0.25)' : '0 4px 12px rgba(0, 0, 0, 0.35)',
-    borderRadius: '8px',
-    background: isSelected ? 'rgba(255, 216, 117, 0.08)' : isOverGroupDrop ? 'rgba(0, 229, 255, 0.06)' : 'rgba(15, 11, 22, 0.65)',
-    cursor: 'grab'
-  } as React.CSSProperties;
-
-  const handleUpdateInGroup = (groupId: string, itemId: string, updates: Partial<PatternChainItem>) => {
-    if (!group.items) return;
-    const newItems = group.items.map(i => i.id === itemId ? { ...i, ...updates } : i);
-    updateChainItem(groupId, { items: newItems });
-  };
-
-  const handleRemoveFromGroup = (groupId: string, itemId: string) => {
-    if (!group.items) return;
-    const newItems = group.items.filter(i => i.id !== itemId);
-    updateChainItem(groupId, { items: newItems });
-  };
-
-  return (
-    <div 
-      ref={setNodeRef} 
-      style={style} 
-      {...attributes}
-      {...listeners}
-      className={`pattern-chain-group ${isSelected ? 'selected' : ''}`}
-      onClick={(e) => onSelect(e, group.id)}
-      onContextMenu={(e) => onContextMenu(e, group)}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: '0.72rem', color: isSelected ? '#ffd875' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '5px', fontFamily: "'Outfit', system-ui, sans-serif", fontWeight: 700 }}>
-          <Folder size={13} style={{ color: '#ffd875' }} />
-          <span>GRUPO</span>
-          {group.items && group.items.length > 0 && (
-            <span style={{ fontSize: '0.65rem', opacity: 0.6, fontWeight: 500 }}>({group.items.length} {group.items.length === 1 ? 'patrón' : 'patrones'})</span>
-          )}
-        </span>
-        <div className="block-nav-btns" onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-          <button className="chain-nav-btn remove-btn" onClick={(e) => { e.stopPropagation(); removeChainItem(group.id); }} title="Eliminar grupo">✕</button>
-        </div>
-      </div>
-      
-      <div 
-        ref={setGroupDropRef}
-        style={{
-          display: 'flex',
-          gap: '6px',
-          alignItems: 'center',
-          overflowX: 'auto',
-          padding: '4px',
-          minHeight: '68px',
-          minWidth: '80px',
-          borderRadius: '6px',
-          background: isOverGroupDrop ? 'rgba(255, 216, 117, 0.1)' : 'rgba(0,0,0,0.2)',
-          border: isOverGroupDrop ? '1px dashed #ffd875' : '1px solid rgba(255,255,255,0.05)',
-          transition: 'all 0.15s ease'
-        }}
-      >
-        <SortableContext
-          items={(group.items || []).map(i => i.id)}
-          strategy={horizontalListSortingStrategy}
-        >
-          {group.items && group.items.length > 0 ? (
-            group.items.map((item, i) => (
-              <React.Fragment key={item.id}>
-                <SortablePatternItem
-                  item={item}
-                  totalPatterns={totalPatterns}
-                  isInsideGroup={true}
-                  parentGroupId={group.id}
-                  isCurrentPlaying={isPlaying && !isPatternRepeatOn && currentChainItemId === item.id}
-                  isSelected={selectedChainIds.includes(item.id)}
-                  zoomLevel={zoomLevel}
-                  updateChainItem={updateChainItem}
-                  removeChainItem={removeChainItem}
-                  setCurrentDrumPatternEdit={setCurrentDrumPatternEdit}
-                  onSelect={onSelect}
-                  onContextMenu={onContextMenu}
-                  onRemoveFromGroup={handleRemoveFromGroup}
-                  onUpdateInGroup={handleUpdateInGroup}
-                />
-                {i < (group.items?.length ?? 0) - 1 && (
-                  <div style={{ color: 'var(--border-color)', opacity: 0.6 }}><LinkIcon size={12} /></div>
-                )}
-              </React.Fragment>
-            ))
-          ) : (
-            <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', opacity: 0.6, padding: '0 8px', fontStyle: 'italic', pointerEvents: 'none' }}>
-              Arrastra un patrón aquí
-            </div>
-          )}
-        </SortableContext>
-        <button 
-          type="button"
-          className="action-btn"
-          style={{ width: '28px', height: '28px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.8, flexShrink: 0 }}
-          onPointerDown={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            const newItems = [...(group.items || []), { id: `chain_${Date.now()}`, type: 'pattern' as const, patternIndex: currentDrumPatternEdit, repeatCount: 1 }];
-            updateChainItem(group.id, { items: newItems });
-          }}
-          title="Añadir patrón al grupo"
-        >
-          <Plus size={13} />
-        </button>
-      </div>
-
-      <div className="block-repeat-counter" onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} style={{ alignSelf: 'center', background: 'rgba(255,255,255,0.04)', borderRadius: '4px', padding: '1px 6px' }}>
-        <button type="button" className="repeat-btn" disabled={group.repeatCount <= 1} onClick={(e) => { e.stopPropagation(); updateChainItem(group.id, { repeatCount: Math.max(1, group.repeatCount - 1) }); }}>-</button>
-        <span className="repeat-count-text">x{group.repeatCount}</span>
-        <button type="button" className="repeat-btn" onClick={(e) => { e.stopPropagation(); updateChainItem(group.id, { repeatCount: Math.min(64, group.repeatCount + 1) }); }}>+</button>
-      </div>
-    </div>
-  );
+const formatMeasureRange = (startM: number, durM: number): string => {
+  const startDisp = Math.round(startM * 100) / 100 + 1;
+  const endM = startM + durM;
+  if (Math.abs(durM - 1) < 0.01 && Number.isInteger(startM)) {
+    return `c.${startDisp}`;
+  }
+  const endDisp = Math.round(endM * 100) / 100;
+  return `c.${startDisp}–${Number.isInteger(endM) ? endDisp : endDisp.toFixed(1)}`;
 };
 
 export const PatternChainArranger: React.FC = () => {
   const {
     patternChain,
     drumChannels,
+    patternLengths,
+    chordBlocks,
+    tracks,
+    timeSignature,
     isPatternRepeatOn,
-    currentChainItemId,
-    addChainItem,
-    updateChainItem,
-    removeChainItem,
-    setCurrentDrumPatternEdit,
+    setPatternRepeatOn,
     currentDrumPatternEdit,
+    setCurrentDrumPatternEdit,
     isPlaying,
     selectedChainIds,
     setSelectedChainIds,
@@ -749,21 +126,29 @@ export const PatternChainArranger: React.FC = () => {
     pasteChainItems,
     duplicateSelectedChainItems,
     deleteSelectedChainItems,
-    groupSelectedChainItems,
-    ungroupSelectedChainItems,
+    addChainItem,
+    addChainItemsBatch,
+    updateChainItem,
+    updateChainItemsBatch,
+    splitChainItem,
+    makeChainItemUnique,
+    fillChainToSong,
+    clearPatternChain,
+    removeChainItem,
     chainClipboard,
     drumTimelineViewport,
     setDrumTimelineViewport
   } = useSongStore(useShallow(state => ({
-    patternChain: state.patternChain,
+    patternChain: state.patternChain || [],
     drumChannels: state.drumChannels || [],
+    patternLengths: state.patternLengths || [],
+    chordBlocks: state.chordBlocks || [],
+    tracks: state.tracks || [],
+    timeSignature: state.timeSignature || '4/4',
     isPatternRepeatOn: state.isPatternRepeatOn,
-    currentChainItemId: state.currentChainItemId,
-    addChainItem: state.addChainItem,
-    updateChainItem: state.updateChainItem,
-    removeChainItem: state.removeChainItem,
-    setCurrentDrumPatternEdit: state.setCurrentDrumPatternEdit,
+    setPatternRepeatOn: state.setPatternRepeatOn,
     currentDrumPatternEdit: state.currentDrumPatternEdit,
+    setCurrentDrumPatternEdit: state.setCurrentDrumPatternEdit,
     isPlaying: state.isPlaying,
     selectedChainIds: state.selectedChainIds || [],
     setSelectedChainIds: state.setSelectedChainIds,
@@ -774,101 +159,340 @@ export const PatternChainArranger: React.FC = () => {
     pasteChainItems: state.pasteChainItems,
     duplicateSelectedChainItems: state.duplicateSelectedChainItems,
     deleteSelectedChainItems: state.deleteSelectedChainItems,
-    groupSelectedChainItems: state.groupSelectedChainItems,
-    ungroupSelectedChainItems: state.ungroupSelectedChainItems,
+    addChainItem: state.addChainItem,
+    addChainItemsBatch: state.addChainItemsBatch,
+    updateChainItem: state.updateChainItem,
+    updateChainItemsBatch: state.updateChainItemsBatch,
+    splitChainItem: state.splitChainItem,
+    makeChainItemUnique: state.makeChainItemUnique,
+    fillChainToSong: state.fillChainToSong,
+    clearPatternChain: state.clearPatternChain,
+    removeChainItem: state.removeChainItem,
     chainClipboard: state.chainClipboard || [],
     drumTimelineViewport: state.drumTimelineViewport,
     setDrumTimelineViewport: state.setDrumTimelineViewport
   })));
 
+  const beatsPerMeasure = timeSignature === '3/4' ? 3 : timeSignature === '6/8' ? 6 : 4;
   const totalPatterns = drumChannels[0]?.patterns?.length || 8;
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [zoomLevel, setZoomLevel] = useState<number>(drumTimelineViewport?.zoomLevel || 1.0);
-  const trackWrapperRef = useRef<HTMLDivElement>(null);
+  const linearClips = useMemo(() => normalizePatternChainToLinear(patternChain), [patternChain]);
 
-  // Menús contextuales
-  const [itemContextMenu, setItemContextMenu] = useState<{ x: number; y: number; item: PatternChainItem; parentGroupId?: string } | null>(null);
-  const [trackContextMenu, setTrackContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [zoomLevel, setZoomLevel] = useState<number>(drumTimelineViewport?.zoomLevel || 1.0);
+  const [snapGrid, setSnapGrid] = useState<DrumSnapGrid>('1');
+  const [isSliceToolActive, setIsSliceToolActive] = useState(false);
+  const [slicePreviewMeasure, setSlicePreviewMeasure] = useState<number | null>(null);
+  const [draggingBrushIdx, setDraggingBrushIdx] = useState<number | null>(null);
+  const [hoverDropMeasure, setHoverDropMeasure] = useState<number | null>(null);
+  const [activeDrag, setActiveDrag] = useState<DragClipState | null>(null);
+  const [lasso, setLasso] = useState<LassoState>({ isActive: false, startX: 0, startY: 0, currentX: 0, currentY: 0 });
+  const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
+
+  const [clipContextMenu, setClipContextMenu] = useState<{ x: number; y: number; clip: LinearDrumClip; measure: number } | null>(null);
+  const [trackContextMenu, setTrackContextMenu] = useState<{ x: number; y: number; measure: number } | null>(null);
+
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const playheadRef = useRef<HTMLDivElement | null>(null);
+
+  const BASE_MEASURE_WIDTH = 96;
+  const MEASURE_WIDTH = Math.max(44, Math.round(BASE_MEASURE_WIDTH * zoomLevel));
+  const snapMeasures = snapGrid === 'off' ? 0.25 : Number(snapGrid);
+
+  // Calcular longitud total en compases acoplada a Acordes, Melodías y Clips de Batería
+  const songSpanMeasures = useMemo(() => {
+    const maxChordBeat = chordBlocks.reduce((m, b) => Math.max(m, b.startBeat + b.durationBeats), 0);
+    const maxMelodyBeat = tracks.reduce(
+      (m, t) => Math.max(m, (t.notes || []).reduce((nm, n) => Math.max(nm, n.startBeat + n.durationBeats), 0)),
+      0
+    );
+    const songBeats = Math.max(maxChordBeat, maxMelodyBeat);
+    return Math.ceil(songBeats / beatsPerMeasure);
+  }, [chordBlocks, tracks, beatsPerMeasure]);
+
+  const maxClipEndMeasure = useMemo(
+    () => linearClips.reduce((m, c) => Math.max(m, c.startMeasure + c.durationMeasures), 0),
+    [linearClips]
+  );
+
+  const totalMeasures = Math.max(16, songSpanMeasures + 4, Math.ceil(maxClipEndMeasure) + 6);
+  const canvasWidth = totalMeasures * MEASURE_WIDTH;
 
   useEffect(() => {
     setDrumTimelineViewport({ zoomLevel });
   }, [zoomLevel, setDrumTimelineViewport]);
 
   useEffect(() => {
-    if (trackWrapperRef.current) {
-      trackWrapperRef.current.scrollLeft = drumTimelineViewport?.scrollLeft ?? 0;
+    if (viewportRef.current) {
+      const targetLeft = drumTimelineViewport?.scrollLeft ?? 0;
+      if (Math.abs(viewportRef.current.scrollLeft - targetLeft) > 2) {
+        viewportRef.current.scrollLeft = targetLeft;
+      }
     }
   }, [drumTimelineViewport?.scrollLeft]);
 
-  // Zoom con Alt + Rueda y Scroll con Shift + Rueda
-  useEffect(() => {
-    const el = trackWrapperRef.current;
-    if (!el) return;
+  const clipRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const activePlayingClipIdRef = useRef<string | null>(null);
+  const scrollPersistTimerRef = useRef<number | null>(null);
 
-    const handleWheel = (e: WheelEvent) => {
-      if (e.altKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        const delta = e.deltaY > 0 ? -0.1 : 0.1;
-        setZoomLevel(z => Math.max(0.6, Math.min(2.0, parseFloat((z + delta).toFixed(2)))));
-      } else if (e.shiftKey) {
-        e.preventDefault();
-        el.scrollLeft += e.deltaY;
+  const persistScrollLeft = useCallback((nextLeft: number) => {
+    if (scrollPersistTimerRef.current !== null) {
+      window.clearTimeout(scrollPersistTimerRef.current);
+    }
+    scrollPersistTimerRef.current = window.setTimeout(() => {
+      scrollPersistTimerRef.current = null;
+      setDrumTimelineViewport({ scrollLeft: nextLeft });
+    }, 150);
+  }, [setDrumTimelineViewport]);
+
+  useEffect(() => {
+    return () => {
+      if (scrollPersistTimerRef.current !== null) {
+        window.clearTimeout(scrollPersistTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isPlaying || isPatternRepeatOn) {
+      if (activePlayingClipIdRef.current) {
+        const prevEl = clipRefs.current.get(activePlayingClipIdRef.current);
+        if (prevEl) {
+          prevEl.classList.remove('playing');
+          const prevIcon = prevEl.querySelector('.drum-clip-play-icon') as HTMLElement | null;
+          if (prevIcon) prevIcon.style.display = 'none';
+        }
+        activePlayingClipIdRef.current = null;
+      }
+      return;
+    }
+
+    return liveTelemetryBus.subscribeDrumStep(({ chainItemId }) => {
+      if (activePlayingClipIdRef.current && activePlayingClipIdRef.current !== chainItemId) {
+        const prevEl = clipRefs.current.get(activePlayingClipIdRef.current);
+        if (prevEl) {
+          prevEl.classList.remove('playing');
+          const prevIcon = prevEl.querySelector('.drum-clip-play-icon') as HTMLElement | null;
+          if (prevIcon) prevIcon.style.display = 'none';
+        }
+      }
+      if (chainItemId) {
+        const nextEl = clipRefs.current.get(chainItemId);
+        if (nextEl) {
+          nextEl.classList.add('playing');
+          const nextIcon = nextEl.querySelector('.drum-clip-play-icon') as HTMLElement | null;
+          if (nextIcon) nextIcon.style.display = 'inline-block';
+        }
+        activePlayingClipIdRef.current = chainItemId;
+      } else {
+        activePlayingClipIdRef.current = null;
+      }
+    });
+  }, [isPlaying, isPatternRepeatOn, linearClips, selectedChainIds]);
+
+  // Navegación unificada: Ctrl/Alt+Wheel anchored zoom, Shift+Wheel scroll, Middle-click pan
+  useTimelineNavigation({
+    viewportRef,
+    baseBeatWidth: BASE_MEASURE_WIDTH / beatsPerMeasure,
+    zoomLevel,
+    minZoom: 0.45,
+    maxZoom: 2.5,
+    onZoomChange: setZoomLevel,
+    onScrollChange: useCallback((nextLeft: number) => {
+      persistScrollLeft(nextLeft);
+    }, [persistScrollLeft])
+  });
+
+  // Playhead de alta frecuencia (60 FPS sin causar re-renders en React)
+  useEffect(() => {
+    const updatePos = () => {
+      if (playheadRef.current) {
+        const beat = isPlaying ? toneEngine.getLiveBeat() : (useSongStore.getState().currentBeat || 0);
+        const measure = beat / beatsPerMeasure;
+        playheadRef.current.style.transform = `translate3d(${measure * MEASURE_WIDTH}px, 0, 0)`;
       }
     };
 
-    el.addEventListener('wheel', handleWheel, { passive: false });
-    return () => el.removeEventListener('wheel', handleWheel);
-  }, []);
+    if (!isPlaying) {
+      updatePos();
+      const unsub = useSongStore.subscribe((s) => {
+        if (!s.isPlaying && playheadRef.current) {
+          playheadRef.current.style.transform = `translate3d(${((s.currentBeat || 0) / beatsPerMeasure) * MEASURE_WIDTH}px, 0, 0)`;
+        }
+      });
+      return unsub;
+    }
 
-  // Atajos de teclado para la Cadena de Patrones
+    let rafId = 0;
+    const loop = () => {
+      updatePos();
+      rafId = requestAnimationFrame(loop);
+    };
+    rafId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafId);
+  }, [isPlaying, MEASURE_WIDTH, beatsPerMeasure]);
+
+  // Precomputar matriz compacta de hits por patrón para miniaturas visuales en clips
+  const patternPreviewHits = useMemo(() => {
+    const previewMap = new Map<number, Array<Array<{ stepIdx: number; totalSteps: number; rowIdx: number }>>>();
+    const visibleChannels = drumChannels.slice(0, 6);
+    for (let p = 0; p < totalPatterns; p++) {
+      const patLen = patternLengths[p] || 16;
+      const rows: Array<Array<{ stepIdx: number; totalSteps: number; rowIdx: number }>> = [];
+      visibleChannels.forEach((ch, rIdx) => {
+        const rowHits: Array<{ stepIdx: number; totalSteps: number; rowIdx: number }> = [];
+        const steps = ch.patterns?.[p] || [];
+        for (let s = 0; s < Math.min(patLen, steps.length); s++) {
+          if (steps[s]?.isActive) {
+            rowHits.push({ stepIdx: s, totalSteps: patLen, rowIdx: rIdx });
+          }
+        }
+        if (rowHits.length > 0) rows.push(rowHits);
+      });
+      previewMap.set(p, rows);
+    }
+    return previewMap;
+  }, [drumChannels, patternLengths, totalPatterns]);
+
+  // Zoom to Fit (Ctrl+0)
+  const handleZoomToFit = useCallback(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    const span = Math.max(4, songSpanMeasures, maxClipEndMeasure);
+    const viewW = Math.max(300, vp.clientWidth - 24);
+    const nextZoom = Math.max(0.45, Math.min(2.5, parseFloat(((viewW / span) / BASE_MEASURE_WIDTH).toFixed(2))));
+    setZoomLevel(nextZoom);
+    requestAnimationFrame(() => {
+      if (viewportRef.current) viewportRef.current.scrollLeft = 0;
+    });
+  }, [songSpanMeasures, maxClipEndMeasure]);
+
+  // Cierre de menús al hacer clic fuera
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.custom-context-menu')) {
+        setClipContextMenu(null);
+        setTrackContextMenu(null);
+      }
+      if (
+        !target.closest('.drum-linear-clip') &&
+        !target.closest('.custom-context-menu') &&
+        !target.closest('.pattern-chain-header') &&
+        !lasso.isActive
+      ) {
+        if (selectedChainIds.length > 0 && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+          setSelectedChainIds([]);
+        }
+      }
+    };
+    window.addEventListener('mousedown', handleGlobalClick);
+    return () => window.removeEventListener('mousedown', handleGlobalClick);
+  }, [selectedChainIds.length, setSelectedChainIds, lasso.isActive]);
+
+  // Atajos unificados del Timeline de Batería (guarded por activeView === 'sequencer')
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLSelectElement ||
-        e.target instanceof HTMLTextAreaElement
-      ) {
+      const state = useSongStore.getState();
+      if (state.activeView !== 'sequencer' || isModalBlockingShortcuts(state)) {
+        return;
+      }
+      if (isTypingTarget(e.target)) {
         return;
       }
 
       const isCtrlOrCmd = e.ctrlKey || e.metaKey;
+      const keyLower = e.key.toLowerCase();
 
-      if (isCtrlOrCmd && e.key.toLowerCase() === 'c') {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (isSliceToolActive) {
+          setIsSliceToolActive(false);
+          setSlicePreviewMeasure(null);
+        } else if (clipContextMenu || trackContextMenu) {
+          setClipContextMenu(null);
+          setTrackContextMenu(null);
+        } else if (selectedChainIds.length > 0) {
+          setSelectedChainIds([]);
+        }
+        return;
+      }
+
+      if (isCtrlOrCmd && e.key === '0') {
+        e.preventDefault();
+        handleZoomToFit();
+        return;
+      }
+
+      if (!isCtrlOrCmd && !e.altKey && !e.shiftKey && keyLower === 'c') {
+        e.preventDefault();
+        setIsSliceToolActive(prev => !prev);
+        return;
+      }
+
+      if (isCtrlOrCmd && keyLower === 'c') {
         if (selectedChainIds.length > 0) {
           e.preventDefault();
           copySelectedChainItems();
         }
-      } else if (isCtrlOrCmd && e.key.toLowerCase() === 'x') {
+        return;
+      }
+      if (isCtrlOrCmd && keyLower === 'x') {
         if (selectedChainIds.length > 0) {
           e.preventDefault();
           cutSelectedChainItems();
         }
-      } else if (isCtrlOrCmd && e.key.toLowerCase() === 'v') {
+        return;
+      }
+      if (isCtrlOrCmd && keyLower === 'v') {
         e.preventDefault();
-        pasteChainItems(selectedChainIds[0]);
-      } else if (isCtrlOrCmd && e.key.toLowerCase() === 'd') {
+        pasteChainItems();
+        return;
+      }
+      if (isCtrlOrCmd && keyLower === 'd') {
         if (selectedChainIds.length > 0) {
           e.preventDefault();
           duplicateSelectedChainItems();
         }
-      } else if (isCtrlOrCmd && e.shiftKey && e.key.toLowerCase() === 'g') {
-        if (selectedChainIds.length > 0) {
-          e.preventDefault();
-          ungroupSelectedChainItems();
-        }
-      } else if (isCtrlOrCmd && !e.shiftKey && e.key.toLowerCase() === 'g') {
-        if (selectedChainIds.length > 1) {
-          e.preventDefault();
-          groupSelectedChainItems();
-        }
-      } else if (isCtrlOrCmd && e.key.toLowerCase() === 'a') {
+        return;
+      }
+      if (isCtrlOrCmd && keyLower === 'a') {
         e.preventDefault();
         selectAllChainItems();
-      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        return;
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedChainIds.length > 0) {
           e.preventDefault();
           deleteSelectedChainItems();
+        }
+        return;
+      }
+
+      if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !isCtrlOrCmd && selectedChainIds.length > 0) {
+        e.preventDefault();
+        const step = e.altKey ? 0.25 : snapMeasures;
+        const delta = (e.key === 'ArrowRight' ? 1 : -1) * step;
+        const selected = linearClips.filter(c => selectedChainIds.includes(c.id));
+        if (selected.length === 0) return;
+
+        if (e.shiftKey) {
+          updateChainItemsBatch(
+            selected.map(c => ({
+              id: c.id,
+              changes: { durationMeasures: Math.max(0.25, c.durationMeasures + delta) }
+            }))
+          );
+        } else {
+          const minStart = selected.reduce((m, c) => Math.min(m, c.startMeasure), Infinity);
+          const safeDelta = Math.max(-minStart, delta);
+          if (safeDelta !== 0) {
+            updateChainItemsBatch(
+              selected.map(c => ({
+                id: c.id,
+                changes: { startMeasure: Math.max(0, c.startMeasure + safeDelta) }
+              }))
+            );
+          }
         }
       }
     };
@@ -876,651 +500,839 @@ export const PatternChainArranger: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
+    isSliceToolActive,
+    clipContextMenu,
+    trackContextMenu,
     selectedChainIds,
+    setSelectedChainIds,
+    linearClips,
+    snapMeasures,
+    handleZoomToFit,
     copySelectedChainItems,
     cutSelectedChainItems,
     pasteChainItems,
     duplicateSelectedChainItems,
-    deleteSelectedChainItems,
     selectAllChainItems,
-    groupSelectedChainItems,
-    ungroupSelectedChainItems
+    deleteSelectedChainItems,
+    updateChainItemsBatch
   ]);
 
-  // Cerrar selecciones al hacer clic en fondo
-  const handleTrackBackgroundClick = (e: React.MouseEvent) => {
-    const target = e.target as HTMLElement;
-    if (!target.closest('.pattern-chain-block') && !target.closest('.pattern-chain-group') && !target.closest('.context-menu-container') && !target.closest('.pattern-quick-picker-popover') && !target.closest('.chain-actions')) {
-      if (selectedChainIds.length > 0 && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        setSelectedChainIds([]);
-      }
-    }
-  };
-
-  const handleSelectItem = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    const isMultiKey = e.shiftKey || e.ctrlKey || e.metaKey;
-    toggleSelectChainId(id, isMultiKey);
-  };
-
-  const handleItemContextMenu = (e: React.MouseEvent, item: PatternChainItem, parentGroupId?: string) => {
+  // Scrubbing desde regla de compases
+  const handleRulerMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
-    if (!selectedChainIds.includes(item.id)) {
-      setSelectedChainIds([item.id]);
-    }
-    setItemContextMenu({ x: e.clientX, y: e.clientY, item, parentGroupId });
-  };
 
-  const handleTrackContextMenu = (e: React.MouseEvent) => {
-    const target = e.target as HTMLElement;
-    if (!target.closest('.pattern-chain-block') && !target.closest('.pattern-chain-group')) {
-      e.preventDefault();
-      e.stopPropagation();
-      setTrackContextMenu({ x: e.clientX, y: e.clientY });
-    }
-  };
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
-
-  const handleAddGroup = () => {
-    const newGroup: PatternChainItem = {
-      id: `group_${Date.now()}`,
-      type: 'group',
-      repeatCount: 1,
-      items: [
-        { id: `chain_${Date.now()}_1`, type: 'pattern', patternIndex: currentDrumPatternEdit, repeatCount: 1 },
-        { id: `chain_${Date.now()}_2`, type: 'pattern', patternIndex: (currentDrumPatternEdit + 1) % totalPatterns, repeatCount: 1 }
-      ] 
+    const seekFromClientX = (clientX: number) => {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const x = Math.max(0, clientX - rect.left);
+      const rawMeasure = x / MEASURE_WIDTH;
+      const snappedMeasure = Math.max(0, Math.round(rawMeasure / 0.25) * 0.25);
+      toneEngine.seekToBeat(snappedMeasure * beatsPerMeasure);
     };
-    useSongStore.setState(state => ({ 
-      patternChain: [...state.patternChain, newGroup],
-      selectedChainIds: [newGroup.id]
-    }));
+
+    seekFromClientX(e.clientX);
+    const onMove = (me: MouseEvent) => seekFromClientX(me.clientX);
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   };
 
-  const findContainer = (id: string, chain: PatternChainItem[]) => {
-    if (chain.some(i => i.id === id)) {
-      return 'root';
+  // Interacción sobre clip lineal: Move, Shift+Drag Clone, Resize L/R, Slice
+  const handleClipMouseDown = (e: React.MouseEvent, clip: LinearDrumClip) => {
+    e.stopPropagation();
+
+    if (e.button === 2 && e.shiftKey) {
+      e.preventDefault();
+      const canvasRect = canvasRef.current?.getBoundingClientRect();
+      if (canvasRect) {
+        const mRaw = (e.clientX - canvasRect.left) / MEASURE_WIDTH;
+        const splitM = Math.round(mRaw / snapMeasures) * snapMeasures;
+        splitChainItem(clip.id, splitM);
+      }
+      return;
     }
-    for (const group of chain) {
-      if (group.type === 'group' && group.items?.some(i => i.id === id)) {
-        return group.id;
+
+    if (e.button !== 0) return;
+    e.preventDefault();
+
+    if (isSliceToolActive) {
+      const canvasRect = canvasRef.current?.getBoundingClientRect();
+      if (canvasRect) {
+        const mRaw = (e.clientX - canvasRect.left) / MEASURE_WIDTH;
+        const cutStep = snapGrid === 'off' ? 0.25 : snapMeasures;
+        const cutM = Math.round(mRaw / cutStep) * cutStep;
+        if (cutM > clip.startMeasure + 0.125 && cutM < clip.startMeasure + clip.durationMeasures - 0.125) {
+          splitChainItem(clip.id, cutM);
+          setSlicePreviewMeasure(null);
+          return;
+        }
       }
     }
-    return null;
-  };
 
-  const moveItemAcrossContainers = (
-    chain: PatternChainItem[],
-    activeId: string,
-    activeContainer: string,
-    overContainer: string,
-    overId: string,
-    insertIndex?: number
-  ): PatternChainItem[] => {
-    let activeItem: PatternChainItem | undefined;
-    let newChain: PatternChainItem[];
-    let rootOldIdx = -1;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const relX = e.clientX - rect.left;
+    const isNearLeft = relX < 9;
+    const isNearRight = rect.width - relX < 9;
+    const mode: 'move' | 'resize_left' | 'resize_right' =
+      isNearLeft ? 'resize_left' : isNearRight ? 'resize_right' : 'move';
+    const isCloneDrag = mode === 'move' && e.shiftKey;
 
-    if (activeContainer === 'root') {
-      rootOldIdx = chain.findIndex(i => i.id === activeId);
-      if (rootOldIdx === -1) return chain;
-      activeItem = chain[rootOldIdx];
-      newChain = chain.filter(i => i.id !== activeId);
-    } else {
-      newChain = chain.map(item => {
-        if (item.id === activeContainer && item.items) {
-          const subIdx = item.items.findIndex(s => s.id === activeId);
-          if (subIdx !== -1) {
-            activeItem = item.items[subIdx];
-            return {
-              ...item,
-              items: item.items.filter(s => s.id !== activeId)
-            };
-          }
-        }
-        return item;
-      });
+    if (e.ctrlKey || e.metaKey) {
+      toggleSelectChainId(clip.id, true);
+    } else if (!selectedChainIds.includes(clip.id)) {
+      setSelectedChainIds([clip.id]);
     }
 
-    if (!activeItem) return chain;
+    setCurrentDrumPatternEdit(clip.patternIndex);
 
-    if (overContainer === 'root') {
-      let targetIdx: number;
-      if (typeof insertIndex === 'number') {
-        const adjustedInsertIndex = (activeContainer === 'root' && rootOldIdx >= 0 && insertIndex > rootOldIdx)
-          ? insertIndex - 1
-          : insertIndex;
-        targetIdx = Math.max(0, Math.min(newChain.length, adjustedInsertIndex));
-      } else {
-        const overIdx = newChain.findIndex(i => i.id === overId);
-        targetIdx = overIdx >= 0 ? overIdx : newChain.length;
-      }
-      const result = [...newChain];
-      result.splice(targetIdx, 0, activeItem);
-      return result;
-    } else {
-      return newChain.map(item => {
-        if (item.id === overContainer) {
-          const currentItems = item.items || [];
-          let targetIdx: number;
-          if (typeof insertIndex === 'number') {
-            targetIdx = Math.max(0, Math.min(currentItems.length, insertIndex));
-          } else {
-            const overIdx = currentItems.findIndex(s => s.id === overId);
-            targetIdx = overIdx >= 0 ? overIdx : currentItems.length;
-          }
-          const updatedItems = [...currentItems];
-          updatedItems.splice(targetIdx, 0, activeItem!);
-          return {
-            ...item,
-            items: updatedItems
-          };
-        }
-        return item;
-      });
-    }
-  };
-
-  const handleDragStart = (event: DragStartEvent) => {
-    setActiveId(event.active.id as string);
-  };
-
-  const handleDragOver = (event: DragOverEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const activeData = active.data.current;
-    const overData = over.data.current;
-
-    // Si se arrastra un grupo, NUNCA puede entrar en otro grupo
-    if (activeData?.type === 'group') {
-      return;
-    }
-
-    // Los conectores son targets de drop en dragEnd, no mutan el estado en dragOver
-    if (overData?.type === 'connector') {
-      return;
-    }
-
-    const activeContainer = findContainer(active.id as string, patternChain);
-    let overContainer: string | null = null;
-
-    if (overData?.type === 'group-inner') {
-      overContainer = overData.groupId as string;
-    } else if (overData?.parentGroupId) {
-      overContainer = overData.parentGroupId as string;
-    } else {
-      overContainer = findContainer(over.id as string, patternChain);
-    }
-
-    // Si el contenedor no cambia, no mutar estado en dragOver (dnd-kit sortable maneja CSS transforms fluidamente)
-    if (!activeContainer || !overContainer || activeContainer === overContainer) {
-      return;
-    }
-
-    // Solo mover si cambia de contenedor
-    useSongStore.setState((state) => {
-      const nextChain = moveItemAcrossContainers(
-        state.patternChain,
-        active.id as string,
-        activeContainer,
-        overContainer!,
-        over.id as string
-      );
-      return { patternChain: nextChain };
+    const effectiveSelectedIds = selectedChainIds.includes(clip.id) ? selectedChainIds : [clip.id];
+    const snapshots = new Map<string, LinearDrumClip>();
+    linearClips.forEach(c => {
+      if (effectiveSelectedIds.includes(c.id)) snapshots.set(c.id, { ...c });
     });
-  };
 
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    setActiveId(null);
+    const startClientX = e.clientX;
+    let latestClientX = e.clientX;
+    let latestAlt = e.altKey;
+    let lastDeltaMeasures = 0;
+    const initialScrollLeft = viewportRef.current?.scrollLeft || 0;
 
-    if (!over) return;
+    setActiveDrag({
+      id: clip.id,
+      mode,
+      isCloneDrag,
+      initialStartMeasure: clip.startMeasure,
+      initialDurationMeasures: clip.durationMeasures,
+      currentStartMeasure: clip.startMeasure,
+      currentDurationMeasures: clip.durationMeasures,
+      snapshots
+    });
 
-    const activeId = active.id as string;
-    const overId = over.id as string;
-    const activeData = active.data.current;
-    const overData = over.data.current;
+    const computeUpdate = (clientX: number, altKey: boolean) => {
+      const currentScroll = viewportRef.current?.scrollLeft || 0;
+      const totalDx = (clientX - startClientX) + (currentScroll - initialScrollLeft);
+      const step = altKey ? 0.25 : snapMeasures;
+      const minDur = Math.max(0.25, step);
+      const deltaM = Math.round((totalDx / MEASURE_WIDTH) / step) * step;
+      lastDeltaMeasures = deltaM;
 
-    // 1. Caso: Se soltó sobre un conector o zona de inserción
-    if (overData?.type === 'connector') {
-      const insertIndex = overData.insertIndex as number;
-      useSongStore.setState((state) => {
-        const activeContainer = findContainer(activeId, state.patternChain);
-        if (!activeContainer) return state;
-
-        if (activeData?.type === 'group') {
-          const oldIndex = state.patternChain.findIndex(i => i.id === activeId);
-          if (oldIndex === -1) return state;
-          const targetIndex = insertIndex > oldIndex ? insertIndex - 1 : insertIndex;
-          if (oldIndex !== targetIndex) {
-            return { patternChain: arrayMove(state.patternChain, oldIndex, targetIndex) };
-          }
-          return state;
+      setActiveDrag(prev => {
+        if (!prev) return null;
+        if (prev.mode === 'move') {
+          return { ...prev, currentStartMeasure: Math.max(0, prev.initialStartMeasure + deltaM) };
         }
-
-        const nextChain = moveItemAcrossContainers(
-          state.patternChain,
-          activeId,
-          activeContainer,
-          'root',
-          overId,
-          insertIndex
-        );
-        return { patternChain: nextChain };
-      });
-      return;
-    }
-
-    // 2. Caso: Se soltó sobre el área interna de un grupo
-    if (overData?.type === 'group-inner') {
-      const targetGroupId = overData.groupId as string;
-      if (activeData?.type === 'group') return; // Grupos jamás entran en otros grupos
-
-      useSongStore.setState((state) => {
-        const activeContainer = findContainer(activeId, state.patternChain);
-        if (!activeContainer) return state;
-        const nextChain = moveItemAcrossContainers(
-          state.patternChain,
-          activeId,
-          activeContainer,
-          targetGroupId,
-          overId
-        );
-        return { patternChain: nextChain };
-      });
-      return;
-    }
-
-    if (activeId === overId) return;
-
-    // 3. Caso: Se soltó un GRUPO sobre otro elemento
-    if (activeData?.type === 'group') {
-      let rootTargetId = overId;
-      if (overData?.parentGroupId) {
-        rootTargetId = overData.parentGroupId;
-      }
-      useSongStore.setState((state) => {
-        const oldIndex = state.patternChain.findIndex(i => i.id === activeId);
-        const newIndex = state.patternChain.findIndex(i => i.id === rootTargetId);
-        if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
-          return { patternChain: arrayMove(state.patternChain, oldIndex, newIndex) };
+        if (prev.mode === 'resize_right') {
+          return { ...prev, currentDurationMeasures: Math.max(minDur, prev.initialDurationMeasures + deltaM) };
         }
-        return state;
+        const initialEnd = prev.initialStartMeasure + prev.initialDurationMeasures;
+        const maxStart = initialEnd - minDur;
+        const newStart = Math.min(maxStart, Math.max(0, prev.initialStartMeasure + deltaM));
+        const newDur = Math.max(minDur, initialEnd - newStart);
+        return { ...prev, currentStartMeasure: newStart, currentDurationMeasures: newDur };
       });
-      return;
-    }
+    };
 
-    // 4. Caso: Se soltó un PATRÓN sobre otro elemento
-    useSongStore.setState((state) => {
-      const activeContainer = findContainer(activeId, state.patternChain);
-      let overContainer: string | null = null;
+    const stopAutoScroll = startDrumEdgeAutoScroll(
+      viewportRef,
+      () => latestClientX,
+      () => computeUpdate(latestClientX, latestAlt)
+    );
 
-      if (overData?.parentGroupId) {
-        overContainer = overData.parentGroupId as string;
-      } else {
-        overContainer = findContainer(overId, state.patternChain);
-      }
+    const onMove = (me: MouseEvent) => {
+      window.getSelection()?.removeAllRanges();
+      latestClientX = me.clientX;
+      latestAlt = me.altKey;
+      computeUpdate(me.clientX, me.altKey);
+    };
 
-      if (!activeContainer || !overContainer) return state;
+    const onUp = (ue: MouseEvent) => {
+      stopAutoScroll();
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
 
-      if (activeContainer === overContainer) {
-        if (activeContainer === 'root') {
-          const oldIndex = state.patternChain.findIndex(i => i.id === activeId);
-          const newIndex = state.patternChain.findIndex(i => i.id === overId);
-          if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
-            return { patternChain: arrayMove(state.patternChain, oldIndex, newIndex) };
-          }
-        } else {
-          const groupIndex = state.patternChain.findIndex(g => g.id === activeContainer);
-          if (groupIndex !== -1 && state.patternChain[groupIndex].items) {
-            const items = state.patternChain[groupIndex].items!;
-            const oldIndex = items.findIndex(i => i.id === activeId);
-            const newIndex = items.findIndex(i => i.id === overId);
-            if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
-              const nextChain = [...state.patternChain];
-              nextChain[groupIndex] = {
-                ...nextChain[groupIndex],
-                items: arrayMove(items, oldIndex, newIndex)
-              };
-              return { patternChain: nextChain };
+      latestClientX = ue.clientX;
+      latestAlt = ue.altKey;
+      computeUpdate(ue.clientX, ue.altKey);
+
+      const finalScroll = viewportRef.current?.scrollLeft || 0;
+      const movedPx = Math.abs((ue.clientX - startClientX) + (finalScroll - initialScrollLeft));
+      const minDur = Math.max(0.25, ue.altKey ? 0.25 : snapMeasures);
+      const deltaM = lastDeltaMeasures;
+
+      if (movedPx >= 4) {
+        if (mode === 'resize_right') {
+          const finalDur = Math.max(minDur, clip.durationMeasures + deltaM);
+          updateChainItem(clip.id, { durationMeasures: finalDur });
+        } else if (mode === 'resize_left') {
+          const initialEnd = clip.startMeasure + clip.durationMeasures;
+          const maxStart = initialEnd - minDur;
+          const finalStart = Math.min(maxStart, Math.max(0, clip.startMeasure + deltaM));
+          const finalDur = Math.max(minDur, initialEnd - finalStart);
+          updateChainItem(clip.id, { startMeasure: finalStart, durationMeasures: finalDur });
+        } else if (mode === 'move' && deltaM !== 0) {
+          const minStart = Array.from(snapshots.values()).reduce((m, s) => Math.min(m, s.startMeasure), Infinity);
+          const safeDelta = Math.max(-minStart, deltaM);
+          if (safeDelta !== 0) {
+            if (isCloneDrag) {
+              const clones = Array.from(snapshots.values()).map(s => ({
+                patternIndex: s.patternIndex,
+                startMeasure: Math.max(0, s.startMeasure + safeDelta),
+                durationMeasures: s.durationMeasures
+              }));
+              addChainItemsBatch(clones);
+            } else {
+              updateChainItemsBatch(
+                Array.from(snapshots.values()).map(s => ({
+                  id: s.id,
+                  changes: { startMeasure: Math.max(0, s.startMeasure + safeDelta) }
+                }))
+              );
             }
           }
         }
-        return state;
-      } else {
-        const nextChain = moveItemAcrossContainers(
-          state.patternChain,
-          activeId,
-          activeContainer,
-          overContainer,
-          overId
-        );
-        return { patternChain: nextChain };
       }
-    });
+
+      setActiveDrag(null);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   };
 
-  const activeItem = activeId 
-    ? (
-      patternChain.find(i => i.id === activeId) || 
-      patternChain.reduce<PatternChainItem | undefined>((acc, curr) => acc || curr.items?.find(i => i.id === activeId), undefined)
-    ) 
-    : null;
+  // Click / Lasso en carril vacío del timeline de batería
+  const handleLaneMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('.drum-linear-clip')) return;
+    if (e.button !== 0) return;
+    e.preventDefault();
 
-  const hasSelection = selectedChainIds.length > 0;
-  const isSingleGroupSelected = hasSelection && selectedChainIds.length === 1 && patternChain.some(i => i.id === selectedChainIds[0] && i.type === 'group');
+    const laneRect = e.currentTarget.getBoundingClientRect();
+    const startX = e.clientX - laneRect.left;
+    const startY = e.clientY - laneRect.top;
+    const startMeasure = Math.max(0, Math.floor((startX / MEASURE_WIDTH) / snapMeasures) * snapMeasures);
+    const initialSelected = [...selectedChainIds];
+
+    // Con Ctrl/Meta inicia selección Lasso sin pintar; click simple sin arrastre pinta patrón activo
+    const isLassoOnly = e.ctrlKey || e.metaKey || e.shiftKey;
+    if (!isLassoOnly) {
+      setSelectedChainIds([]);
+    }
+
+    let didDrag = false;
+    let latestClientX = e.clientX;
+    let latestClientY = e.clientY;
+
+    const updateLasso = (clientX: number, clientY: number) => {
+      const rectNow = canvasRef.current?.getBoundingClientRect();
+      if (!rectNow) return;
+      const curX = clientX - rectNow.left;
+      const curY = clientY - rectNow.top;
+      if (!didDrag && (Math.abs(curX - startX) > 6 || Math.abs(clientY - e.clientY) > 6)) {
+        didDrag = true;
+      }
+      if (!didDrag) return;
+
+      setLasso({ isActive: true, startX, startY, currentX: curX, currentY: curY });
+      const minX = Math.min(startX, curX);
+      const maxX = Math.max(startX, curX);
+
+      const hits: string[] = [];
+      linearClips.forEach(c => {
+        const cLeft = c.startMeasure * MEASURE_WIDTH;
+        const cRight = cLeft + c.durationMeasures * MEASURE_WIDTH;
+        if (cLeft < maxX && cRight > minX) hits.push(c.id);
+      });
+      setSelectedChainIds(isLassoOnly ? Array.from(new Set([...initialSelected, ...hits])) : hits);
+    };
+
+    const stopAutoScroll = startDrumEdgeAutoScroll(
+      viewportRef,
+      () => latestClientX,
+      () => updateLasso(latestClientX, latestClientY)
+    );
+
+    const onMove = (me: MouseEvent) => {
+      window.getSelection()?.removeAllRanges();
+      latestClientX = me.clientX;
+      latestClientY = me.clientY;
+      updateLasso(me.clientX, me.clientY);
+    };
+
+    const onUp = () => {
+      stopAutoScroll();
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      setLasso({ isActive: false, startX: 0, startY: 0, currentX: 0, currentY: 0 });
+
+      if (!didDrag && !isLassoOnly) {
+        // Click limpio en hueco vacío: pintar clip del patrón en edición y habilitar Timeline Lineal
+        const clipDur = Math.max(1, snapMeasures);
+        addChainItem(currentDrumPatternEdit, clipDur, startMeasure);
+        if (isPatternRepeatOn) {
+          setPatternRepeatOn(false);
+        }
+        toneEngine.seekToBeat(startMeasure * beatsPerMeasure);
+      }
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  // Clone Ghost Previews during Shift+Drag
+  const cloneGhostClips: LinearDrumClip[] = [];
+  if (activeDrag?.isCloneDrag) {
+    const delta = activeDrag.currentStartMeasure - activeDrag.initialStartMeasure;
+    const minStart = Array.from(activeDrag.snapshots.values()).reduce((m, s) => Math.min(m, s.startMeasure), Infinity);
+    const safeDelta = Math.max(-minStart, delta);
+    if (safeDelta !== 0) {
+      activeDrag.snapshots.forEach((snap) => {
+        cloneGhostClips.push({
+          ...snap,
+          startMeasure: Math.max(0, snap.startMeasure + safeDelta)
+        });
+      });
+    }
+  }
 
   return (
-    <div className="pattern-chain-container" onClick={handleTrackBackgroundClick} onContextMenu={handleTrackContextMenu}>
+    <div className="pattern-chain-container drum-linear-container">
+      {/* Toolbar superior unificada del Arreglador Lineal de Batería */}
       <div className="pattern-chain-header">
-        <div className="chain-title-group" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <LinkIcon size={15} className="chain-icon" style={{ color: 'var(--reposo)' }} />
-          <span style={{ fontSize: '0.78rem', fontFamily: "'Outfit', system-ui, sans-serif", color: 'var(--text-secondary)', letterSpacing: '0.04em', fontWeight: 700 }}>
-            CADENA DE PATRONES ({patternChain.length} {patternChain.length === 1 ? 'bloque' : 'bloques'})
-          </span>
-        </div>
-
-        {/* Barra Central de Controles de Zoom */}
-        <div className="timeline-zoom-group" style={{ display: 'flex', alignItems: 'center', gap: '3px', background: 'rgba(0,0,0,0.4)', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.08)' }}>
-          <button
-            type="button"
-            className="action-btn"
-            style={{ padding: '2px 5px', minHeight: '22px', fontSize: '0.7rem' }}
-            title="Reducir Zoom (Alt + Rueda Abajo)"
-            onClick={() => setZoomLevel(z => Math.max(0.6, parseFloat((z - 0.1).toFixed(2))))}
-          >
-            <ZoomOut size={12} />
-          </button>
-          <span
-            style={{ fontSize: '0.72rem', fontFamily: "'Outfit', system-ui, sans-serif", color: 'var(--text-secondary)', padding: '0 5px', minWidth: '36px', textAlign: 'center', cursor: 'pointer', fontWeight: 700 }}
-            title="Hacer clic para restaurar 100%"
-            onClick={() => setZoomLevel(1.0)}
-          >
-            {Math.round(zoomLevel * 100)}%
-          </span>
-          <button
-            type="button"
-            className="action-btn"
-            style={{ padding: '2px 5px', minHeight: '22px', fontSize: '0.7rem' }}
-            title="Aumentar Zoom (Alt + Rueda Arriba)"
-            onClick={() => setZoomLevel(z => Math.min(2.0, parseFloat((z + 0.1).toFixed(2))))}
-          >
-            <ZoomIn size={12} />
-          </button>
-        </div>
-
-        {/* Barra de Acciones de la Cadena */}
-        <div className="chain-actions" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-          {hasSelection && (
-            <>
-              <button
-                type="button"
-                className="action-btn"
-                style={{ padding: '3px 8px', fontSize: '0.72rem', color: '#ffd875', display: 'flex', alignItems: 'center', gap: '4px', borderColor: 'rgba(255,216,117,0.3)' }}
-                onClick={duplicateSelectedChainItems}
-                title="Duplicar selección (Ctrl+D)"
-              >
-                <Layers size={12} /> Duplicar
-              </button>
-
-              <button
-                type="button"
-                className="action-btn"
-                style={{ padding: '3px 8px', fontSize: '0.72rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}
-                onClick={copySelectedChainItems}
-                title="Copiar selección (Ctrl+C)"
-              >
-                <Copy size={12} /> Copiar
-              </button>
-
-              <button
-                type="button"
-                className="action-btn"
-                style={{ padding: '3px 8px', fontSize: '0.72rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}
-                onClick={cutSelectedChainItems}
-                title="Cortar selección (Ctrl+X)"
-              >
-                <Scissors size={12} /> Cortar
-              </button>
-
-              {selectedChainIds.length > 1 && (
-                <button
-                  type="button"
-                  className="action-btn"
-                  style={{ padding: '3px 8px', fontSize: '0.72rem', color: '#ffd875', display: 'flex', alignItems: 'center', gap: '4px' }}
-                  onClick={groupSelectedChainItems}
-                  title="Agrupar selección (Ctrl+G)"
-                >
-                  <Group size={12} /> Agrupar
-                </button>
-              )}
-
-              {isSingleGroupSelected && (
-                <button
-                  type="button"
-                  className="action-btn"
-                  style={{ padding: '3px 8px', fontSize: '0.72rem', color: 'var(--subdominante)', display: 'flex', alignItems: 'center', gap: '4px' }}
-                  onClick={ungroupSelectedChainItems}
-                  title="Desagrupar grupo seleccionado (Ctrl+Shift+G)"
-                >
-                  <Ungroup size={12} /> Desagrupar
-                </button>
-              )}
-
-              <button
-                type="button"
-                className="action-btn danger-action"
-                style={{ padding: '3px 8px', fontSize: '0.72rem', color: '#ff4757', display: 'flex', alignItems: 'center', gap: '4px', borderColor: 'rgba(255,71,87,0.3)' }}
-                onClick={deleteSelectedChainItems}
-                title="Eliminar seleccionados (Supr)"
-              >
-                <Trash2 size={12} /> Eliminar
-              </button>
-            </>
-          )}
-
-          {chainClipboard.length > 0 && (
+        <div className="chain-title-group">
+          <div className="physical-segment-tray" title="Modo de reproducción de batería">
             <button
               type="button"
-              className="action-btn"
-              style={{ padding: '3px 8px', fontSize: '0.72rem', color: 'var(--reposo)', display: 'flex', alignItems: 'center', gap: '4px', borderColor: 'rgba(95,171,130,0.35)' }}
-              onClick={() => pasteChainItems(selectedChainIds[0])}
-              title="Pegar elementos del portapapeles (Ctrl+V)"
+              className={`physical-segment-btn ${!isPatternRepeatOn ? 'active' : ''}`}
+              onClick={() => setPatternRepeatOn(false)}
+              title="Reproducir secuencia lineal de clips acoplada al timeline global"
+              style={{ fontSize: '0.68rem', padding: '0 8px' }}
             >
-              <Clipboard size={12} /> Pegar ({chainClipboard.length})
+              TIMELINE LINEAL
             </button>
-          )}
+            <button
+              type="button"
+              className={`physical-segment-btn ${isPatternRepeatOn ? 'active' : ''}`}
+              onClick={() => setPatternRepeatOn(true)}
+              title="Bucle continuo del patrón actual (ignora clips lineales)"
+              style={{ fontSize: '0.68rem', padding: '0 8px', gap: '4px' }}
+            >
+              <Repeat size={11} />
+              <span>LOOP P{currentDrumPatternEdit + 1}</span>
+            </button>
+          </div>
 
-          <button 
+          <span className="chain-meta-summary">
+            {linearClips.length} {linearClips.length === 1 ? 'clip' : 'clips'} · {Math.ceil(maxClipEndMeasure)} c.
+          </span>
+        </div>
+
+        {/* Brocha de Patrones (Click selecciona, Drag suelta en el timeline) */}
+        <div className="drum-brush-tray" title="Selecciona un patrón para pintar al hacer click en el timeline, o arrástralo directamente a cualquier compás">
+          <span className="drum-brush-label">PINCEL:</span>
+          {Array.from({ length: totalPatterns }).map((_, idx) => {
+            const color = PATTERN_PALETTE[idx % PATTERN_PALETTE.length];
+            const isActiveBrush = currentDrumPatternEdit === idx;
+            return (
+              <button
+                key={idx}
+                type="button"
+                draggable
+                onDragStart={(e) => {
+                  setDraggingBrushIdx(idx);
+                  e.dataTransfer.setData('text/drum-pattern', String(idx));
+                  e.dataTransfer.effectAllowed = 'copy';
+                }}
+                onDragEnd={() => {
+                  setDraggingBrushIdx(null);
+                  setHoverDropMeasure(null);
+                }}
+                onClick={() => setCurrentDrumPatternEdit(idx)}
+                className={`drum-brush-pill ${isActiveBrush ? 'active' : ''}`}
+                style={{
+                  '--brush-color': color,
+                  borderColor: isActiveBrush ? color : undefined,
+                  color: isActiveBrush ? '#ffffff' : undefined
+                } as React.CSSProperties}
+                title={`Patrón P${idx + 1} — Click para pintar / Arrastra a un compás`}
+              >
+                <span className="brush-swatch" style={{ backgroundColor: color }} />
+                P{idx + 1}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Controles derechos: Snap, Slice, Auto-Fill, Clear, Zoom */}
+        <div className="chain-actions">
+          <div className="physical-segment-tray" title="Ajuste de rejilla por compases">
+            <button
+              type="button"
+              className={`physical-segment-btn ${snapGrid !== 'off' ? 'active' : ''}`}
+              onClick={() => setSnapGrid(snapGrid === 'off' ? '1' : 'off')}
+              title="Activar/desactivar ajuste magnético (Mantén Alt para ajuste fino)"
+            >
+              <Magnet size={12} style={{ color: snapGrid === 'off' ? 'var(--text-secondary)' : '#ffd875' }} />
+            </button>
+            {(['1', '0.5', '0.25'] as const).map(val => (
+              <button
+                key={val}
+                type="button"
+                className={`physical-segment-btn ${snapGrid === val ? 'active' : ''}`}
+                onClick={() => setSnapGrid(val)}
+                style={{ fontSize: '10px', padding: '0 5px' }}
+                title={val === '1' ? '1 Compás' : val === '0.5' ? '1/2 Compás' : '1/4 Compás (Fills)'}
+              >
+                {val === '1' ? '1B' : val === '0.5' ? '1/2' : '1/4'}
+              </button>
+            ))}
+          </div>
+
+          <button
             type="button"
-            className="action-btn primary-add-btn"
-            style={{ padding: '3px 9px', fontSize: '0.72rem', color: 'var(--accent-hover)', display: 'flex', alignItems: 'center', gap: '4px', borderColor: 'rgba(132,112,204,0.4)', background: 'rgba(132,112,204,0.1)' }}
-            onClick={() => addChainItem(currentDrumPatternEdit, 1)}
-            title={`Añadir Patrón P${currentDrumPatternEdit + 1} a la cadena`}
+            className={`physical-btn ${isSliceToolActive ? 'active' : ''}`}
+            onClick={() => {
+              setIsSliceToolActive(prev => !prev);
+              setSlicePreviewMeasure(null);
+            }}
+            title="Herramienta Corte / Slice (C · también Shift+Click derecho en clip)"
+            style={isSliceToolActive ? { borderColor: 'rgba(255, 107, 107, 0.55)', boxShadow: 'inset 0 0 8px rgba(255, 107, 107, 0.2)' } : undefined}
           >
-            <Plus size={13} /> P{currentDrumPatternEdit + 1}
+            <Scissors size={13} style={{ color: isSliceToolActive ? '#ff6b6b' : 'var(--text-secondary)' }} />
           </button>
 
-          <button 
+          <button
             type="button"
-            className="action-btn"
-            style={{ padding: '3px 9px', fontSize: '0.72rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px', borderColor: 'rgba(255,255,255,0.18)', background: 'rgba(255,255,255,0.04)' }}
-            onClick={() => addChainItem(-1, 1)}
-            title="Añadir Silencio a la cadena"
+            className="physical-btn"
+            onClick={() => {
+              const targetMeasures = Math.max(4, songSpanMeasures || 8);
+              fillChainToSong(currentDrumPatternEdit, targetMeasures);
+            }}
+            title={`Extender Patrón P${currentDrumPatternEdit + 1} por toda la canción (${Math.max(4, songSpanMeasures || 8)} compases)`}
+            style={{ gap: '4px', padding: '0 8px', fontSize: '0.68rem' }}
           >
-            <Plus size={13} /> <VolumeX size={13} />
+            <Wand2 size={12} style={{ color: '#ffd875' }} />
+            <span>Auto-Fill</span>
           </button>
 
-          <button 
+          <button
             type="button"
-            className="action-btn"
-            style={{ padding: '3px 8px', fontSize: '0.72rem', color: 'var(--subdominante)', display: 'flex', alignItems: 'center', gap: '4px' }}
-            onClick={handleAddGroup}
-            title="Añadir Subgrupo a la cadena"
+            className="physical-btn"
+            onClick={handleZoomToFit}
+            title="Encuadrar secuencia completa (Ctrl+0)"
           >
-            <Plus size={13} /> <Folder size={13} />
+            <Maximize2 size={13} />
           </button>
+
+          <button
+            type="button"
+            className="physical-btn"
+            disabled={linearClips.length === 0}
+            onClick={() => setIsClearConfirmOpen(true)}
+            title="Limpiar timeline de batería"
+          >
+            <Trash2 size={13} style={{ color: '#ef5350' }} />
+          </button>
+
+          <PhysicalZoomControl
+            zoomLevel={zoomLevel}
+            onZoomChange={setZoomLevel}
+            minZoom={0.45}
+            maxZoom={2.5}
+            step={0.15}
+          />
         </div>
       </div>
 
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCorners}
-        onDragStart={handleDragStart}
-        onDragOver={handleDragOver}
-        onDragEnd={handleDragEnd}
+      {/* Viewport Lineal Sincronizado */}
+      <div
+        ref={viewportRef}
+        className="drum-linear-viewport"
+        onScroll={(e) => {
+          persistScrollLeft(e.currentTarget.scrollLeft);
+        }}
       >
-        <div 
-          className="pattern-chain-track-wrapper" 
-          ref={trackWrapperRef}
-          onScroll={(e) => {
-            const left = e.currentTarget.scrollLeft;
-            setDrumTimelineViewport({ scrollLeft: left });
-          }}
+        <div
+          ref={canvasRef}
+          className="drum-linear-canvas"
+          style={{ width: `${canvasWidth}px` }}
         >
-          <div className="pattern-chain-track">
-            <SortableContext items={patternChain.map(i => i.id)} strategy={horizontalListSortingStrategy}>
-              <DroppableStartZone activeId={activeId} />
-              {patternChain.map((item, index) => (
-                <React.Fragment key={item.id}>
-                  {item.type === 'group' 
-                    ? <SortableGroupItem
-                        group={item}
-                        totalPatterns={totalPatterns}
-                        isPlaying={isPlaying}
-                        isPatternRepeatOn={isPatternRepeatOn}
-                        isSelected={selectedChainIds.includes(item.id)}
-                        selectedChainIds={selectedChainIds}
-                        zoomLevel={zoomLevel}
-                        currentChainItemId={currentChainItemId}
-                        currentDrumPatternEdit={currentDrumPatternEdit}
-                        updateChainItem={updateChainItem}
-                        removeChainItem={removeChainItem}
-                        setCurrentDrumPatternEdit={setCurrentDrumPatternEdit}
-                        onSelect={handleSelectItem}
-                        onContextMenu={handleItemContextMenu}
-                      /> 
-                    : <SortablePatternItem
-                        item={item}
-                        totalPatterns={totalPatterns}
-                        isCurrentPlaying={isPlaying && !isPatternRepeatOn && currentChainItemId === item.id}
-                        isSelected={selectedChainIds.includes(item.id)}
-                        zoomLevel={zoomLevel}
-                        updateChainItem={updateChainItem}
-                        removeChainItem={removeChainItem}
-                        setCurrentDrumPatternEdit={setCurrentDrumPatternEdit}
-                        onSelect={handleSelectItem}
-                        onContextMenu={handleItemContextMenu}
-                      />
+          {/* Fila 1: Regla de Compases */}
+          <div
+            className="drum-linear-ruler"
+            onMouseDown={handleRulerMouseDown}
+            title="Click o arrastra para mover el cabezal de reproducción"
+          >
+            {Array.from({ length: totalMeasures }).map((_, m) => (
+              <div
+                key={m}
+                className="drum-ruler-measure"
+                style={{ left: `${m * MEASURE_WIDTH}px`, width: `${MEASURE_WIDTH}px` }}
+              >
+                <span className="drum-ruler-num">c.{m + 1}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Fila 2: Referencia Armónica Sincronizada (Acordes del proyecto bar-for-bar) */}
+          <div className="drum-chord-reference-strip" title="Acordes de referencia del proyecto (acoplados por compás)">
+            <span className="drum-ref-watermark">ACORDES REF</span>
+            {Array.from({ length: totalMeasures }).map((_, m) => (
+              <div
+                key={m}
+                className="drum-ref-gridline"
+                style={{ left: `${m * MEASURE_WIDTH}px` }}
+              />
+            ))}
+            {chordBlocks.map(cb => {
+              const leftPx = (cb.startBeat / beatsPerMeasure) * MEASURE_WIDTH;
+              const widthPx = Math.max(20, (cb.durationBeats / beatsPerMeasure) * MEASURE_WIDTH - 2);
+              return (
+                <div
+                  key={cb.id}
+                  className="drum-ref-chord-pill"
+                  style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+                >
+                  {cb.chord}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Fila 3: Carril Principal Lineal de Clips de Batería */}
+          <div
+            className={`drum-linear-lane ${isPatternRepeatOn ? 'is-bypassed' : ''}`}
+            onMouseDown={handleLaneMouseDown}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'copy';
+              const rect = canvasRef.current?.getBoundingClientRect();
+              if (rect) {
+                const rawM = (e.clientX - rect.left) / MEASURE_WIDTH;
+                const snapped = Math.max(0, Math.round(rawM / snapMeasures) * snapMeasures);
+                setHoverDropMeasure(snapped);
+              }
+            }}
+            onDragLeave={() => setHoverDropMeasure(null)}
+            onDrop={(e) => {
+              e.preventDefault();
+              const patStr = e.dataTransfer.getData('text/drum-pattern');
+              const patIdx = patStr !== '' ? Number(patStr) : draggingBrushIdx;
+              const rect = canvasRef.current?.getBoundingClientRect();
+              if (rect && patIdx !== null && !Number.isNaN(patIdx)) {
+                const rawM = (e.clientX - rect.left) / MEASURE_WIDTH;
+                const snapped = Math.max(0, Math.round(rawM / snapMeasures) * snapMeasures);
+                addChainItem(patIdx, Math.max(1, snapMeasures), snapped);
+                setCurrentDrumPatternEdit(patIdx);
+                if (isPatternRepeatOn) setPatternRepeatOn(false);
+              }
+              setDraggingBrushIdx(null);
+              setHoverDropMeasure(null);
+            }}
+            onContextMenu={(e) => {
+              const target = e.target as HTMLElement;
+              if (!target.closest('.drum-linear-clip')) {
+                e.preventDefault();
+                e.stopPropagation();
+                const rect = canvasRef.current?.getBoundingClientRect();
+                const clickX = rect ? e.clientX - rect.left : 0;
+                const m = Math.max(0, Math.floor((clickX / MEASURE_WIDTH) / snapMeasures) * snapMeasures);
+                setTrackContextMenu({ x: e.clientX, y: e.clientY, measure: m });
+              }
+            }}
+          >
+            {/* Líneas de cuadrícula de compás y sub-compás */}
+            {Array.from({ length: totalMeasures }).map((_, m) => (
+              <div
+                key={m}
+                className="drum-lane-measure-cell"
+                style={{ left: `${m * MEASURE_WIDTH}px`, width: `${MEASURE_WIDTH}px` }}
+              />
+            ))}
+
+            {/* Hint sutil cuando la pista está vacía */}
+            {linearClips.length === 0 && (
+              <div className="drum-linear-empty-hint">
+                Haz click en cualquier compás para colocar P{currentDrumPatternEdit + 1}, o usa <strong>Auto-Fill</strong>
+              </div>
+            )}
+
+            {/* Drop ghost al arrastrar P# desde la brocha */}
+            {hoverDropMeasure !== null && draggingBrushIdx !== null && (
+              <div
+                className="drum-clip-ghost"
+                style={{
+                  left: `${hoverDropMeasure * MEASURE_WIDTH}px`,
+                  width: `${Math.max(24, Math.max(1, snapMeasures) * MEASURE_WIDTH - 2)}px`,
+                  borderColor: PATTERN_PALETTE[draggingBrushIdx % PATTERN_PALETTE.length]
+                }}
+              >
+                P{draggingBrushIdx + 1}
+              </div>
+            )}
+
+            {/* Clips Lineales de Batería */}
+            {linearClips.map(clip => {
+              const color = PATTERN_PALETTE[clip.patternIndex % PATTERN_PALETTE.length];
+              const isSelected = selectedChainIds.includes(clip.id);
+              const isPlayingClip = isPlaying && !isPatternRepeatOn && activePlayingClipIdRef.current === clip.id;
+
+              let renderStart = clip.startMeasure;
+              let renderDur = clip.durationMeasures;
+
+              if (activeDrag && !activeDrag.isCloneDrag) {
+                if (activeDrag.id === clip.id) {
+                  if (activeDrag.mode === 'move' || activeDrag.mode === 'resize_left') {
+                    renderStart = activeDrag.currentStartMeasure;
                   }
+                  if (activeDrag.mode === 'resize_left' || activeDrag.mode === 'resize_right') {
+                    renderDur = activeDrag.currentDurationMeasures;
+                  }
+                } else if (activeDrag.mode === 'move' && activeDrag.snapshots.has(clip.id)) {
+                  const snap = activeDrag.snapshots.get(clip.id)!;
+                  const delta = activeDrag.currentStartMeasure - activeDrag.initialStartMeasure;
+                  renderStart = Math.max(0, snap.startMeasure + delta);
+                }
+              }
 
-                  {index < patternChain.length - 1 && (
-                    <DroppableConnector
-                      id={`connector-${index}`}
-                      index={index}
-                      isPlaying={isPlaying}
-                      isPatternRepeatOn={isPatternRepeatOn}
-                      activeId={activeId}
-                    />
-                  )}
-                </React.Fragment>
-              ))}
-              <DroppableEndZone activeId={activeId} count={patternChain.length} />
-            </SortableContext>
+              const leftPx = renderStart * MEASURE_WIDTH;
+              const widthPx = Math.max(22, renderDur * MEASURE_WIDTH - 2);
+              const previewRows = patternPreviewHits.get(clip.patternIndex) || [];
+              const wholeRepeats = Math.max(1, Math.ceil(renderDur));
+
+              return (
+                <div
+                  key={clip.id}
+                  ref={(el) => {
+                    if (el) clipRefs.current.set(clip.id, el);
+                    else clipRefs.current.delete(clip.id);
+                  }}
+                  className={`drum-linear-clip ${isSelected ? 'selected' : ''} ${isPlayingClip ? 'playing' : ''}`}
+                  style={{
+                    left: `${leftPx}px`,
+                    width: `${widthPx}px`,
+                    borderColor: isSelected ? '#ffd875' : color,
+                    backgroundColor: `${color}24`,
+                    cursor: isSliceToolActive ? 'crosshair' : 'grab',
+                    '--clip-color': color
+                  } as React.CSSProperties}
+                  onMouseDown={(e) => handleClipMouseDown(e, clip)}
+                  onMouseMove={(e) => {
+                    if (!isSliceToolActive) {
+                      if (slicePreviewMeasure !== null) setSlicePreviewMeasure(null);
+                      return;
+                    }
+                    const rect = canvasRef.current?.getBoundingClientRect();
+                    if (!rect) return;
+                    const rawM = (e.clientX - rect.left) / MEASURE_WIDTH;
+                    const cutStep = snapGrid === 'off' ? 0.25 : snapMeasures;
+                    const cutM = Math.round(rawM / cutStep) * cutStep;
+                    if (cutM > clip.startMeasure + 0.125 && cutM < clip.startMeasure + clip.durationMeasures - 0.125) {
+                      setSlicePreviewMeasure(cutM);
+                    } else {
+                      setSlicePreviewMeasure(null);
+                    }
+                  }}
+                  onMouseLeave={() => { if (slicePreviewMeasure !== null) setSlicePreviewMeasure(null); }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setCurrentDrumPatternEdit(clip.patternIndex);
+                    setSelectedChainIds([clip.id]);
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (e.shiftKey) return;
+                    const rect = canvasRef.current?.getBoundingClientRect();
+                    const rawM = rect ? (e.clientX - rect.left) / MEASURE_WIDTH : clip.startMeasure + clip.durationMeasures / 2;
+                    const snappedM = Math.round(rawM / snapMeasures) * snapMeasures;
+                    if (!selectedChainIds.includes(clip.id)) {
+                      setSelectedChainIds([clip.id]);
+                    }
+                    setClipContextMenu({ x: e.clientX, y: e.clientY, clip, measure: snappedM });
+                  }}
+                  title={`P${clip.patternIndex + 1} · ${formatMeasureRange(renderStart, renderDur)} · Doble click para editar · Shift+Arrastrar para clonar`}
+                >
+                  {/* Cabecera del clip con franja de color */}
+                  <div className="drum-clip-header" style={{ backgroundColor: `${color}45` }}>
+                    <span className="drum-clip-title">
+                      <Play
+                        size={9}
+                        fill="currentColor"
+                        className="drum-clip-play-icon"
+                        style={{ marginRight: '3px', display: isPlayingClip ? 'inline-block' : 'none' }}
+                      />
+                      P{clip.patternIndex + 1}
+                    </span>
+                    {widthPx > 62 && (
+                      <span className="drum-clip-span">{formatMeasureRange(renderStart, renderDur)}</span>
+                    )}
+                  </div>
+
+                  {/* Divisiones internas cuando un clip dura varios compases + puntos de actividad */}
+                  <div className="drum-clip-body">
+                    {Array.from({ length: wholeRepeats }).map((_, repIdx) => {
+                      const tileLeftPct = (repIdx / renderDur) * 100;
+                      const tileWidthPct = (Math.min(1, renderDur - repIdx) / renderDur) * 100;
+                      if (tileWidthPct <= 0) return null;
+                      return (
+                        <div
+                          key={repIdx}
+                          className="drum-clip-tile"
+                          style={{
+                            left: `${tileLeftPct}%`,
+                            width: `${tileWidthPct}%`,
+                            borderLeft: repIdx > 0 ? '1px dashed rgba(255,255,255,0.22)' : 'none'
+                          }}
+                        >
+                          {previewRows.map((rowHits, rI) => (
+                            <div
+                              key={rI}
+                              className="drum-mini-row"
+                              style={{ top: `${15 + rI * 13}%` }}
+                            >
+                              {rowHits.map(hit => {
+                                const frac = hit.stepIdx / hit.totalSteps;
+                                const visibleLimit = Math.min(1, renderDur - repIdx);
+                                if (frac >= visibleLimit) return null;
+                                return (
+                                  <span
+                                    key={hit.stepIdx}
+                                    className="drum-mini-dot"
+                                    style={{
+                                      left: `${(frac / visibleLimit) * 100}%`,
+                                      backgroundColor: color
+                                    }}
+                                  />
+                                );
+                              })}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Tiradores laterales de redimensionado */}
+                  <div className="drum-clip-handle left" title="Ajustar inicio" />
+                  <div className="drum-clip-handle right" title="Extender/acortar compases" />
+                </div>
+              );
+            })}
+
+            {/* Fantasmas de clonación en vivo (Shift+Drag) */}
+            {cloneGhostClips.map((g) => (
+              <div
+                key={`ghost-${g.id}`}
+                className="drum-clip-ghost"
+                style={{
+                  left: `${g.startMeasure * MEASURE_WIDTH}px`,
+                  width: `${Math.max(22, g.durationMeasures * MEASURE_WIDTH - 2)}px`
+                }}
+              >
+                P{g.patternIndex + 1}
+              </div>
+            ))}
+
+            {/* Guía de corte (Slice Tool) */}
+            {isSliceToolActive && slicePreviewMeasure !== null && (
+              <div
+                className="drum-slice-guide"
+                style={{ left: `${slicePreviewMeasure * MEASURE_WIDTH}px` }}
+              />
+            )}
+
+            {/* Caja de selección Lasso */}
+            {lasso.isActive && (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: `${Math.min(lasso.startX, lasso.currentX)}px`,
+                  top: `${Math.min(lasso.startY, lasso.currentY)}px`,
+                  width: `${Math.abs(lasso.currentX - lasso.startX)}px`,
+                  height: `${Math.abs(lasso.currentY - lasso.startY)}px`,
+                  border: '1px dashed #ffd875',
+                  backgroundColor: 'rgba(255, 216, 117, 0.12)',
+                  pointerEvents: 'none',
+                  zIndex: 30
+                }}
+              />
+            )}
           </div>
+
+          {/* Cabezal de reproducción en vivo (60fps) */}
+          <div ref={playheadRef} className="drum-linear-playhead" />
         </div>
+      </div>
 
-        <DragOverlay>
-          {activeItem ? (
-            activeItem.type === 'group' ? (
-              <SortableGroupItem
-                group={activeItem}
-                totalPatterns={totalPatterns}
-                isPlaying={isPlaying}
-                isPatternRepeatOn={isPatternRepeatOn}
-                isSelected={false}
-                selectedChainIds={[]}
-                zoomLevel={zoomLevel}
-                currentChainItemId={currentChainItemId}
-                currentDrumPatternEdit={currentDrumPatternEdit}
-                updateChainItem={() => {}}
-                removeChainItem={() => {}}
-                setCurrentDrumPatternEdit={() => {}}
-                onSelect={() => {}}
-                onContextMenu={() => {}}
-              />
-            ) : (
-              <SortablePatternItem
-                item={activeItem}
-                totalPatterns={totalPatterns}
-                isCurrentPlaying={isPlaying && !isPatternRepeatOn && currentChainItemId === activeItem.id}
-                isSelected={false}
-                zoomLevel={zoomLevel}
-                updateChainItem={() => {}}
-                removeChainItem={() => {}}
-                setCurrentDrumPatternEdit={() => {}}
-                onSelect={() => {}}
-                onContextMenu={() => {}}
-              />
-            )
-          ) : null}
-        </DragOverlay>
-      </DndContext>
-
-      {/* Menú Contextual de Bloque */}
-      {itemContextMenu && (
-        <ContextMenuContainer
-          x={itemContextMenu.x}
-          y={itemContextMenu.y}
-        >
+      {/* Menú Contextual de Clip */}
+      {clipContextMenu && (
+        <ContextMenuContainer x={clipContextMenu.x} y={clipContextMenu.y}>
           <div className="menu-header">
-            <span>
-              {itemContextMenu.item.type === 'group' 
-                ? 'GRUPO DE PATRONES' 
-                : (itemContextMenu.item.type === 'rest' || itemContextMenu.item.patternIndex === -1)
-                ? 'BLOQUE SILENCIO'
-                : `BLOQUE P${(itemContextMenu.item.patternIndex ?? 0) + 1}`}
-            </span>
+            <span>CLIP · P{clipContextMenu.clip.patternIndex + 1} ({formatMeasureRange(clipContextMenu.clip.startMeasure, clipContextMenu.clip.durationMeasures)})</span>
           </div>
 
-          {itemContextMenu.item.type !== 'group' && (
-            (itemContextMenu.item.type === 'rest' || itemContextMenu.item.patternIndex === -1) ? (
+          <button
+            type="button"
+            className="menu-item"
+            onClick={() => {
+              makeChainItemUnique(clipContextMenu.clip.id);
+              setClipContextMenu(null);
+            }}
+          >
+            <Sparkles size={13} style={{ color: '#ffd875' }} /> Hacer Único (Crear Fill)
+          </button>
+
+          <button
+            type="button"
+            className="menu-item"
+            disabled={clipContextMenu.clip.durationMeasures <= 0.25}
+            onClick={() => {
+              const c = clipContextMenu.clip;
+              const mid = c.startMeasure + c.durationMeasures / 2;
+              const targetSplit =
+                clipContextMenu.measure > c.startMeasure + 0.125 && clipContextMenu.measure < c.startMeasure + c.durationMeasures - 0.125
+                  ? clipContextMenu.measure
+                  : mid;
+              splitChainItem(c.id, targetSplit);
+              setClipContextMenu(null);
+            }}
+          >
+            <Scissors size={13} /> Dividir Aquí (C)
+          </button>
+
+          <div className="menu-subheader">Asignar Patrón</div>
+          <div className="drum-ctx-pattern-grid">
+            {Array.from({ length: totalPatterns }).map((_, idx) => (
               <button
+                key={idx}
                 type="button"
-                className="menu-item"
+                className={`drum-ctx-pat-btn ${clipContextMenu.clip.patternIndex === idx ? 'active' : ''}`}
+                style={{ '--pat-col': PATTERN_PALETTE[idx % PATTERN_PALETTE.length] } as React.CSSProperties}
                 onClick={() => {
-                  updateChainItem(itemContextMenu.item.id, { type: 'pattern', patternIndex: currentDrumPatternEdit });
-                  setItemContextMenu(null);
+                  updateChainItem(clipContextMenu.clip.id, { patternIndex: idx });
+                  setCurrentDrumPatternEdit(idx);
+                  setClipContextMenu(null);
                 }}
               >
-                <Plus size={13} /> Convertir a Patrón P{currentDrumPatternEdit + 1}
+                P{idx + 1}
               </button>
-            ) : (
-              <button
-                type="button"
-                className="menu-item"
-                onClick={() => {
-                  updateChainItem(itemContextMenu.item.id, { type: 'rest', patternIndex: -1 });
-                  setItemContextMenu(null);
-                }}
-              >
-                <VolumeX size={13} /> Convertir a Silencio
-              </button>
-            )
-          )}
+            ))}
+          </div>
+
+          <hr className="menu-separator" />
 
           <button
             type="button"
             className="menu-item"
             onClick={() => {
               copySelectedChainItems();
-              setItemContextMenu(null);
+              setClipContextMenu(null);
             }}
           >
             <Copy size={13} /> Copiar (Ctrl+C)
@@ -1531,72 +1343,11 @@ export const PatternChainArranger: React.FC = () => {
             className="menu-item"
             onClick={() => {
               duplicateSelectedChainItems();
-              setItemContextMenu(null);
+              setClipContextMenu(null);
             }}
           >
             <Layers size={13} /> Duplicar (Ctrl+D)
           </button>
-
-          <button
-            type="button"
-            className="menu-item"
-            onClick={() => {
-              cutSelectedChainItems();
-              setItemContextMenu(null);
-            }}
-          >
-            <Scissors size={13} /> Cortar (Ctrl+X)
-          </button>
-
-          {chainClipboard.length > 0 && (
-            <button
-              type="button"
-              className="menu-item"
-              onClick={() => {
-                pasteChainItems(itemContextMenu.item.id);
-                setItemContextMenu(null);
-              }}
-            >
-              <Clipboard size={13} /> Pegar después (Ctrl+V)
-            </button>
-          )}
-
-          <button
-            type="button"
-            className="menu-item"
-            onClick={() => {
-              addChainItem(-1, 1);
-              setItemContextMenu(null);
-            }}
-          >
-            <VolumeX size={13} /> Insertar Silencio
-          </button>
-
-          {selectedChainIds.length > 1 && (
-            <button
-              type="button"
-              className="menu-item"
-              onClick={() => {
-                groupSelectedChainItems();
-                setItemContextMenu(null);
-              }}
-            >
-              <Group size={13} /> Agrupar ({selectedChainIds.length}) (Ctrl+G)
-            </button>
-          )}
-
-          {itemContextMenu.item.type === 'group' && (
-            <button
-              type="button"
-              className="menu-item"
-              onClick={() => {
-                ungroupSelectedChainItems();
-                setItemContextMenu(null);
-              }}
-            >
-              <Ungroup size={13} /> Desagrupar (Ctrl+Shift+G)
-            </button>
-          )}
 
           <hr className="menu-separator" />
 
@@ -1604,71 +1355,47 @@ export const PatternChainArranger: React.FC = () => {
             type="button"
             className="menu-danger"
             onClick={() => {
-              deleteSelectedChainItems();
-              setItemContextMenu(null);
+              if (selectedChainIds.length > 1) {
+                deleteSelectedChainItems();
+              } else {
+                removeChainItem(clipContextMenu.clip.id);
+              }
+              setClipContextMenu(null);
             }}
           >
-            <Trash2 size={13} /> Eliminar
+            <Trash2 size={13} /> Eliminar {selectedChainIds.length > 1 ? `(${selectedChainIds.length})` : ''}
           </button>
         </ContextMenuContainer>
       )}
 
-      {/* Menú Contextual de Pista (Right-click en fondo) */}
+      {/* Menú Contextual de Fondo */}
       {trackContextMenu && (
-        <ContextMenuContainer
-          x={trackContextMenu.x}
-          y={trackContextMenu.y}
-        >
+        <ContextMenuContainer x={trackContextMenu.x} y={trackContextMenu.y}>
           <div className="menu-header">
-            <span>CADENA DE PATRONES</span>
+            <span>TIMELINE BATERÍA · c.{trackContextMenu.measure + 1}</span>
           </div>
-
           <button
             type="button"
             className="menu-item"
             onClick={() => {
-              addChainItem(currentDrumPatternEdit, 1);
+              addChainItem(currentDrumPatternEdit, 1, trackContextMenu.measure);
+              if (isPatternRepeatOn) setPatternRepeatOn(false);
               setTrackContextMenu(null);
             }}
           >
-            <Plus size={13} /> Insertar Patrón P{currentDrumPatternEdit + 1}
+            Insertar P{currentDrumPatternEdit + 1} aquí
           </button>
-
           <button
             type="button"
             className="menu-item"
+            disabled={!chainClipboard || chainClipboard.length === 0}
             onClick={() => {
-              addChainItem(-1, 1);
+              pasteChainItems();
               setTrackContextMenu(null);
             }}
           >
-            <VolumeX size={13} /> Insertar Silencio
+            <Clipboard size={13} /> Pegar en cabezal (Ctrl+V)
           </button>
-
-          <button
-            type="button"
-            className="menu-item"
-            onClick={() => {
-              handleAddGroup();
-              setTrackContextMenu(null);
-            }}
-          >
-            <Folder size={13} /> Insertar Nuevo Grupo
-          </button>
-
-          {chainClipboard.length > 0 && (
-            <button
-              type="button"
-              className="menu-item"
-              onClick={() => {
-                pasteChainItems();
-                setTrackContextMenu(null);
-              }}
-            >
-              <Clipboard size={13} /> Pegar ({chainClipboard.length}) (Ctrl+V)
-            </button>
-          )}
-
           <button
             type="button"
             className="menu-item"
@@ -1681,6 +1408,19 @@ export const PatternChainArranger: React.FC = () => {
           </button>
         </ContextMenuContainer>
       )}
+
+      <ConfirmModal
+        isOpen={isClearConfirmOpen}
+        title="Limpiar Secuencia Lineal"
+        message="¿Estás seguro de que quieres eliminar todos los clips del timeline de batería? Tus patrones P1..PN permanecerán intactos."
+        confirmText="Limpiar Timeline"
+        cancelText="Cancelar"
+        onConfirm={() => {
+          clearPatternChain();
+          setIsClearConfirmOpen(false);
+        }}
+        onCancel={() => setIsClearConfirmOpen(false)}
+      />
     </div>
   );
 };

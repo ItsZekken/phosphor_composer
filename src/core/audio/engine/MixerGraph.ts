@@ -11,7 +11,7 @@ import { normalizeTrackDb } from './audioTrackMath';
 export interface ChannelNode {
   volumeNode: Tone.Volume;
   pannerNode: Tone.Panner;
-  meterNode: Tone.Meter;
+  meterNode: Tone.Meter | null;
 }
 
 /**
@@ -27,6 +27,7 @@ export class MixerGraph {
   private channelNodes = new Map<string, ChannelNode>();
   private analyserNode: Tone.Analyser | null = null;
   private fftNode: Tone.Analyser | null = null;
+  private masterLimiter: Tone.Limiter | null = null;
   private cachedChannels: Record<string, ChannelConfig> = {};
   private cachedAudioTracks: Array<{ id: string; volume: number; pan: number; muted: boolean; solo: boolean }> = [];
 
@@ -64,7 +65,6 @@ export class MixerGraph {
       try {
         const volumeNode = new Tone.Volume(0);
         const pannerNode = new Tone.Panner({ pan: 0 });
-        const meterNode = new Tone.Meter({ smoothing: 0.8 });
 
         // Configuración estéreo explícita en los nodos nativos Web Audio para preservar la separación L/R
         this.enforceStereoNode(volumeNode);
@@ -73,22 +73,22 @@ export class MixerGraph {
         volumeNode.connect(pannerNode);
 
         if (id === 'master') {
-          pannerNode.toDestination();
-          pannerNode.connect(meterNode);
+          this.masterLimiter = new Tone.Limiter(-0.5).toDestination();
+          this.enforceStereoNode(this.masterLimiter);
+          pannerNode.connect(this.masterLimiter);
         } else {
           const masterNode = this.getChannelNode('master');
           pannerNode.connect(masterNode.volumeNode);
-          pannerNode.connect(meterNode);
         }
 
-        node = { volumeNode, pannerNode, meterNode };
+        node = { volumeNode, pannerNode, meterNode: null };
         this.channelNodes.set(id, node);
       } catch (_) {
         // Fallback seguro para entornos de prueba sin AudioParam
         node = {
           volumeNode: { volume: { value: 0 }, mute: false, connect: () => {}, dispose: () => {} } as any,
           pannerNode: { pan: { value: 0 }, connect: () => {}, toDestination: () => {}, dispose: () => {} } as any,
-          meterNode: { getValue: () => -Infinity, connect: () => {}, dispose: () => {} } as any
+          meterNode: null
         };
         this.channelNodes.set(id, node);
       }
@@ -197,6 +197,15 @@ export class MixerGraph {
     const node = this.channelNodes.get(id);
     if (!node) return -Infinity;
     try {
+      if (!node.meterNode) {
+        const meter = new Tone.Meter({ smoothing: 0.8 });
+        if (id === 'master' && this.masterLimiter) {
+          this.masterLimiter.connect(meter);
+        } else {
+          node.pannerNode.connect(meter);
+        }
+        node.meterNode = meter;
+      }
       const val = node.meterNode.getValue();
       return typeof val === 'number' ? val : Array.isArray(val) ? (val as number[])[0] : -Infinity;
     } catch (_) {
@@ -211,7 +220,7 @@ export class MixerGraph {
     const dest = target || this.waveformBuffer;
     try {
       if (!this.analyserNode) this.getAnalyser();
-      const raw = (this.analyserNode as any)?._analyser;
+      const raw = (this.analyserNode as any)?._analysers?.[0];
       if (raw && typeof raw.getFloatTimeDomainData === 'function') {
         raw.getFloatTimeDomainData(dest);
         return dest;
@@ -231,7 +240,7 @@ export class MixerGraph {
     const dest = target || this.frequencyBuffer;
     try {
       if (!this.fftNode) this.getFftAnalyser();
-      const raw = (this.fftNode as any)?._analyser;
+      const raw = (this.fftNode as any)?._analysers?.[0];
       if (raw && typeof raw.getFloatFrequencyData === 'function') {
         raw.getFloatFrequencyData(dest);
         return dest;
@@ -251,7 +260,7 @@ export class MixerGraph {
     this.channelNodes.forEach((node) => {
       try { node.volumeNode.dispose(); } catch (_) {}
       try { node.pannerNode.dispose(); } catch (_) {}
-      try { node.meterNode.dispose(); } catch (_) {}
+      if (node.meterNode) try { node.meterNode.dispose(); } catch (_) {}
     });
     this.channelNodes.clear();
     if (this.analyserNode) {
@@ -261,6 +270,10 @@ export class MixerGraph {
     if (this.fftNode) {
       try { this.fftNode.dispose(); } catch (_) {}
       this.fftNode = null;
+    }
+    if (this.masterLimiter) {
+      try { this.masterLimiter.dispose(); } catch (_) {}
+      this.masterLimiter = null;
     }
   }
 }

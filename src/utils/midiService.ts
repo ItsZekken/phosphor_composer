@@ -1,5 +1,5 @@
-import pkg, { Midi as NamedMidi } from '@tonejs/midi';
-const Midi = NamedMidi || (pkg as any)?.Midi || (pkg as any);
+import * as ToneMidi from '@tonejs/midi';
+const Midi = (ToneMidi as any).Midi || (ToneMidi as any).default?.Midi || (ToneMidi as any).default;
 import {
   midiToNote,
   renderChordPattern,
@@ -8,7 +8,7 @@ import {
   createTempoMap
 } from '../core/music';
 import {
-  flattenPatternChain,
+  normalizePatternChainToLinear,
   type ChordBlock,
   type MelodyNote,
   type TempoMarker,
@@ -18,6 +18,7 @@ import {
   type StyleMarker
 } from './typeDefinitions';
 import type { PatternDef } from '../patterns/patternTypes';
+import { importMidiSmart, type SmartMidiImportResult } from '../core/midi/smartMidiImporter';
 
 export const midiToNoteName = midiToNote;
 
@@ -411,48 +412,56 @@ export function exportSessionToMidi(session: ExportSessionMidiParams, type: 'nor
 
     const patternChain = session.patternChain || [];
     const isPatternRepeatOn = session.isPatternRepeatOn;
+    const beatsPerMeasure = session.timeSignature === '3/4' ? 3 : session.timeSignature === '6/8' ? 6 : 4;
 
     if (!isPatternRepeatOn && patternChain.length > 0) {
-      const flatChain = flattenPatternChain(patternChain);
-      const totalMeasures = flatChain.length;
-      maxBeat = Math.max(maxBeat, totalMeasures * 4);
+      const linearClips = normalizePatternChainToLinear(patternChain);
 
-      flatChain.forEach((step, measureIdx) => {
-        const patternIdx = step.patternIndex;
+      linearClips.forEach((clip) => {
+        const patternIdx = clip.patternIndex;
         if (patternIdx < 0) return;
-        const measureStartBeat = measureIdx * 4;
 
+        const clipStartBeat = clip.startMeasure * beatsPerMeasure;
+        const clipEndBeat = (clip.startMeasure + clip.durationMeasures) * beatsPerMeasure;
+        maxBeat = Math.max(maxBeat, clipEndBeat);
+
+        const startWholeMeasure = Math.floor(clip.startMeasure);
+        const endWholeMeasure = Math.ceil(clip.startMeasure + clip.durationMeasures);
         const patternLen = session.patternLengths?.[patternIdx] || 16;
-        const stepDuration = 4 / patternLen;
+        const stepDuration = beatsPerMeasure / patternLen;
 
-        for (let stepIdx = 0; stepIdx < patternLen; stepIdx++) {
-          const stepBeat = measureStartBeat + (stepIdx * stepDuration);
-          const time = tempoMap.beatToSeconds(stepBeat);
-          const duration = Math.max(0.05, Math.min(0.2, tempoMap.getDurationSeconds(stepBeat, stepDuration)));
+        for (let m = startWholeMeasure; m < endWholeMeasure; m++) {
+          const measureStartBeat = m * beatsPerMeasure;
+          for (let stepIdx = 0; stepIdx < patternLen; stepIdx++) {
+            const stepBeat = measureStartBeat + (stepIdx * stepDuration);
+            if (stepBeat < clipStartBeat - 1e-6 || stepBeat >= clipEndBeat - 1e-6) continue;
+            const time = tempoMap.beatToSeconds(stepBeat);
+            const duration = Math.max(0.05, Math.min(0.2, tempoMap.getDurationSeconds(stepBeat, stepDuration)));
 
-          drumChannels.forEach(ch => {
-            if (ch.muted) return;
-            const dStep = ch.patterns?.[patternIdx]?.[stepIdx];
-            if (dStep && dStep.isActive) {
-              const gmNote = getDrumGMNote(ch.id, ch.name);
-              const vel = typeof dStep.velocity === 'number' ? dStep.velocity : 0.8;
-              const volFactor = typeof ch.volume === 'number' ? ch.volume / 100 : 0.8;
-              drumsTrack.addNote({
-                midi: gmNote,
-                time,
-                duration,
-                velocity: Math.max(0.1, Math.min(1.0, vel * volFactor))
-              });
-            }
-          });
+            drumChannels.forEach(ch => {
+              if (ch.muted) return;
+              const dStep = ch.patterns?.[patternIdx]?.[stepIdx];
+              if (dStep && dStep.isActive) {
+                const gmNote = getDrumGMNote(ch.id, ch.name);
+                const vel = typeof dStep.velocity === 'number' ? dStep.velocity : 0.8;
+                const volFactor = typeof ch.volume === 'number' ? ch.volume / 100 : 0.8;
+                drumsTrack.addNote({
+                  midi: gmNote,
+                  time,
+                  duration,
+                  velocity: Math.max(0.1, Math.min(1.0, vel * volFactor))
+                });
+              }
+            });
+          }
         }
       });
     } else {
       // Repetición del patrón actual a lo largo de maxBeat
       const patternIdx = session.currentDrumPatternEdit || 0;
-      const totalMeasures = Math.max(1, Math.ceil(maxBeat / 4));
+      const totalMeasures = Math.max(1, Math.ceil(maxBeat / beatsPerMeasure));
       const patternLen = session.patternLengths?.[patternIdx] || 16;
-      const stepDuration = 4 / patternLen;
+      const stepDuration = beatsPerMeasure / patternLen;
       let hasActiveSteps = false;
 
       for (const ch of drumChannels) {
@@ -492,7 +501,7 @@ export function exportSessionToMidi(session: ExportSessionMidiParams, type: 'nor
     }
 
     if (drumsTrack.notes.length === 0) {
-      midi.tracks = midi.tracks.filter(t => t !== drumsTrack);
+      midi.tracks = midi.tracks.filter((t: any) => t !== drumsTrack);
     }
   }
 
@@ -500,269 +509,16 @@ export function exportSessionToMidi(session: ExportSessionMidiParams, type: 'nor
 }
 
 /**
- * Importa un archivo MIDI (ArrayBuffer) y lo convierte al estado de la sesión reconstructiva
+ * Importa un archivo MIDI (ArrayBuffer) y lo adapta de forma inteligente al estudio Phosphor:
+ * - Tiempos exactos por ticks/ppq (tresillos y cambios de tempo preservados)
+ * - Velocidades reales, pedal sustain CC64, CC7 volumen y CC10 pan
+ * - Pistas separadas con mapeo GM a Piano / Presets de Synth curados
+ * - Análisis armónico multi-pista y detección real de tonalidad/escala
+ * - Percusión GM (Canal 10) convertida a patrones y cadena lineal de batería
  */
 export function importMidiToSession(
   midiData: ArrayBuffer,
   customPatterns: PatternDef[]
-): {
-  success: boolean;
-  isProject: boolean;
-  bpm: number;
-  tempoMarkers?: TempoMarker[];
-  key: string;
-  scale: string;
-  pattern: string;
-  timeSignature: '4/4' | '3/4' | '6/8';
-  chordBlocks: ChordBlock[];
-  melodyNotes: MelodyNote[];
-  channels?: Record<string, any>;
-  drumChannels?: any[];
-  patternChain?: any[];
-  isPatternRepeatOn?: boolean;
-  activeDrumKitId?: string;
-  chordOctaveShift?: number;
-  currentDrumPatternEdit?: number;
-  patternLengths?: number[];
-  message: string;
-} {
-  const midi = new Midi(midiData);
-  const bpm = midi.header.tempos.length > 0 ? Math.round(midi.header.tempos[0].bpm) : 120;
-
-  if (midi.header.meta && midi.header.meta.length > 0) {
-    const metaEvent = midi.header.meta.find(e => e.text.startsWith('ComposerSessionMetadata:'));
-    if (metaEvent) {
-      try {
-        const jsonStr = metaEvent.text.substring('ComposerSessionMetadata:'.length);
-        const state = JSON.parse(jsonStr);
-        return {
-          success: true,
-          isProject: true,
-          bpm: state.bpm ?? bpm,
-          tempoMarkers: state.tempoMarkers ?? [],
-          key: state.key ?? 'C',
-          scale: state.scale ?? 'major',
-          pattern: state.pattern ?? 'hold',
-          timeSignature: state.timeSignature ?? '4/4',
-          chordBlocks: state.chordBlocks ?? [],
-          melodyNotes: state.melodyNotes ?? [],
-          channels: state.channels,
-          drumChannels: state.drumChannels,
-          patternChain: state.patternChain,
-          isPatternRepeatOn: state.isPatternRepeatOn,
-          activeDrumKitId: state.activeDrumKitId,
-          chordOctaveShift: state.chordOctaveShift,
-          currentDrumPatternEdit: state.currentDrumPatternEdit,
-          patternLengths: state.patternLengths,
-          message: 'Sesión de proyecto restaurada al 100% desde metadatos.'
-        };
-      } catch (e) {
-        console.warn('[midiService] Falló el parseo de metadatos encajados:', e);
-      }
-    }
-  }
-
-  let melodyNotesRaw: any[] = [];
-  let harmonyNotesRaw: any[] = [];
-
-  const nonPercussionTracks = midi.tracks.filter(t => !t.instrument.percussion && t.channel !== 9);
-
-  if (nonPercussionTracks.length === 0) {
-    return {
-      success: false,
-      isProject: false,
-      bpm,
-      key: 'C',
-      scale: 'major',
-      pattern: 'hold',
-      timeSignature: '4/4',
-      chordBlocks: [],
-      melodyNotes: [],
-      message: 'El archivo MIDI no contiene pistas de notas legibles.'
-    };
-  }
-
-  if (nonPercussionTracks.length === 1) {
-    const trackNotes = nonPercussionTracks[0].notes;
-    const notesByBeat: Record<number, any[]> = {};
-    trackNotes.forEach(n => {
-      const beat = Math.round((n.time * (bpm / 60)) * 4) / 4;
-      if (!notesByBeat[beat]) notesByBeat[beat] = [];
-      notesByBeat[beat].push(n);
-    });
-
-    Object.entries(notesByBeat).forEach(([_beatStr, notes]) => {
-      if (notes.length === 1) {
-        const note = notes[0];
-        if (note.midi >= 60) {
-          melodyNotesRaw.push(note);
-        } else {
-          harmonyNotesRaw.push(note);
-        }
-      } else {
-        notes.sort((a, b) => b.midi - a.midi);
-        const highest = notes[0];
-        if (highest.midi >= 60) {
-          melodyNotesRaw.push(highest);
-          for (let i = 1; i < notes.length; i++) {
-            harmonyNotesRaw.push(notes[i]);
-          }
-        } else {
-          notes.forEach(n => harmonyNotesRaw.push(n));
-        }
-      }
-    });
-  } else {
-    nonPercussionTracks.forEach(track => {
-      const trackName = track.name.toLowerCase();
-      
-      const isExplicitMelody = /melody|vocal|lead|solo|flute|trumpet|sing|voice/i.test(trackName);
-      const isExplicitHarmony = /chord|harmony|piano|keyboard|accomp|pad|synth|guitar/i.test(trackName);
-      
-      if (isExplicitMelody) {
-        melodyNotesRaw.push(...track.notes);
-        return;
-      }
-      if (isExplicitHarmony) {
-        harmonyNotesRaw.push(...track.notes);
-        return;
-      }
-
-      let overlapCount = 0;
-      track.notes.forEach((n1, idx1) => {
-        const overlaps = track.notes.some((n2, idx2) => {
-          if (idx1 === idx2) return false;
-          return n2.time >= n1.time && n2.time < n1.time + n1.duration;
-        });
-        if (overlaps) overlapCount++;
-      });
-
-      const polyphonyRatio = track.notes.length > 0 ? overlapCount / track.notes.length : 0;
-
-      if (polyphonyRatio > 0.15) {
-        harmonyNotesRaw.push(...track.notes);
-      } else {
-        melodyNotesRaw.push(...track.notes);
-      }
-    });
-  }
-
-  if (harmonyNotesRaw.length === 0 && melodyNotesRaw.length > 0) {
-    harmonyNotesRaw = [...melodyNotesRaw];
-  }
-
-  const melodyNotes: MelodyNote[] = melodyNotesRaw.map(n => {
-    const startBeat = Math.round((n.time * (bpm / 60)) * 4) / 4;
-    const durationBeats = Math.max(0.25, Math.round((n.duration * (bpm / 60)) * 4) / 4);
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      note: n.name,
-      midi: n.midi,
-      startBeat,
-      durationBeats,
-      velocity: n.velocity
-    };
-  });
-
-  const harmonyNotesMapped = harmonyNotesRaw.map(n => {
-    const startBeat = Math.round((n.time * (bpm / 60)) * 4) / 4;
-    const durationBeats = Math.max(0.25, Math.round((n.duration * (bpm / 60)) * 4) / 4);
-    return {
-      midi: n.midi,
-      startBeat,
-      durationBeats
-    };
-  });
-
-  let maxBeat = 0;
-  harmonyNotesMapped.forEach(n => {
-    maxBeat = Math.max(maxBeat, n.startBeat + n.durationBeats);
-  });
-
-  const stepChords: { chord: string; inversion: number }[] = [];
-  for (let b = 0; b < maxBeat; b += 0.5) {
-    const activeMidis = harmonyNotesMapped
-      .filter(n => n.startBeat <= b + 0.05 && n.startBeat + n.durationBeats > b + 0.05)
-      .map(n => n.midi);
-
-    if (activeMidis.length > 0) {
-      stepChords.push(detectChordFromMidi(activeMidis));
-    } else {
-      stepChords.push({ chord: '', inversion: 0 });
-    }
-  }
-
-  const chordBlocks: ChordBlock[] = [];
-  let currentBlock: any = null;
-
-  for (let i = 0; i < stepChords.length; i++) {
-    const sc = stepChords[i];
-    const stepBeat = i * 0.5;
-
-    if (currentBlock && currentBlock.chord === sc.chord && currentBlock.inversion === sc.inversion) {
-      currentBlock.durationBeats += 0.5;
-    } else {
-      if (currentBlock && currentBlock.chord !== '') {
-        chordBlocks.push({
-          id: Math.random().toString(36).substr(2, 9),
-          chord: currentBlock.chord,
-          startBeat: currentBlock.startBeat,
-          durationBeats: currentBlock.durationBeats,
-          inversion: currentBlock.inversion,
-          voicing: 'default'
-        });
-      }
-      currentBlock = {
-        chord: sc.chord,
-        inversion: sc.inversion,
-        startBeat: stepBeat,
-        durationBeats: 0.5
-      };
-    }
-  }
-  if (currentBlock && currentBlock.chord !== '') {
-    chordBlocks.push({
-      id: Math.random().toString(36).substr(2, 9),
-      chord: currentBlock.chord,
-      startBeat: currentBlock.startBeat,
-      durationBeats: currentBlock.durationBeats,
-      inversion: currentBlock.inversion,
-      voicing: 'default'
-    });
-  }
-
-  const pattern = identifyPattern(harmonyNotesMapped, chordBlocks, customPatterns);
-
-  let timeSignature: '4/4' | '3/4' | '6/8' = '4/4';
-  if (midi.header.timeSignatures && midi.header.timeSignatures.length > 0) {
-    const ts = midi.header.timeSignatures[0].timeSignature;
-    const tsStr = `${ts[0]}/${ts[1]}`;
-    if (tsStr === '4/4' || tsStr === '3/4' || tsStr === '6/8') {
-      timeSignature = tsStr as any;
-    }
-  }
-
-  const tempoMarkers: TempoMarker[] = midi.header.tempos && midi.header.tempos.length > 1
-    ? midi.header.tempos
-        .filter(t => t.ticks > 0)
-        .map((t, idx) => ({
-          id: `tm_midi_${idx}`,
-          beat: Math.round((t.ticks / (midi.header.ppq || 480)) * 4) / 4,
-          bpm: Math.round(t.bpm)
-        }))
-    : [];
-
-  return {
-    success: true,
-    isProject: false,
-    bpm,
-    tempoMarkers,
-    key: 'C',
-    scale: 'major',
-    pattern,
-    timeSignature,
-    chordBlocks,
-    melodyNotes,
-    message: `MIDI estándar importado con éxito. Se detectaron ${chordBlocks.length} acordes y se identificó el patrón rítmico '${pattern}'.`
-  };
+): SmartMidiImportResult {
+  return importMidiSmart(midiData, customPatterns, identifyPattern);
 }

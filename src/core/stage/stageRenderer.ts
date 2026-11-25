@@ -33,6 +33,7 @@ export interface StageRenderFrameParams {
   totalDurationSeconds?: number;
   totalBeats?: number;
   waveform: Float32Array;
+  frequency?: Float32Array;
   notes: StageRenderNote[];
   drumChannels: DrumChannel[];
   patternChain: PatternChainItem[];
@@ -62,6 +63,82 @@ const DRUM_ROW_COLORS = [
 const MIN_MIDI = 24;  // C1
 const MAX_MIDI = 108; // C8
 const TOTAL_PITCHES = MAX_MIDI - MIN_MIDI + 1; // 85 pitches
+const BLACK_KEY_TABLE = new Uint8Array([0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0]);
+const MAX_STAGE_PARTICLES = 80;
+
+// Caches de alto rendimiento para 60 FPS sin asignación por frame
+const hexRgbCache = new Map<string, [number, number, number]>();
+const patternChainCache = new WeakMap<PatternChainItem[], ReturnType<typeof flattenPatternChain>>();
+const sortedNotesCache = new WeakMap<StageRenderNote[], { sorted: StageRenderNote[]; maxDur: number }>();
+const sortedChordsCache = new WeakMap<ChordBlock[], { sorted: ChordBlock[]; maxDur: number; firstStart: number; maxEnd: number }>();
+
+const spectrumGradCache = new WeakMap<
+  CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  { height: number; gradient: CanvasGradient }
+>();
+
+let crtCacheCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
+let crtCacheW = 0;
+let crtCacheH = 0;
+
+// Pools reutilizables por frame
+const activeStrikesPool: Array<{ x: number; color: string; width: number }> = [];
+const activeFrameMidiPool = new Set<number>();
+
+function getFlattenedPatternChainCached(patternChain: PatternChainItem[]): ReturnType<typeof flattenPatternChain> {
+  let cached = patternChainCache.get(patternChain);
+  if (!cached) {
+    cached = flattenPatternChain(patternChain);
+    patternChainCache.set(patternChain, cached);
+  }
+  return cached;
+}
+
+function getSortedNotesCached(notes: StageRenderNote[]): { sorted: StageRenderNote[]; maxDur: number } {
+  let cached = sortedNotesCache.get(notes);
+  if (!cached) {
+    let maxDur = 0.25;
+    for (let i = 0; i < notes.length; i++) {
+      if (notes[i].durationBeats > maxDur) maxDur = notes[i].durationBeats;
+    }
+    const sorted = notes.slice().sort((a, b) => a.startBeat - b.startBeat);
+    cached = { sorted, maxDur };
+    sortedNotesCache.set(notes, cached);
+  }
+  return cached;
+}
+
+function getSortedChordsCached(
+  chordBlocks: ChordBlock[]
+): { sorted: ChordBlock[]; maxDur: number; firstStart: number; maxEnd: number } {
+  let cached = sortedChordsCache.get(chordBlocks);
+  if (!cached) {
+    const sorted = chordBlocks.slice().sort((a, b) => a.startBeat - b.startBeat);
+    let maxDur = 4;
+    let maxEnd = 16;
+    for (let i = 0; i < sorted.length; i++) {
+      const b = sorted[i];
+      if (b.durationBeats > maxDur) maxDur = b.durationBeats;
+      const end = b.startBeat + b.durationBeats;
+      if (end > maxEnd) maxEnd = end;
+    }
+    const firstStart = sorted[0]?.startBeat ?? 0;
+    cached = { sorted, maxDur, firstStart, maxEnd };
+    sortedChordsCache.set(chordBlocks, cached);
+  }
+  return cached;
+}
+
+function lowerBoundByBeat<T extends { startBeat: number }>(arr: T[], targetBeat: number): number {
+  let lo = 0;
+  let hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (arr[mid].startBeat < targetBeat) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
 
 /**
  * Función central de dibujo: ejecuta la composición gráfica completa del Stage.
@@ -92,7 +169,7 @@ export function renderStageFrame(
   } = params;
 
   // 1. CAPA 0: Renderizado del fondo y osciloscopio con persistencia analógica de fósforo (Al fondo)
-  renderBackgroundVisualizer(bgCtx, width, height, waveform, visualizerMode, Boolean(isFirstFrame));
+  renderBackgroundVisualizer(bgCtx, width, height, waveform, params.frequency, visualizerMode, Boolean(isFirstFrame));
 
   // Volcar fondo con estela al lienzo principal
   ctx.drawImage(bgCanvas, 0, 0);
@@ -122,6 +199,47 @@ export function renderStageFrame(
   }
 }
 
+const SPECTRUM_BINS = 48;
+const fallbackSpectrumBins = new Float32Array(SPECTRUM_BINS);
+
+/**
+ * Calcula un espectro de magnitudes logarítmico (60 Hz - 12 kHz) a partir de una ventana de waveform.
+ * Utilizado en renderizado offline (exportación MP4) o cuando no hay datos FFT de Web Audio.
+ */
+function computeSpectrumFromWaveform(waveform: Float32Array, numBins = SPECTRUM_BINS): Float32Array {
+  const n = waveform.length;
+  if (n === 0) {
+    fallbackSpectrumBins.fill(0);
+    return fallbackSpectrumBins;
+  }
+
+  const sampleRate = 44100;
+  const minFreq = 60;
+  const maxFreq = 12000;
+  const ratio = maxFreq / minFreq;
+
+  for (let b = 0; b < numBins; b++) {
+    const freq = minFreq * Math.pow(ratio, b / Math.max(1, numBins - 1));
+    const omega = (2 * Math.PI * freq) / sampleRate;
+    let re = 0;
+    let im = 0;
+
+    for (let i = 0; i < n; i++) {
+      // Ventana Hann para reducir fuga espectral
+      const hann = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (n - 1)));
+      const sample = waveform[i] * hann;
+      const angle = omega * i;
+      re += sample * Math.cos(angle);
+      im -= sample * Math.sin(angle);
+    }
+
+    const mag = Math.sqrt(re * re + im * im) / (n * 0.25);
+    fallbackSpectrumBins[b] = Math.min(1, Math.tanh(mag * 1.4));
+  }
+
+  return fallbackSpectrumBins;
+}
+
 /**
  * Capa 0: Fondo orgánico con estela analógica de fósforo
  */
@@ -130,6 +248,7 @@ function renderBackgroundVisualizer(
   width: number,
   height: number,
   waveform: Float32Array,
+  frequency: Float32Array | undefined,
   mode: 'oscilloscope' | 'spectrum' | 'lissajous',
   isFirstFrame: boolean
 ) {
@@ -176,20 +295,54 @@ function renderBackgroundVisualizer(
     bgCtx.strokeStyle = '#d5f5e4';
     bgCtx.stroke();
   } else if (mode === 'spectrum') {
-    const numBars = Math.min(48, waveform.length);
+    const numBars = SPECTRUM_BINS;
     const padding = 3;
     const barWidth = (width / numBars) - padding;
 
-    const gradient = bgCtx.createLinearGradient(0, height, 0, height * 0.4);
-    gradient.addColorStop(0, 'rgba(80, 114, 168, 0.15)');
-    gradient.addColorStop(0.5, 'rgba(90, 158, 122, 0.35)');
-    gradient.addColorStop(0.85, 'rgba(176, 144, 64, 0.45)');
-    gradient.addColorStop(1, 'rgba(232, 140, 66, 0.6)');
+    let cachedSpec = spectrumGradCache.get(bgCtx);
+    if (!cachedSpec || cachedSpec.height !== height) {
+      const gradient = bgCtx.createLinearGradient(0, height, 0, height * 0.4);
+      gradient.addColorStop(0, 'rgba(80, 114, 168, 0.15)');
+      gradient.addColorStop(0.5, 'rgba(90, 158, 122, 0.35)');
+      gradient.addColorStop(0.85, 'rgba(176, 144, 64, 0.45)');
+      gradient.addColorStop(1, 'rgba(232, 140, 66, 0.6)');
+      cachedSpec = { height, gradient };
+      spectrumGradCache.set(bgCtx, cachedSpec);
+    }
+    const gradient = cachedSpec.gradient;
+
+    // Determinar si el buffer FFT real de Web Audio contiene mediciones válidas en dB (< 0)
+    let hasLiveFft = false;
+    if (frequency && frequency.length > 0) {
+      for (let k = 0; k < frequency.length; k++) {
+        if (frequency[k] < -0.001) {
+          hasLiveFft = true;
+          break;
+        }
+      }
+    }
+
+    const computedBins = hasLiveFft ? null : computeSpectrumFromWaveform(waveform, numBars);
 
     for (let i = 0; i < numBars; i++) {
-      const sampleIdx = Math.floor((i / numBars) * (waveform.length - 1));
-      const val = Math.abs(waveform[sampleIdx]) * 0.8;
-      const barHeight = Math.min(height * 0.35, val * (height * 0.24));
+      let norm = 0;
+      if (hasLiveFft && frequency) {
+        // Mapeo logarítmico sobre los bins FFT (descartando DC bin 0 para mejor respuesta visual)
+        const maxBin = Math.max(1, frequency.length - 1);
+        const logPos = Math.pow(i / Math.max(1, numBars - 1), 1.45);
+        const binPos = 1 + logPos * (maxBin - 1);
+        const b0 = Math.min(maxBin, Math.floor(binPos));
+        const b1 = Math.min(maxBin, b0 + 1);
+        const frac = binPos - b0;
+        const db0 = Number.isFinite(frequency[b0]) ? frequency[b0] : -100;
+        const db1 = Number.isFinite(frequency[b1]) ? frequency[b1] : -100;
+        const db = db0 + (db1 - db0) * frac;
+        norm = Math.max(0, Math.min(1, (db + 85) / 70));
+      } else if (computedBins) {
+        norm = computedBins[i] || 0;
+      }
+
+      const barHeight = Math.min(height * 0.36, norm * (height * 0.32));
       const x = i * (barWidth + padding);
       const y = height - barHeight;
 
@@ -247,7 +400,7 @@ function renderDrumSwitchesDeck(
   let beatInMeasure = ((beat % 4) + 4) % 4;
 
   if (!isPatternRepeatOn && patternChain && patternChain.length > 0) {
-    const flatChain = flattenPatternChain(patternChain);
+    const flatChain = getFlattenedPatternChainCached(patternChain);
     const totalChainBeats = flatChain.length * 4;
     if (totalChainBeats > 0) {
       const chainPos = ((beat % totalChainBeats) + totalChainBeats) % totalChainBeats;
@@ -319,31 +472,37 @@ function renderDrumSwitchesDeck(
 
       if (isActive) {
         if (env > 0.01) {
-          // Destello incandescente con expansión vertical suave y transición de color a blanco
+          // Destello incandescente por doble capa sin shadowBlur (0 stall de blur en GPU)
           const currentScaleY = 1.0 + (0.22 * env);
           const scaledH = rowHeight * currentScaleY;
           const offsetY = (scaledH - rowHeight) / 2;
           const blendedColor = interpolateRgb(lightColor, '#ffffff', env * 0.95);
-          const blur = 10 + 16 * env;
+          const haloExpand = 2.5 + 3.5 * env;
 
-          ctx.save();
-          ctx.shadowColor = env > 0.5 ? '#ffffff' : lightColor;
-          ctx.shadowBlur = blur;
+          ctx.globalAlpha = 0.18 + 0.25 * env;
+          ctx.fillStyle = lightColor;
+          ctx.beginPath();
+          ctx.roundRect(currentX - haloExpand * 0.5, rowY - offsetY - haloExpand * 0.5, pillWidth + haloExpand, scaledH + haloExpand, 4);
+          ctx.fill();
+
+          ctx.globalAlpha = 1.0;
           ctx.fillStyle = blendedColor;
           ctx.beginPath();
           ctx.roundRect(currentX, rowY - offsetY, pillWidth, scaledH, 3);
           ctx.fill();
-          ctx.restore();
         } else {
-          // Luz activa cálida en reposo
-          ctx.save();
-          ctx.shadowColor = lightColor;
-          ctx.shadowBlur = 10;
+          // Luz activa cálida en reposo con halo sutil
+          ctx.globalAlpha = 0.22;
+          ctx.fillStyle = lightColor;
+          ctx.beginPath();
+          ctx.roundRect(currentX - 1, rowY - 1, pillWidth + 2, rowHeight + 2, 4);
+          ctx.fill();
+
+          ctx.globalAlpha = 1.0;
           ctx.fillStyle = lightColor;
           ctx.beginPath();
           ctx.roundRect(currentX, rowY, pillWidth, rowHeight, 3);
           ctx.fill();
-          ctx.restore();
         }
       } else {
         // Barra inactiva: casi imperceptible en reposo
@@ -372,13 +531,12 @@ function renderDrumSwitchesDeck(
 
     if (isPlaying && cursorDist < 1.0) {
       const cursorAlpha = Math.pow(1 - cursorDist, 1.8);
-      ctx.save();
-      ctx.globalAlpha = cursorAlpha;
-      ctx.shadowColor = '#ffffff';
-      ctx.shadowBlur = 8;
+      ctx.globalAlpha = cursorAlpha * 0.3;
       ctx.fillStyle = '#ffffff';
+      ctx.fillRect(cursorX + pillWidth * 0.1, cursorRowY - 1, pillWidth * 0.8, 4);
+      ctx.globalAlpha = cursorAlpha;
       ctx.fillRect(cursorX + pillWidth * 0.2, cursorRowY, pillWidth * 0.6, 2);
-      ctx.restore();
+      ctx.globalAlpha = 1.0;
     }
 
     cursorX += pillWidth;
@@ -409,109 +567,123 @@ function renderMidiWaterfallAndKeyboard(
 
   ctx.save();
 
-  // 1. Líneas verticales sutiles de referencia de pitch
+  // 1. Líneas verticales sutiles de referencia de pitch (en 2 batch strokes en lugar de 85 draw calls)
   ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.015)';
+  ctx.beginPath();
   for (let m = MIN_MIDI; m <= MAX_MIDI; m++) {
-    const isOctaveC = m % 12 === 0;
-    ctx.strokeStyle = isOctaveC ? 'rgba(130, 165, 245, 0.07)' : 'rgba(255, 255, 255, 0.015)';
+    if (m % 12 === 0) continue;
     const x = (m - MIN_MIDI) * keyWidth;
-    ctx.beginPath();
     ctx.moveTo(x, 0);
     ctx.lineTo(x, impactY);
-    ctx.stroke();
   }
+  ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(130, 165, 245, 0.07)';
+  ctx.beginPath();
+  for (let m = MIN_MIDI; m <= MAX_MIDI; m++) {
+    if (m % 12 !== 0) continue;
+    const x = (m - MIN_MIDI) * keyWidth;
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, impactY);
+  }
+  ctx.stroke();
 
   // 2. Horizonte de impacto sutil
   ctx.strokeStyle = 'rgba(130, 165, 245, 0.25)';
-  ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(0, impactY);
   ctx.lineTo(width, impactY);
   ctx.stroke();
 
-  // 3. Renderizar notas visibles
+  // 3. Renderizar únicamente las notas visibles mediante búsqueda binaria O(log N)
   const visibleMinBeat = beat - lookBehindBeats;
   const visibleMaxBeat = beat + lookAheadBeats;
-  const activeStrikes: { x: number; color: string; width: number }[] = [];
-  const activeFrameMidi = new Set<number>();
+  activeStrikesPool.length = 0;
+  activeFrameMidiPool.clear();
 
-  for (let i = 0; i < notes.length; i++) {
-    const note = notes[i];
-    const noteEndBeat = note.startBeat + note.durationBeats;
-    if (noteEndBeat < visibleMinBeat || note.startBeat > visibleMaxBeat) continue;
+  if (notes.length > 0) {
+    const { sorted, maxDur } = getSortedNotesCached(notes);
+    let idx = lowerBoundByBeat(sorted, visibleMinBeat - maxDur);
+    for (; idx < sorted.length; idx++) {
+      const note = sorted[idx];
+      if (note.startBeat > visibleMaxBeat) break;
+      const noteEndBeat = note.startBeat + note.durationBeats;
+      if (noteEndBeat < visibleMinBeat) continue;
 
-    const clampedMidi = Math.max(MIN_MIDI, Math.min(MAX_MIDI, note.midi));
-    const noteX = (clampedMidi - MIN_MIDI) * keyWidth + 0.5;
-    const noteW = Math.max(3, keyWidth - 1);
+      const clampedMidi = Math.max(MIN_MIDI, Math.min(MAX_MIDI, note.midi));
+      const noteX = (clampedMidi - MIN_MIDI) * keyWidth + 0.5;
+      const noteW = Math.max(3, keyWidth - 1);
 
-    const beatsFromImpactHead = note.startBeat - beat;
-    const beatsFromImpactTail = noteEndBeat - beat;
+      const beatsFromImpactHead = note.startBeat - beat;
+      const beatsFromImpactTail = noteEndBeat - beat;
 
-    const bottomY = impactY - beatsFromImpactHead * noteSpeed;
-    const topY = impactY - beatsFromImpactTail * noteSpeed;
-    const noteH = Math.max(5, bottomY - topY);
+      const bottomY = impactY - beatsFromImpactHead * noteSpeed;
+      const topY = impactY - beatsFromImpactTail * noteSpeed;
+      const noteH = Math.max(5, bottomY - topY);
 
-    const isActive = beat >= note.startBeat && beat <= noteEndBeat;
-    const baseColor = note.color || '#6880ad';
+      const isActive = beat >= note.startBeat && beat <= noteEndBeat;
+      const baseColor = note.color || '#6880ad';
 
-    // A. Cuerpo de la nota
-    ctx.fillStyle = baseColor;
-    ctx.beginPath();
-    ctx.roundRect(noteX, topY, noteW, noteH, 2.5);
-    ctx.fill();
-
-    // B. Estela de desvanecimiento suave (afterglow)
-    if (isPlaying && beat > noteEndBeat && (beat - noteEndBeat) < 0.55) {
-      const trailProgress = (beat - noteEndBeat) / 0.55;
-      const trailAlpha = Math.max(0, (1 - trailProgress) ** 2);
-      ctx.save();
-      ctx.globalAlpha = trailAlpha * 0.7;
+      // A. Cuerpo de la nota
       ctx.fillStyle = baseColor;
-      const trailH = Math.max(2, (0.55 - (beat - noteEndBeat)) * noteSpeed * 0.4);
-      ctx.fillRect(noteX, impactY - trailH, noteW, trailH);
-      ctx.restore();
-    }
+      ctx.beginPath();
+      ctx.roundRect(noteX, topY, noteW, noteH, 2.5);
+      ctx.fill();
 
-    // C. Nota activa en el impacto
-    if (isActive && isPlaying) {
-      activeFrameMidi.add(clampedMidi);
-      keyLuminanceMap.set(clampedMidi, { color: baseColor, alpha: 1.0 });
-      activeStrikes.push({ x: noteX + noteW / 2, color: baseColor, width: noteW });
+      // B. Estela de desvanecimiento suave (afterglow)
+      if (isPlaying && beat > noteEndBeat && (beat - noteEndBeat) < 0.55) {
+        const trailProgress = (beat - noteEndBeat) / 0.55;
+        const trailAlpha = Math.max(0, (1 - trailProgress) ** 2);
+        ctx.globalAlpha = trailAlpha * 0.7;
+        ctx.fillStyle = baseColor;
+        const trailH = Math.max(2, (0.55 - (beat - noteEndBeat)) * noteSpeed * 0.4);
+        ctx.fillRect(noteX, impactY - trailH, noteW, trailH);
+        ctx.globalAlpha = 1.0;
+      }
 
-      if (Math.random() < 0.25) {
-        particles.push({
-          x: noteX + noteW / 2 + (Math.random() - 0.5) * noteW,
-          y: impactY,
-          vx: (Math.random() - 0.5) * 3,
-          vy: -Math.random() * 3 - 1,
-          color: baseColor,
-          alpha: 0.85,
-          size: Math.random() * 2 + 1,
-          decay: 0.035 + Math.random() * 0.02
-        });
+      // C. Nota activa en el impacto
+      if (isActive && isPlaying) {
+        activeFrameMidiPool.add(clampedMidi);
+        keyLuminanceMap.set(clampedMidi, { color: baseColor, alpha: 1.0 });
+        activeStrikesPool.push({ x: noteX + noteW / 2, color: baseColor, width: noteW });
+
+        if (particles.length < MAX_STAGE_PARTICLES && Math.random() < 0.25) {
+          particles.push({
+            x: noteX + noteW / 2 + (Math.random() - 0.5) * noteW,
+            y: impactY,
+            vx: (Math.random() - 0.5) * 3,
+            vy: -Math.random() * 3 - 1,
+            color: baseColor,
+            alpha: 0.85,
+            size: Math.random() * 2 + 1,
+            decay: 0.035 + Math.random() * 0.02
+          });
+        }
       }
     }
   }
 
-  // 4. Destellos en el horizonte de impacto
-  for (const strike of activeStrikes) {
-    const grad = ctx.createRadialGradient(
-      strike.x, impactY, 0,
-      strike.x, impactY, strike.width * 2.5
-    );
-    grad.addColorStop(0, strike.color);
-    grad.addColorStop(1, 'transparent');
-
-    ctx.fillStyle = grad;
+  // 4. Destellos en el horizonte de impacto (glow layering rápido sin gradient allocations)
+  for (let i = 0; i < activeStrikesPool.length; i++) {
+    const strike = activeStrikesPool[i];
+    ctx.globalAlpha = 0.28;
+    ctx.fillStyle = strike.color;
     ctx.beginPath();
-    ctx.arc(strike.x, impactY, strike.width * 2.5, 0, Math.PI * 2);
+    ctx.arc(strike.x, impactY, strike.width * 2.1, 0, Math.PI * 2);
     ctx.fill();
 
+    ctx.globalAlpha = 0.65;
+    ctx.beginPath();
+    ctx.arc(strike.x, impactY, strike.width * 1.1, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = 1.0;
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(strike.x - strike.width / 2, impactY - 1, strike.width, 2);
   }
 
-  // 5. Partículas
+  // 5. Partículas con swap-and-pop O(1)
   for (let p = particles.length - 1; p >= 0; p--) {
     const pt = particles[p];
     pt.x += pt.vx;
@@ -519,22 +691,23 @@ function renderMidiWaterfallAndKeyboard(
     pt.alpha -= pt.decay;
 
     if (pt.alpha <= 0) {
-      particles.splice(p, 1);
+      const last = particles.length - 1;
+      if (p !== last) particles[p] = particles[last];
+      particles.pop();
       continue;
     }
 
-    ctx.save();
     ctx.globalAlpha = pt.alpha;
     ctx.fillStyle = pt.color;
     ctx.beginPath();
     ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
     ctx.fill();
-    ctx.restore();
   }
+  ctx.globalAlpha = 1.0;
 
   // 6. Decaimiento de luminancia de teclas
   keyLuminanceMap.forEach((item, midi) => {
-    if (!activeFrameMidi.has(midi)) {
+    if (!activeFrameMidiPool.has(midi)) {
       item.alpha -= 0.045;
       if (item.alpha <= 0.01) {
         keyLuminanceMap.delete(midi);
@@ -548,16 +721,15 @@ function renderMidiWaterfallAndKeyboard(
   ctx.fillRect(0, kbY, width, kbHeight);
 
   for (let m = MIN_MIDI; m <= MAX_MIDI; m++) {
-    const isBlack = [1, 3, 6, 8, 10].includes(m % 12);
+    const isBlack = BLACK_KEY_TABLE[m % 12] === 1;
     const x = (m - MIN_MIDI) * keyWidth;
     const activeEntry = keyLuminanceMap.get(m);
 
     if (activeEntry && activeEntry.alpha > 0.01) {
-      ctx.save();
       ctx.globalAlpha = activeEntry.alpha;
       ctx.fillStyle = activeEntry.color;
       ctx.fillRect(x + 0.5, kbY, keyWidth - 1, kbHeight);
-      ctx.restore();
+      ctx.globalAlpha = 1.0;
     } else {
       ctx.fillStyle = isBlack ? 'rgba(24, 19, 32, 0.8)' : 'rgba(42, 34, 56, 0.6)';
       ctx.fillRect(x + 0.5, kbY, keyWidth - 1, kbHeight);
@@ -587,10 +759,13 @@ function renderFloatingChordStream(
 
   ctx.save();
 
-  // Contenedor de la cinta
-  ctx.save();
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-  ctx.shadowBlur = 18;
+  // Contenedor de la cinta (halo limpio sin shadowBlur en GPU)
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.42)';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.roundRect(ribbonX, ribbonY, ribbonWidth, ribbonHeight, 16);
+  ctx.stroke();
+
   ctx.fillStyle = 'rgba(16, 12, 22, 0.92)';
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
   ctx.lineWidth = 1;
@@ -598,13 +773,11 @@ function renderFloatingChordStream(
   ctx.roundRect(ribbonX, ribbonY, ribbonWidth, ribbonHeight, 16);
   ctx.fill();
   ctx.stroke();
-  ctx.restore();
 
-  // Scroll horizontal adaptativo centrado en el 35%
+  // Scroll horizontal adaptativo centrado en el 35% usando acorde caché ordenado
   const beatWidth = 40;
-  const songStartBeat = chordBlocks[0]?.startBeat ?? 0;
-  const lastBlock = chordBlocks[chordBlocks.length - 1];
-  const songTotalBeats = lastBlock ? (lastBlock.startBeat + lastBlock.durationBeats) - songStartBeat : 16;
+  const { sorted: sortedChords, maxDur: maxChordDur, firstStart: songStartBeat, maxEnd } = getSortedChordsCached(chordBlocks);
+  const songTotalBeats = Math.max(16, maxEnd - songStartBeat);
   const totalTrackWidth = songTotalBeats * beatWidth;
 
   const playheadRelX = (beat - songStartBeat) * beatWidth;
@@ -616,6 +789,8 @@ function renderFloatingChordStream(
   }
 
   const visiblePlayheadX = ribbonX + playheadRelX - scrollX;
+  const visibleMinChordBeat = songStartBeat + (scrollX / beatWidth) - maxChordDur;
+  const visibleMaxChordBeat = songStartBeat + ((scrollX + ribbonWidth) / beatWidth);
 
   // Clip dentro de la cinta
   ctx.save();
@@ -626,7 +801,14 @@ function renderFloatingChordStream(
   const pillY = ribbonY + 2.5;
   const pillH = ribbonHeight - 5;
 
-  for (const block of chordBlocks) {
+  ctx.font = 'bold 12px "Share Tech Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  let cIdx = lowerBoundByBeat(sortedChords, visibleMinChordBeat);
+  for (; cIdx < sortedChords.length; cIdx++) {
+    const block = sortedChords[cIdx];
+    if (block.startBeat > visibleMaxChordBeat) break;
     const blockRelStart = (block.startBeat - songStartBeat) * beatWidth;
     const blockX = ribbonX + blockRelStart - scrollX;
     const blockW = Math.max(16, block.durationBeats * beatWidth);
@@ -677,10 +859,7 @@ function renderFloatingChordStream(
     }
 
     const chordLabel = block.type === 'silence' ? '🔇' : block.chord || 'C';
-    ctx.font = 'bold 12px "Share Tech Mono", monospace';
     ctx.fillStyle = isActive ? '#ffffff' : isPassed ? '#a395b8' : '#c2b5d4';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
     ctx.fillText(chordLabel, blockX + blockW / 2, pillY + pillH / 2);
   }
 
@@ -698,22 +877,31 @@ function renderFloatingChordStream(
   ctx.restore();
 }
 
-/**
- * Capa 4: Filtro CRT
- */
-function renderCRTOverlay(
-  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-  width: number,
-  height: number
-) {
-  ctx.save();
-
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.16)';
-  for (let y = 0; y < height; y += 4) {
-    ctx.fillRect(0, y, width, 1.5);
+function ensureCrtOverlayCache(width: number, height: number): HTMLCanvasElement | OffscreenCanvas | null {
+  if (crtCacheCanvas && crtCacheW === width && crtCacheH === height) {
+    return crtCacheCanvas;
   }
 
-  const grad = ctx.createRadialGradient(
+  let canvas: HTMLCanvasElement | OffscreenCanvas | null = null;
+  if (typeof OffscreenCanvas !== 'undefined') {
+    canvas = new OffscreenCanvas(width, height);
+  } else if (typeof document !== 'undefined') {
+    const el = document.createElement('canvas');
+    el.width = width;
+    el.height = height;
+    canvas = el;
+  }
+  if (!canvas) return null;
+
+  const cctx = canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+  if (!cctx) return null;
+
+  cctx.fillStyle = 'rgba(0, 0, 0, 0.16)';
+  for (let y = 0; y < height; y += 4) {
+    cctx.fillRect(0, y, width, 1.5);
+  }
+
+  const grad = cctx.createRadialGradient(
     width / 2,
     height / 2,
     width * 0.40,
@@ -724,29 +912,50 @@ function renderCRTOverlay(
   grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
   grad.addColorStop(1, 'rgba(0, 0, 0, 0.60)');
 
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, width, height);
+  cctx.fillStyle = grad;
+  cctx.fillRect(0, 0, width, height);
 
-  ctx.restore();
+  crtCacheCanvas = canvas;
+  crtCacheW = width;
+  crtCacheH = height;
+  return crtCacheCanvas;
 }
 
 /**
- * Helpers de interpolación de color para transiciones analógicas en lienzo
+ * Capa 4: Filtro CRT (blit instantáneo desde offscreen cache)
+ */
+function renderCRTOverlay(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  width: number,
+  height: number
+) {
+  const cached = ensureCrtOverlayCache(width, height);
+  if (cached) {
+    ctx.drawImage(cached, 0, 0);
+  }
+}
+
+/**
+ * Helpers de interpolación de color con caché para transiciones analógicas en lienzo
  */
 function hexToRgb(hex: string): [number, number, number] {
+  const hit = hexRgbCache.get(hex);
+  if (hit) return hit;
+
   const clean = hex.replace('#', '');
-  if (clean.length === 3) {
-    return [
-      parseInt(clean[0] + clean[0], 16),
-      parseInt(clean[1] + clean[1], 16),
-      parseInt(clean[2] + clean[2], 16)
-    ];
-  }
-  return [
-    parseInt(clean.slice(0, 2), 16),
-    parseInt(clean.slice(2, 4), 16),
-    parseInt(clean.slice(4, 6), 16)
-  ];
+  const rgb: [number, number, number] = clean.length === 3
+    ? [
+        parseInt(clean[0] + clean[0], 16),
+        parseInt(clean[1] + clean[1], 16),
+        parseInt(clean[2] + clean[2], 16)
+      ]
+    : [
+        parseInt(clean.slice(0, 2), 16),
+        parseInt(clean.slice(2, 4), 16),
+        parseInt(clean.slice(4, 6), 16)
+      ];
+  hexRgbCache.set(hex, rgb);
+  return rgb;
 }
 
 function interpolateRgb(hexColor: string, targetHex: string, factor: number): string {

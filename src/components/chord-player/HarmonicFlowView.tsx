@@ -15,7 +15,7 @@ import {
 } from '../../core/music';
 import { toneEngine } from '../../audio/toneEngine';
 import { useSongStore } from '../../store/songStore';
-import { getChordRole } from './ChordPalette';
+import { getChordRole } from './chordRoleUtils';
 import { 
   GitFork, 
   Plus, 

@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useSongStore } from '../../store/songStore';
 import { toneEngine } from '../../audio/toneEngine';
+import { liveTelemetryBus } from '../../core/audio/liveTelemetryBus';
 import type { DrumChannel } from '../../utils/typeDefinitions';
 import { Knob } from '../ui/Knob';
 import { DRUM_CATEGORIES, getSamplesByCategory } from '../../constants/drumSamples';
@@ -25,12 +26,24 @@ interface Props {
 // Subcomponente aislado para el LED del medidor de actividad
 const DrumActivityLed: React.FC<{ channelColor: string; activePattern: any[] }> = React.memo(({ channelColor, activePattern }) => {
   const isPlaying = useSongStore(s => s.isPlaying);
-  const playbackStep = useSongStore(s => s.playbackStep);
-  const isPlayingActiveStep = isPlaying && activePattern && activePattern[playbackStep]?.isActive;
+  const ledRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ledRef.current;
+    if (!el) return;
+    if (!isPlaying) {
+      el.classList.remove('lit');
+      return;
+    }
+    return liveTelemetryBus.subscribeDrumStep(({ step }) => {
+      const lit = Boolean(activePattern && step >= 0 && activePattern[step]?.isActive);
+      el.classList.toggle('lit', lit);
+    });
+  }, [isPlaying, activePattern]);
 
   return (
     <div className="drum-activity-meter">
-      <div className={`meter-led ${isPlayingActiveStep ? 'lit' : ''}`} style={{ '--led-color': channelColor } as React.CSSProperties} />
+      <div ref={ledRef} className="meter-led" style={{ '--led-color': channelColor } as React.CSSProperties} />
     </div>
   );
 });
@@ -58,19 +71,40 @@ const DrumStepsRow: React.FC<{
   onStopDrawing: () => void;
 }> = React.memo(({ channelColor, activePattern, onStepMouseDown, onStepMouseEnter, onStopDrawing }) => {
   const isPlaying = useSongStore(s => s.isPlaying);
-  const playbackStep = useSongStore(s => s.playbackStep);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const prevStepRef = useRef<number>(-1);
   const total = activePattern?.length || 16;
   const stepsWidth = 12 + total * 30;
 
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    if (prevStepRef.current >= 0) {
+      container.children[prevStepRef.current]?.classList.remove('playback-head');
+      prevStepRef.current = -1;
+    }
+    if (!isPlaying) return;
+    return liveTelemetryBus.subscribeDrumStep(({ step }) => {
+      if (prevStepRef.current >= 0 && prevStepRef.current !== step) {
+        container.children[prevStepRef.current]?.classList.remove('playback-head');
+      }
+      if (step >= 0 && step < container.children.length) {
+        container.children[step]?.classList.add('playback-head');
+        prevStepRef.current = step;
+      } else {
+        prevStepRef.current = -1;
+      }
+    });
+  }, [isPlaying, activePattern]);
+
   return (
-    <div className="drum-steps" onMouseLeave={onStopDrawing} style={{ width: `${stepsWidth}px`, userSelect: 'none' }}>
+    <div ref={containerRef} className="drum-steps" onMouseLeave={onStopDrawing} style={{ width: `${stepsWidth}px`, userSelect: 'none' }}>
       {activePattern && activePattern.map((step, i) => {
         const isDownbeat = isStepDownbeat(i, total);
-        const isPlayingThisStep = isPlaying && playbackStep === i;
         return (
           <div 
             key={i}
-            className={`drum-step ${step.isActive ? 'active' : ''} ${isDownbeat ? 'downbeat' : ''} ${isPlayingThisStep ? 'playback-head' : ''}`}
+            className={`drum-step ${step.isActive ? 'active' : ''} ${isDownbeat ? 'downbeat' : ''}`}
             style={{ '--switch-color': channelColor } as React.CSSProperties}
             onMouseDown={() => onStepMouseDown(i, step.isActive)}
             onMouseEnter={() => onStepMouseEnter(i, step.isActive)}
@@ -94,19 +128,41 @@ const DrumVelocityRow: React.FC<{
   onStopDrawing: () => void;
 }> = React.memo(({ channelColor, activePattern, onVelocityMouseDown, onVelocityMouseMove, onStopDrawing }) => {
   const isPlaying = useSongStore(s => s.isPlaying);
-  const playbackStep = useSongStore(s => s.playbackStep);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const prevStepRef = useRef<number>(-1);
   const total = activePattern?.length || 16;
   const stepsWidth = 12 + total * 30;
 
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    if (prevStepRef.current >= 0) {
+      container.children[prevStepRef.current]?.classList.remove('playback-head-vel');
+      prevStepRef.current = -1;
+    }
+    if (!isPlaying) return;
+    return liveTelemetryBus.subscribeDrumStep(({ step }) => {
+      if (prevStepRef.current >= 0 && prevStepRef.current !== step) {
+        container.children[prevStepRef.current]?.classList.remove('playback-head-vel');
+      }
+      if (step >= 0 && step < container.children.length) {
+        container.children[step]?.classList.add('playback-head-vel');
+        prevStepRef.current = step;
+      } else {
+        prevStepRef.current = -1;
+      }
+    });
+  }, [isPlaying, activePattern]);
+
   return (
     <div className="drum-velocity-panel">
-      <div className="velocity-editor" onMouseLeave={onStopDrawing} style={{ width: `${stepsWidth}px` }}>
+      <div ref={containerRef} className="velocity-editor" onMouseLeave={onStopDrawing} style={{ width: `${stepsWidth}px` }}>
         {activePattern && activePattern.map((step, i) => {
           const isDownbeat = isStepDownbeat(i, total);
           return (
             <div 
               key={i} 
-              className={`velocity-bar-container ${isDownbeat ? 'downbeat-bg' : ''} ${isPlaying && playbackStep === i ? 'playback-head-vel' : ''}`}
+              className={`velocity-bar-container ${isDownbeat ? 'downbeat-bg' : ''}`}
               onMouseDown={(e) => onVelocityMouseDown(e, i)}
               onMouseMove={(e) => onVelocityMouseMove(e, i)}
               onTouchStart={(e) => onVelocityMouseDown(e, i)}

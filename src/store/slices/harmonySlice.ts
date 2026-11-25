@@ -1,6 +1,6 @@
 import type { SliceCreator, HarmonyState, HarmonyActions } from '../types';
 import type { ChordBlock } from '../../utils/typeDefinitions';
-import { getHarmonicSuggestions, detectKey, noteToMod12 } from '../../core/music';
+import { getHarmonicSuggestions, detectKey, noteToMod12, transposeChordName } from '../../core/music';
 import { loadCustomPatterns, invalidatePatternCache, getDefaultCustomPatterns } from '../../patterns/patternLoader';
 import { generateId } from '../../utils/idGenerator';
 
@@ -69,6 +69,87 @@ export const createHarmonySlice: SliceCreator<HarmonyState & HarmonyActions> = (
       chordBlocks: state.chordBlocks.map(b => b.id === id ? { ...b, ...updates } : b)
         .sort((a, b) => a.startBeat - b.startBeat)
     }));
+    if (get().isAutoKey || get().isAutoSuggestions) get().updateSuggestions();
+  },
+
+  updateChordBlocksBatch: (updates) => {
+    if (!updates || updates.length === 0) return;
+    const updateMap = new Map(updates.map(u => [u.id, u.changes]));
+    set((state) => ({
+      chordBlocks: state.chordBlocks.map(b => {
+        const changes = updateMap.get(b.id);
+        return changes ? { ...b, ...changes } : b;
+      }).sort((a, b) => a.startBeat - b.startBeat)
+    }));
+    if (get().isAutoKey || get().isAutoSuggestions) get().updateSuggestions();
+  },
+
+  addChordBlocksBatch: (blocks) => {
+    if (!blocks || blocks.length === 0) return [];
+    const created: ChordBlock[] = blocks.map(b => ({
+      ...b,
+      id: generateId('cb')
+    }));
+    const newIds = created.map(b => b.id);
+    const newStarts = new Set(created.map(b => b.startBeat));
+
+    set((state) => ({
+      chordBlocks: [
+        ...state.chordBlocks.filter(b => !newStarts.has(b.startBeat)),
+        ...created
+      ].sort((a, b) => a.startBeat - b.startBeat),
+      selectedChordIds: newIds,
+      selectedChordId: newIds[0] || null
+    }));
+
+    if (get().isAutoKey || get().isAutoSuggestions) get().updateSuggestions();
+    return newIds;
+  },
+
+  splitChordBlock: (id, splitBeat) => {
+    const block = get().chordBlocks.find(b => b.id === id);
+    if (!block) return;
+    const endBeat = block.startBeat + block.durationBeats;
+    if (splitBeat <= block.startBeat + 0.05 || splitBeat >= endBeat - 0.05) return;
+
+    const firstDur = splitBeat - block.startBeat;
+    const secondDur = endBeat - splitBeat;
+    const secondBlock: ChordBlock = {
+      ...block,
+      id: generateId('cb'),
+      startBeat: splitBeat,
+      durationBeats: secondDur
+    };
+
+    set((state) => ({
+      chordBlocks: [
+        ...state.chordBlocks.map(b => b.id === id ? { ...b, durationBeats: firstDur } : b),
+        secondBlock
+      ].sort((a, b) => a.startBeat - b.startBeat),
+      selectedChordId: secondBlock.id,
+      selectedChordIds: [id, secondBlock.id]
+    }));
+
+    if (get().isAutoKey || get().isAutoSuggestions) get().updateSuggestions();
+  },
+
+  transposeChordBlocks: (ids, semitones) => {
+    if (!ids || ids.length === 0 || semitones === 0) return;
+    const idSet = new Set(ids);
+    set((state) => ({
+      chordBlocks: state.chordBlocks.map(b =>
+        idSet.has(b.id) ? { ...b, chord: transposeChordName(b.chord, semitones) } : b
+      )
+    }));
+    if (get().isAutoKey || get().isAutoSuggestions) get().updateSuggestions();
+  },
+
+  clearChordBlocks: () => {
+    set({
+      chordBlocks: [],
+      selectedChordId: null,
+      selectedChordIds: []
+    });
     if (get().isAutoKey || get().isAutoSuggestions) get().updateSuggestions();
   },
 
