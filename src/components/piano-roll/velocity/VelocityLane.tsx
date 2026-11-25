@@ -29,6 +29,28 @@ interface VelocityLaneProps {
 const PAD_TOP = 12;
 const PAD_BOTTOM = 8;
 
+const sortedVelNotesCache = new WeakMap<MelodyNote[], MelodyNote[]>();
+
+function getSortedVelNotes(notes: MelodyNote[]): MelodyNote[] {
+  let cached = sortedVelNotesCache.get(notes);
+  if (!cached) {
+    cached = notes.slice().sort((a, b) => a.startBeat - b.startBeat);
+    sortedVelNotesCache.set(notes, cached);
+  }
+  return cached;
+}
+
+function velLowerBoundBeat(notes: MelodyNote[], beat: number): number {
+  let lo = 0;
+  let hi = notes.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (notes[mid].startBeat < beat) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 function getVelocityColor(vel: number, isHovered: boolean): string {
   if (isHovered) return '#ffffff';
   if (vel >= 0.88) return '#ff7a52';
@@ -184,15 +206,38 @@ export const VelocityLane: React.FC<VelocityLaneProps> = React.memo(({
     const hasSelection = selectedSet.size > 0;
     const hoveredId = hoveredNoteIdRef.current;
 
+    // Búsqueda binaria O(log N) para soportar pistas densas de 20,000+ notas sin lag al hacer scroll/hover
+    const sortedNotes = getSortedVelNotes(notes);
+    const minVisibleBeat = (scrollLeft - 20) / bw;
+    const maxVisibleBeat = (scrollLeft + viewW + 20) / bw;
+    const hasOverrides = Boolean(overrides && overrides.size > 0);
+    const visitedIds = hasOverrides ? new Set<string>() : null;
+
     const visibleNotes: Array<{ note: MelodyNote; x: number; vel: number; editable: boolean }> = [];
-    for (const rawNote of notes) {
+    const pushIfVisible = (rawNote: MelodyNote) => {
       const ov = overrides?.get(rawNote.id);
       const note = ov ? { ...rawNote, ...ov } : rawNote;
       const x = note.startBeat * bw + 5;
-      if (x < scrollLeft - 14 || x > scrollLeft + viewW + 14) continue;
+      if (x < scrollLeft - 14 || x > scrollLeft + viewW + 14) return;
       const vel = clampVel(note.velocity ?? 0.8);
       const editable = !hasSelection || selectedSet.has(note.id);
       visibleNotes.push({ note, x, vel, editable });
+    };
+
+    let idx = velLowerBoundBeat(sortedNotes, minVisibleBeat);
+    for (; idx < sortedNotes.length; idx++) {
+      const rawNote = sortedNotes[idx];
+      if (rawNote.startBeat > maxVisibleBeat) break;
+      if (visitedIds) visitedIds.add(rawNote.id);
+      pushIfVisible(rawNote);
+    }
+
+    if (hasOverrides && overrides && visitedIds) {
+      overrides.forEach((_ov, id) => {
+        if (visitedIds.has(id)) return;
+        const base = notes.find((n) => n.id === id);
+        if (base) pushIfVisible(base);
+      });
     }
 
     // 1. Dibujar primero notas atenuadas (cuando hay selección activa)

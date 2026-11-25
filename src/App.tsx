@@ -119,13 +119,32 @@ export default function App() {
 
       clearTimeout(timeoutId);
       timeoutId = window.setTimeout(() => {
-        try {
-          const currentState = useSongStore.getState();
-          const sessionJson = exportSessionToJson(currentState);
-          localStorage.setItem('phosphor_session', sessionJson);
-          currentState.setLastSavedAt(Date.now());
-        } catch (e) {
-          console.warn("Error guardando sesión en localStorage", e);
+        const persistSnapshot = () => {
+          try {
+            const currentState = useSongStore.getState();
+            const totalNotes = (currentState.tracks || []).reduce(
+              (acc, t) => acc + (t.notes?.length || 0),
+              0
+            );
+            // Evitar congelar el hilo principal o exceder la cuota de 5 MB de localStorage en Black MIDIs masivos
+            if (totalNotes > 8000) {
+              return;
+            }
+            const sessionJson = exportSessionToJson(currentState);
+            if (sessionJson.length > 3_500_000) {
+              return;
+            }
+            localStorage.setItem('phosphor_session', sessionJson);
+            currentState.setLastSavedAt(Date.now());
+          } catch (e) {
+            console.warn("Error guardando sesión en localStorage", e);
+          }
+        };
+
+        if (typeof (window as any).requestIdleCallback === 'function') {
+          (window as any).requestIdleCallback(persistSnapshot, { timeout: 1500 });
+        } else {
+          persistSnapshot();
         }
       }, 1000);
     });

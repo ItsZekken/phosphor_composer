@@ -177,4 +177,81 @@ console.log('\n--- 2. Multi-Track Synth + Explicit Chords + Tempo Change + GM Dr
   assert(kickStep0.isActive && kickStep0.velocity >= 0.9, `Drum step velocity preserved (got ${kickStep0.velocity})`);
 }
 
+console.log('\n--- 3. Rush E Boss-Level Stress Test (15,000+ notes, 70->640 BPM, A0..C8, Black-MIDI dupes) ---');
+{
+  const midi = new Midi();
+  const ppq = midi.header.ppq; // 480
+
+  // Continuous accelerando from 70 BPM up to 640 BPM across 120 tempo changes
+  const tempos: Array<{ ticks: number; bpm: number }> = [];
+  for (let i = 0; i < 120; i++) {
+    tempos.push({
+      ticks: i * ppq * 2,
+      bpm: Math.round(70 + (570 * i) / 119)
+    });
+  }
+  midi.header.tempos = tempos;
+  midi.header.update();
+
+  const rh = midi.addTrack();
+  rh.name = 'Rush E Right Hand';
+  rh.channel = 0;
+  rh.instrument.number = 0;
+
+  const lh = midi.addTrack();
+  lh.name = 'Rush E Left Hand';
+  lh.channel = 1;
+  lh.instrument.number = 0;
+
+  // 240 beats of E-minor Rush E madness:
+  // - 1/32 & 1/64 machine-gun repeated E5/E6/E7
+  // - 16-note forearm clusters from A0 (21) to C8 (108)
+  // - Stacked duplicate Black-MIDI notes at identical ticks to verify deduplication
+  for (let b = 0; b < 240; b++) {
+    const baseTick = b * ppq;
+    // Left hand octave oom-pah (A0..E3)
+    const bassRoot = b % 8 < 4 ? 28 : b % 8 < 6 ? 21 : 23; // E1, A0, B0
+    lh.addNote({ midi: bassRoot, ticks: baseTick, durationTicks: Math.round(ppq * 0.5), velocity: 0.95 });
+    lh.addNote({ midi: bassRoot + 12, ticks: baseTick, durationTicks: Math.round(ppq * 0.5), velocity: 0.9 });
+    // Intentional Black-MIDI duplicate at exact same tick
+    lh.addNote({ midi: bassRoot, ticks: baseTick, durationTicks: Math.round(ppq * 0.5), velocity: 0.6 });
+
+    // Right hand rapid 32nd-note repeated E5/E6/E7/C8 runs + dense chord slams
+    const subdivisions = b > 160 ? 16 : 8;
+    const stepTicks = Math.max(15, Math.floor(ppq / subdivisions));
+    for (let s = 0; s < subdivisions; s++) {
+      const t = baseTick + s * stepTicks;
+      const pitch = s % 4 === 0 ? 76 : s % 4 === 1 ? 88 : s % 4 === 2 ? 100 : 108; // E5, E6, E7, C8
+      rh.addNote({ midi: pitch, ticks: t, durationTicks: Math.max(10, stepTicks - 2), velocity: 0.7 + (s % 4) * 0.08 });
+      // Every 4 beats, drop a huge 12-note chord slam + duplicates
+      if (b % 4 === 0 && s === 0) {
+        for (const p of [40, 47, 52, 55, 59, 64, 67, 71, 76, 83, 88, 108]) {
+          rh.addNote({ midi: p, ticks: t, durationTicks: ppq, velocity: 1.0 });
+        }
+      }
+    }
+  }
+
+  const rawBytes = midi.toArray();
+  const t0 = performance.now();
+  const res = importMidiToSession(toArrayBuffer(rawBytes), []);
+  const elapsedMs = performance.now() - t0;
+
+  assert(res.success, `Rush E stress MIDI imported cleanly in ${elapsedMs.toFixed(1)} ms`);
+  assert(elapsedMs < 1500, `Import performance under 1500 ms (got ${elapsedMs.toFixed(1)} ms)`);
+  assert(res.bpm === 70, `Initial BPM preserved at 70 (got ${res.bpm})`);
+  const maxTempoBpm = Math.max(res.bpm, ...(res.tempoMarkers || []).map((tm) => tm.bpm));
+  assert(maxTempoBpm >= 600, `High-BPM accelerando preserved > 600 BPM (max=${maxTempoBpm}, markers=${res.tempoMarkers?.length})`);
+  const allNotes = (res.tracks || []).flatMap((t) => t.notes);
+  const minMidi = Math.min(...allNotes.map((n) => n.midi));
+  const maxMidi = Math.max(...allNotes.map((n) => n.midi));
+  assert(minMidi === 21 && maxMidi === 108, `Full 88-key range A0(21)..C8(108) preserved (got ${minMidi}..${maxMidi})`);
+  const hasUltraShort = allNotes.some((n) => n.durationBeats < 0.06);
+  assert(hasUltraShort, 'Ultra-fast 1/32 & 1/64 staccato durations preserved (< 0.06 beats)');
+  // Verify exact same-tick duplicates were deduplicated
+  const lhNotes = res.tracks![1].notes;
+  const beat0BassNotes = lhNotes.filter((n) => n.startBeat === 0 && n.midi === 28);
+  assert(beat0BassNotes.length === 1 && beat0BassNotes[0].velocity >= 0.94, `Black-MIDI duplicate merged keeping max velocity (${beat0BassNotes[0]?.velocity})`);
+}
+
 console.log('\n🎉 ALL SMART MIDI IMPORT TESTS PASSED WITH 100% SUCCESS!');

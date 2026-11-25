@@ -22,7 +22,8 @@ export const PIANO_URLS: Record<string, string> = {
 
 export const PIANO_BASE_URL = '/piano/';
 
-const MAX_PIANO_VOICES = 32;
+const MAX_PIANO_VOICES = 96;
+const MAX_SAME_PITCH_VOICES = 2;
 
 let sharedPianoBuffers: Tone.ToneAudioBuffers | null = null;
 let sharedPianoPromise: Promise<Tone.ToneAudioBuffers | null> | null = null;
@@ -81,7 +82,10 @@ export function getSharedPianoBuffers(): Tone.ToneAudioBuffers | null {
 export class PianoSampler {
   private sampler: Tone.Sampler | null = null;
   private nativeSamples: Array<{ midi: number; buffer: AudioBuffer }> = [];
+  private nearestSampleByMidi: Array<{ midi: number; buffer: AudioBuffer } | null> = new Array(128).fill(null);
   private nativeVoices: NativePianoVoice[] = [];
+  private busInput: GainNode | null = null;
+  private busCompressor: DynamicsCompressorNode | null = null;
   private useNativePool = false;
   private voiceAgeCounter = 0;
 
@@ -93,6 +97,46 @@ export class PianoSampler {
 
   constructor(targetNode: Tone.InputNode) {
     this.targetNode = targetNode;
+  }
+
+  private ensureNativeBus(audioCtx: AudioContext): GainNode {
+    if (this.busInput) return this.busInput;
+    const bus = audioCtx.createGain();
+    bus.gain.value = 1.0;
+
+    if (typeof audioCtx.createDynamicsCompressor === 'function') {
+      const comp = audioCtx.createDynamicsCompressor();
+      comp.threshold.value = -5;
+      comp.knee.value = 12;
+      comp.ratio.value = 8;
+      comp.attack.value = 0.002;
+      comp.release.value = 0.08;
+      bus.connect(comp);
+      Tone.connect(comp, this.targetNode as any);
+      this.busCompressor = comp;
+    } else {
+      Tone.connect(bus, this.targetNode as any);
+    }
+
+    this.busInput = bus;
+    return bus;
+  }
+
+  private buildNearestSampleLookup(samples: Array<{ midi: number; buffer: AudioBuffer }>): void {
+    this.nearestSampleByMidi.fill(null);
+    if (samples.length === 0) return;
+    for (let midi = 0; midi < 128; midi++) {
+      let best = samples[0];
+      let minDist = Math.abs(best.midi - midi);
+      for (let i = 1; i < samples.length; i++) {
+        const dist = Math.abs(samples[i].midi - midi);
+        if (dist < minDist) {
+          minDist = dist;
+          best = samples[i];
+        }
+      }
+      this.nearestSampleByMidi[midi] = best;
+    }
   }
 
   private indexNativeSamples(buffers: Tone.ToneAudioBuffers): Array<{ midi: number; buffer: AudioBuffer }> {
@@ -132,6 +176,8 @@ export class PianoSampler {
             typeof audioCtx.createGain === 'function'
           ) {
             this.nativeSamples = samples;
+            this.buildNearestSampleLookup(samples);
+            this.ensureNativeBus(audioCtx);
             this.useNativePool = true;
             this.loaded = true;
             this.isLoading = false;
@@ -189,17 +235,41 @@ export class PianoSampler {
   }
 
   private findNearestSample(midi: number): { midi: number; buffer: AudioBuffer } {
-    const samples = this.nativeSamples;
-    let best = samples[0];
-    let minDist = Math.abs(best.midi - midi);
-    for (let i = 1; i < samples.length; i++) {
-      const dist = Math.abs(samples[i].midi - midi);
-      if (dist < minDist) {
-        minDist = dist;
-        best = samples[i];
+    const clamped = Math.max(0, Math.min(127, midi | 0));
+    const cached = this.nearestSampleByMidi[clamped];
+    if (cached) return cached;
+    return this.nativeSamples[0];
+  }
+
+  private fadeAndDropVoice(victim: NativePianoVoice, audioCtx: AudioContext, atTime?: number): void {
+    try {
+      const t = atTime !== undefined ? Math.max(audioCtx.currentTime, atTime) : audioCtx.currentTime;
+      victim.gain.gain.cancelScheduledValues(t);
+      victim.gain.gain.setTargetAtTime(0, t, 0.004);
+      victim.src.stop(t + 0.022);
+    } catch (_) {}
+  }
+
+  private enforceSamePitchCap(midi: number, audioCtx: AudioContext, startAt: number): void {
+    let sameCount = 0;
+    let oldestIdx = -1;
+    let oldestAge = Infinity;
+    for (let i = 0; i < this.nativeVoices.length; i++) {
+      const v = this.nativeVoices[i];
+      if (v.midi === midi) {
+        sameCount++;
+        if (v.age < oldestAge) {
+          oldestAge = v.age;
+          oldestIdx = i;
+        }
       }
     }
-    return best;
+    if (sameCount >= MAX_SAME_PITCH_VOICES && oldestIdx !== -1) {
+      const victim = this.nativeVoices.splice(oldestIdx, 1)[0];
+      if (victim) {
+        this.fadeAndDropVoice(victim, audioCtx, startAt);
+      }
+    }
   }
 
   private stealOldestVoiceIfNeeded(audioCtx: AudioContext): void {
@@ -217,12 +287,7 @@ export class PianoSampler {
       }
       const victim = this.nativeVoices.splice(victimIdx, 1)[0];
       if (victim) {
-        try {
-          const now = audioCtx.currentTime;
-          victim.gain.gain.cancelScheduledValues(now);
-          victim.gain.gain.setTargetAtTime(0, now, 0.004);
-          victim.src.stop(now + 0.025);
-        } catch (_) {}
+        this.fadeAndDropVoice(victim, audioCtx);
       }
     }
   }
@@ -235,12 +300,18 @@ export class PianoSampler {
     const nearest = this.findNearestSample(midi);
     const playbackRate = Math.pow(2, (midi - nearest.midi) / 12);
 
-    this.stealOldestVoiceIfNeeded(audioCtx);
-
     const now = audioCtx.currentTime;
     const startAt = time !== undefined ? Math.max(now, time) : now;
+
+    // Limitar voces duplicadas sobre exactamente la misma tecla (evita embarre y saturación en ráfagas tipo Rush E)
+    this.enforceSamePitchCap(midi, audioCtx, startAt);
+    this.stealOldestVoiceIfNeeded(audioCtx);
+
+    const activeCount = this.nativeVoices.length;
+    const densityHeadroom = activeCount > 8 ? Math.max(0.32, 1 / Math.sqrt(activeCount / 8)) : 1.0;
+
     const clampedVel = Math.max(0.05, Math.min(1.0, velocity));
-    const targetGain = Math.pow(clampedVel, 1.4);
+    const targetGain = Math.pow(clampedVel, 1.4) * densityHeadroom;
 
     const src = audioCtx.createBufferSource();
     src.buffer = nearest.buffer;
@@ -250,8 +321,10 @@ export class PianoSampler {
     gainNode.gain.setValueAtTime(0.0001, startAt);
     gainNode.gain.linearRampToValueAtTime(targetGain, startAt + 0.003);
 
+    // Conexión directa nativa al bus persistente (cero Tone.connect() por nota)
+    const bus = this.ensureNativeBus(audioCtx);
     src.connect(gainNode);
-    Tone.connect(gainNode, this.targetNode as any);
+    gainNode.connect(bus);
 
     const voice: NativePianoVoice = {
       note,
@@ -269,9 +342,12 @@ export class PianoSampler {
       if (this.isPedalActive) {
         voice.sustainedByPedal = true;
       } else {
-        const relAt = startAt + Math.max(0.03, durationSec);
-        gainNode.gain.setTargetAtTime(0, relAt, 0.065);
-        src.stop(relAt + 0.45);
+        const denseLoad = activeCount > 40;
+        const releaseTau = denseLoad ? 0.035 : 0.065;
+        const tailStop = denseLoad ? 0.18 : 0.42;
+        const relAt = startAt + Math.max(0.02, durationSec);
+        gainNode.gain.setTargetAtTime(0, relAt, releaseTau);
+        src.stop(relAt + tailStop);
         voice.released = true;
       }
     }
@@ -414,7 +490,20 @@ export class PianoSampler {
   public dispose() {
     this.stopAll();
     this.nativeSamples = [];
+    this.nearestSampleByMidi.fill(null);
     this.useNativePool = false;
+    if (this.busInput) {
+      try {
+        this.busInput.disconnect();
+      } catch (_) {}
+      this.busInput = null;
+    }
+    if (this.busCompressor) {
+      try {
+        this.busCompressor.disconnect();
+      } catch (_) {}
+      this.busCompressor = null;
+    }
     if (this.sampler) {
       try {
         this.sampler.dispose();

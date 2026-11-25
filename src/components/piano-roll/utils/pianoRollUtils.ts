@@ -8,8 +8,8 @@ import type { ChordBlock, MelodyNote } from '../../../utils/typeDefinitions';
 import { NOTE_CLASSES, parseChord, getChordNotes, noteToMod12 } from '../../../core/music';
 import { generateId } from '../../../utils/idGenerator';
 
-export const MIN_MIDI = 24; // C1
-export const MAX_MIDI = 96; // C7
+export const MIN_MIDI = 21; // A0 (piano de concierto 88 teclas)
+export const MAX_MIDI = 108; // C8
 export const NOTE_COUNT = MAX_MIDI - MIN_MIDI + 1;
 
 export interface LassoRect {

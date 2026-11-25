@@ -48,8 +48,8 @@ export const DEFAULT_VIEWPORT = { scrollLeft: 0, scrollTop: 600, beatWidth: 40, 
 export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; warnings: string[] } {
   const warnings: string[] = [];
 
-  // 1. Validar y normalizar Transporte
-  const bpm = typeof raw.bpm === 'number' && raw.bpm > 20 && raw.bpm < 400 ? raw.bpm : 120;
+  // 1. Validar y normalizar Transporte (soporta acelerandos extremos hasta 999 BPM)
+  const bpm = typeof raw.bpm === 'number' && raw.bpm >= 15 && raw.bpm <= 999 ? raw.bpm : 120;
   const rawKey = typeof raw.key === 'string' ? raw.key : 'C';
   const key: NoteClass = normalizePitchClass(rawKey);
   const scale: ScaleType = (['major', 'minor', 'dorian', 'mixolydian', 'lydian', 'phrygian', 'locrian'].includes(raw.scale as any))
@@ -66,7 +66,7 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
         .map((tm: any, index: number) => ({
           id: tm.id || `tm_${Date.now()}_${index}`,
           beat: typeof tm.beat === 'number' ? Math.max(0, tm.beat) : 0,
-          bpm: Math.max(30, Math.min(360, tm.bpm))
+          bpm: Math.max(15, Math.min(999, tm.bpm))
         }))
         .sort((a: TempoMarker, b: TempoMarker) => a.beat - b.beat)
     : [];

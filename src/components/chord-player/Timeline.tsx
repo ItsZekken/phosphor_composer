@@ -770,11 +770,13 @@ export const Timeline: React.FC = () => {
     window.addEventListener('mouseup', handleLassoUp);
   };
 
-  // Dibujar cuadrícula
+  // Dibujar cuadrícula solo dentro del viewport visible (evita miles de nodos DOM en obras largas)
+  const visibleStartBeat = Math.max(0, Math.floor((scrollLeft / BEAT_WIDTH - 4) / snapStep) * snapStep);
+  const visibleEndBeat = Math.min(TOTAL_BEATS, Math.ceil(((scrollLeft + viewportWidth) / BEAT_WIDTH + 4) / snapStep) * snapStep);
   const gridLines = [];
-  for (let beat = 0; beat < TOTAL_BEATS; beat += snapStep) {
-    const isMeasure = beat % beatsPerMeasure === 0;
-    const isBeat = beat % 1 === 0;
+  for (let beat = visibleStartBeat; beat < visibleEndBeat; beat = Math.round((beat + snapStep) * 1000) / 1000) {
+    const isMeasure = Math.abs(beat % beatsPerMeasure) < 0.001 || Math.abs((beat % beatsPerMeasure) - beatsPerMeasure) < 0.001;
+    const isBeat = Math.abs(beat % 1) < 0.001 || Math.abs((beat % 1) - 1) < 0.001;
     gridLines.push(
       <div
         key={`grid-${beat}`}
@@ -803,6 +805,21 @@ export const Timeline: React.FC = () => {
       </div>
     );
   }
+
+  // Podar marcadores de tempo al viewport visible (y espaciar acelerandos densos < 44px)
+  const visibleTempoMarkers = useMemo(() => {
+    const result: typeof tempoMarkers = [];
+    let lastX = -Infinity;
+    for (let i = 0; i < tempoMarkers.length; i++) {
+      const tm = tempoMarkers[i];
+      if (tm.beat < visibleStartBeat - 4 || tm.beat > visibleEndBeat + 4) continue;
+      const x = tm.beat * BEAT_WIDTH;
+      if (x - lastX < 44 && activeDrag?.id !== tm.id) continue;
+      result.push(tm);
+      lastX = x;
+    }
+    return result;
+  }, [tempoMarkers, visibleStartBeat, visibleEndBeat, BEAT_WIDTH, activeDrag?.id]);
 
   // Posición del popover flotante
   const activePopoverBlock = chordBlocks.find(b => b.id === popoverChordId) || chordBlocks.find(b => b.id === selectedChordId);
@@ -1046,11 +1063,11 @@ export const Timeline: React.FC = () => {
             }
           }}
         >
-          {/* Pista de Marcadores de Estilo y Tempo */}
+          {/* Pista de Marcadores de Estilo y Tempo (podados al viewport visible) */}
           <TimelineMarkerTrack
             styleMarkers={styleMarkers}
             styleGroups={styleGroups}
-            tempoMarkers={tempoMarkers}
+            tempoMarkers={visibleTempoMarkers}
             beatWidth={BEAT_WIDTH}
             snapStep={snapStep}
             activeDrag={activeDrag}
@@ -1065,8 +1082,8 @@ export const Timeline: React.FC = () => {
           {/* Líneas de cuadrícula */}
           {gridLines}
 
-          {/* Líneas guía verticales de cambios de tempo */}
-          {tempoMarkers.map((tm) => (
+          {/* Líneas guía verticales de cambios de tempo visibles */}
+          {visibleTempoMarkers.map((tm) => (
             <div
               key={`tm-guide-${tm.id}`}
               style={{

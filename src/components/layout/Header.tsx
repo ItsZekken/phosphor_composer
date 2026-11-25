@@ -237,7 +237,7 @@ export const Header = () => {
     (raw: string) => {
       const parsed = parseInt(raw, 10);
       if (!isNaN(parsed)) {
-        const clamped = Math.max(40, Math.min(300, parsed));
+        const clamped = Math.max(15, Math.min(999, parsed));
         setBpm(clamped);
         setBpmInput(String(clamped));
       } else {
@@ -263,7 +263,7 @@ export const Header = () => {
         target.blur();
       }
       const sensitivity = ev.shiftKey ? 0.15 : 0.6;
-      const nextBpm = Math.max(40, Math.min(300, Math.round(state.startBpm + dy * sensitivity)));
+      const nextBpm = Math.max(15, Math.min(999, Math.round(state.startBpm + dy * sensitivity)));
       setBpmInput(String(nextBpm));
       setBpm(nextBpm);
     };

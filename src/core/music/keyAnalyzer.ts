@@ -55,11 +55,19 @@ export function detectKey(chordNames: string[]): { key: NoteClass; scale: ScaleT
   const validChords = chordNames.filter(c => !!c && c.trim().length > 0);
   if (validChords.length === 0) return null;
 
-  // Extraer todas las clases de pitch presentes
+  // Pre-parsear clases de pitch por acorde UNA sola vez (72x más rápido en canciones largas)
+  const chordPcsList: number[][] = [];
   const usedPitchClasses = new Set<number>();
-  validChords.forEach(chord => {
-    getChordPitchClasses(chord).forEach(pc => usedPitchClasses.add(pc));
-  });
+  for (let i = 0; i < validChords.length; i++) {
+    const pcs = getChordPitchClasses(validChords[i]);
+    chordPcsList.push(pcs);
+    for (let j = 0; j < pcs.length; j++) {
+      usedPitchClasses.add(pcs[j]);
+    }
+  }
+
+  const firstParsed = parseChord(validChords[0]);
+  const lastParsed = parseChord(validChords[validChords.length - 1]);
 
   const candidates: KeyCandidate[] = [];
   const scalesToEvaluate: ScaleType[] = ['major', 'minor', 'dorian', 'mixolydian', 'lydian', 'phrygian'];
@@ -76,17 +84,23 @@ export function detectKey(chordNames: string[]): { key: NoteClass; scale: ScaleT
 
       // Cuántos acordes encajan completamente
       let matchedChords = 0;
-      validChords.forEach(chord => {
-        const chordPCs = getChordPitchClasses(chord);
-        const allFit = chordPCs.length > 0 && chordPCs.every(pc => scalePCs.has(pc));
+      for (let i = 0; i < chordPcsList.length; i++) {
+        const chordPCs = chordPcsList[i];
+        if (chordPCs.length === 0) continue;
+        let allFit = true;
+        for (let j = 0; j < chordPCs.length; j++) {
+          if (!scalePCs.has(chordPCs[j])) {
+            allFit = false;
+            break;
+          }
+        }
         if (allFit) matchedChords++;
-      });
+      }
 
       const noteScore = usedPitchClasses.size > 0 ? matchedNotes / usedPitchClasses.size : 0;
       const chordScore = validChords.length > 0 ? matchedChords / validChords.length : 0;
 
       // El primer acorde otorga una fuerte pista de tónica (considerando su modalidad mayor/menor)
-      const firstParsed = parseChord(validChords[0]);
       let tonicBonus = 0;
       if (firstParsed && firstParsed.root === key) {
         const isFirstMinor = firstParsed.quality === 'minor' || firstParsed.quality === 'minor7';
@@ -99,7 +113,6 @@ export function detectKey(chordNames: string[]): { key: NoteClass; scale: ScaleT
       }
 
       // El último acorde también sugiere resolución cadencial
-      const lastParsed = parseChord(validChords[validChords.length - 1]);
       let cadenceBonus = 0;
       if (lastParsed && lastParsed.root === key) {
         const isLastMinor = lastParsed.quality === 'minor' || lastParsed.quality === 'minor7';

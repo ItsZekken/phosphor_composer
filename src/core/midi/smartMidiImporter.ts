@@ -172,12 +172,36 @@ function extractTrackNotes(track: any, ppq: number, fallbackBpm: number): Intern
     return {
       midi: Math.max(0, Math.min(127, Math.round(n.midi ?? 60))),
       startBeat: Math.max(0, startBeat),
-      durationBeats: Math.max(0.0625, roundBeat(durBeatRaw)),
+      durationBeats: Math.max(0.0156, roundBeat(durBeatRaw)),
       velocity: clampVelocity(n.velocity)
     };
   });
 
   notes.sort((a, b) => a.startBeat - b.startBeat || a.midi - b.midi);
+
+  // Deduplicar notas idénticas apiladas en exactamente el mismo tick y altura (muy común en Rush E / Black MIDI)
+  const deduped: InternalNote[] = [];
+  for (let i = 0; i < notes.length; i++) {
+    const cur = notes[i];
+    let merged = false;
+    for (let j = deduped.length - 1; j >= 0; j--) {
+      const prev = deduped[j];
+      if (cur.startBeat - prev.startBeat >= 0.008) break;
+      if (prev.midi === cur.midi) {
+        if (cur.velocity > prev.velocity) prev.velocity = cur.velocity;
+        if (cur.durationBeats > prev.durationBeats) prev.durationBeats = cur.durationBeats;
+        merged = true;
+        break;
+      }
+    }
+    if (!merged) {
+      deduped.push(cur);
+    }
+  }
+  notes.length = 0;
+  for (let i = 0; i < deduped.length; i++) {
+    notes.push(deduped[i]);
+  }
 
   // Soporte de pedal sustain (CC64) si la pista lo usa
   const cc64: Array<{ ticks?: number; time?: number; value: number }> | undefined =
@@ -546,23 +570,37 @@ function analyzeHarmonyFromNotes(
   }
   if (maxBeat <= 0) return [];
 
-  // Ventana de 1 beat (o 1.5 en 6/8) para capturar tanto arpegios de tresillos como cambios por tiempo
+  // Ventana de 1 beat (o 1.5 en 6/8) con barrido O(N) de dos punteros (soporta 50,000+ notas tipo Rush E en <5ms)
   const stepBeats = beatsPerMeasure === 6 ? 1.5 : 1;
   const totalSteps = Math.ceil(maxBeat / stepBeats);
   const rawSteps: Array<{ beat: number; chord: string; inversion: number }> = [];
 
+  // Calcular prefijo de máximo fin de nota para poder avanzar scanStart en O(1) amortizado sin perder notas largas
+  const prefixMaxEnd = new Float64Array(notes.length);
+  let runningMaxEnd = 0;
+  for (let i = 0; i < notes.length; i++) {
+    const end = notes[i].startBeat + notes[i].durationBeats;
+    if (end > runningMaxEnd) runningMaxEnd = end;
+    prefixMaxEnd[i] = runningMaxEnd;
+  }
+
   let prevChord: string | null = null;
+  let scanStart = 0;
 
   for (let s = 0; s < totalSteps; s++) {
     const wStart = s * stepBeats;
     const wEnd = wStart + stepBeats;
+
+    while (scanStart < notes.length && prefixMaxEnd[scanStart] <= wStart + 0.005) {
+      scanStart++;
+    }
 
     const pcWeights = new Float64Array(12);
     let bassMidi: number | null = null;
     let lowestSustainedMidi: number | null = null;
     let activeCount = 0;
 
-    for (let i = 0; i < notes.length; i++) {
+    for (let i = scanStart; i < notes.length; i++) {
       const n = notes[i];
       if (n.startBeat >= wEnd - 0.005) break;
       const nEnd = n.startBeat + n.durationBeats;
@@ -596,7 +634,7 @@ function analyzeHarmonyFromNotes(
     }
     if (distinctPCs < 2) {
       const extEnd = Math.min(maxBeat, wStart + stepBeats * 2);
-      for (let i = 0; i < notes.length; i++) {
+      for (let i = scanStart; i < notes.length; i++) {
         const n = notes[i];
         if (n.startBeat >= extEnd - 0.005) break;
         const nEnd = n.startBeat + n.durationBeats;
@@ -993,7 +1031,7 @@ export function importMidiSmart(
   const midi = new Midi(midiData);
   const ppq = midi.header.ppq || 480;
   const rawFirstBpm = midi.header.tempos.length > 0 ? Math.round(midi.header.tempos[0].bpm) : 120;
-  const bpm = Math.max(30, Math.min(360, rawFirstBpm || 120));
+  const bpm = Math.max(15, Math.min(999, rawFirstBpm || 120));
 
   // 1. Restauración íntegra si el archivo trae metadatos incrustados de proyecto Phosphor
   if (midi.header.meta && midi.header.meta.length > 0) {
@@ -1052,9 +1090,9 @@ export function importMidiSmart(
       .filter((t: any) => typeof t.ticks === 'number' && t.ticks > 0)
       .forEach((t: any, idx: number) => {
         const tmBeat = roundBeat(t.ticks / ppq);
-        const tmBpm = Math.max(30, Math.min(360, Math.round(t.bpm)));
+        const tmBpm = Math.max(15, Math.min(999, Math.round(t.bpm)));
         if (tmBpm === lastBpm) return;
-        if (tmBeat - lastBeat < 0.05 && tempoMarkers.length > 0) {
+        if (tmBeat - lastBeat < 0.02 && tempoMarkers.length > 0) {
           tempoMarkers[tempoMarkers.length - 1].bpm = tmBpm;
         } else {
           tempoMarkers.push({ id: `tm_midi_${idx}`, beat: tmBeat, bpm: tmBpm });
@@ -1218,7 +1256,7 @@ export function importMidiSmart(
       synthSettings: resolved.synthSettings
     };
 
-    const centeredScrollTop = Math.max(0, Math.min(1100, (96 - t.medianMidi - 8) * 20));
+    const centeredScrollTop = Math.max(0, Math.min(1450, (108 - t.medianMidi - 8) * 20));
 
     return {
       id: idx === 0 ? 'track_melody_1' : `track_midi_${idx + 1}`,

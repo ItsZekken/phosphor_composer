@@ -27,7 +27,7 @@ interface ScheduledVisualNote {
 type ActiveNotesListener = (snapshot: ActiveNotesSnapshot) => void;
 type DrumStepListener = (snapshot: DrumStepSnapshot) => void;
 
-const MAX_SCHEDULED_NOTES = 256;
+const MAX_SCHEDULED_NOTES = 384;
 
 class LiveTelemetryBus {
   private scheduledNotes: ScheduledVisualNote[] = [];
@@ -64,8 +64,24 @@ class LiveTelemetryBus {
     const safeDur = Math.max(0.035, Math.min(8.0, Number.isFinite(durationSec) ? durationSec : 0.1));
     const endTimeSec = startTimeSec + safeDur;
 
+    // Coalescer re-disparos ultra-rápidos sobre exactamente la misma tecla (< 25 ms) en tormentas tipo Rush E
+    for (let i = this.scheduledNotes.length - 1; i >= Math.max(0, this.scheduledNotes.length - 48); i--) {
+      const existing = this.scheduledNotes[i];
+      if (
+        existing.note === note &&
+        existing.kind === kind &&
+        Math.abs(existing.startTimeSec - startTimeSec) < 0.025
+      ) {
+        if (endTimeSec > existing.endTimeSec) {
+          existing.endTimeSec = endTimeSec;
+        }
+        this.ensureRafRunning();
+        return;
+      }
+    }
+
     if (this.scheduledNotes.length >= MAX_SCHEDULED_NOTES) {
-      // Descartar notas expiradas o la más antigua para mantener el buffer acotado
+      // Descartar notas expiradas o reemplazar la mitad más antigua sin .shift() repetitivo
       const now = this.getCurrentAudioTime();
       let writeIdx = 0;
       for (let i = 0; i < this.scheduledNotes.length; i++) {
@@ -75,7 +91,7 @@ class LiveTelemetryBus {
       }
       this.scheduledNotes.length = writeIdx;
       if (this.scheduledNotes.length >= MAX_SCHEDULED_NOTES) {
-        this.scheduledNotes.shift();
+        this.scheduledNotes.splice(0, 32);
       }
     }
 

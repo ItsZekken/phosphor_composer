@@ -56,7 +56,7 @@ export const TimelineMarkerTrack: React.FC<TimelineMarkerTrackProps> = React.mem
 
   const commitBpmEdit = (id: string) => {
     const val = parseInt(editingBpmValue, 10);
-    if (!isNaN(val) && val >= 30 && val <= 360) {
+    if (!isNaN(val) && val >= 15 && val <= 999) {
       updateTempoMarker(id, { bpm: val });
     }
     setEditingTempoId(null);

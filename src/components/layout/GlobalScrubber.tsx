@@ -115,11 +115,16 @@ export const GlobalScrubber: React.FC = () => {
     if (totalBeats <= 0) return [];
     const list: StructuralTick[] = [];
 
-    // Marcas de tempo (prioridad alta)
-    for (let i = 0; i < tempoMarkers.length; i++) {
-      const b = tempoMarkers[i].beat;
-      if (b > 0 && b < totalBeats) {
-        list.push({ pct: (b / totalBeats) * 100, kind: 'tempo' });
+    // Marcas de tempo (submuestreadas para acelerandos extremos con cientos de marcadores)
+    if (tempoMarkers.length > 0) {
+      let lastTempoPct = -1;
+      for (let i = 0; i < tempoMarkers.length; i++) {
+        const b = tempoMarkers[i].beat;
+        if (b <= 0 || b >= totalBeats) continue;
+        const pct = (b / totalBeats) * 100;
+        if (lastTempoPct >= 0 && pct - lastTempoPct < 0.9) continue;
+        list.push({ pct, kind: 'tempo' });
+        lastTempoPct = pct;
       }
     }
 

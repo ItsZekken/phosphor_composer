@@ -18,12 +18,12 @@ export class TempoMap {
   public readonly segments: TempoSegment[];
 
   constructor(baseBpm: number = 120, markers: TempoMarker[] = []) {
-    const validBaseBpm = typeof baseBpm === 'number' && baseBpm >= 30 && baseBpm <= 360 ? baseBpm : 120;
+    const validBaseBpm = typeof baseBpm === 'number' && baseBpm >= 15 && baseBpm <= 999 ? baseBpm : 120;
     this.baseBpm = validBaseBpm;
 
-    // 1. Filtrar y ordenar marcadores validos
+    // 1. Filtrar y ordenar marcadores validos (soporta acelerandos extremos tipo Rush E hasta 999 BPM)
     const validMarkers = (markers || [])
-      .filter((m) => m && typeof m.bpm === 'number' && m.bpm >= 30 && m.bpm <= 360 && typeof m.beat === 'number' && m.beat >= 0)
+      .filter((m) => m && typeof m.bpm === 'number' && m.bpm >= 15 && m.bpm <= 999 && typeof m.beat === 'number' && m.beat >= 0)
       .sort((a, b) => a.beat - b.beat);
 
     // Deduplicar marcadores en el mismo beat (el ultimo prevalece)
