@@ -15,15 +15,9 @@ import {
   type PianoRollTrack,
   type DrumChannel,
   type PatternChainItem,
-  type StyleMarker,
-  type MidiTrack,
-  type MidiPatternClip
+  type StyleMarker
 } from './typeDefinitions';
-import {
-  getBeatsPerMeasure,
-  resolveArrangedDrumClips,
-  resolveArrangedMelodyTrackNotes
-} from '../core/audio/arrangementResolver';
+import { getBeatsPerMeasure } from '../core/audio/arrangementResolver';
 import type { PatternDef } from '../patterns/patternTypes';
 import { importMidiSmart, type SmartMidiImportResult } from '../core/midi/smartMidiImporter';
 
@@ -251,9 +245,6 @@ export interface ExportSessionMidiParams {
   channels?: Record<string, any>;
   instrumentType?: string;
   activeDrumKitId?: string;
-  drumArrangementMode?: 'sequencer' | 'playlist';
-  midiTracks?: MidiTrack[];
-  midiClips?: MidiPatternClip[];
 }
 
 /**
@@ -391,12 +382,7 @@ export function exportSessionToMidi(session: ExportSessionMidiParams, type: 'nor
         : []);
 
   tracksToExport.forEach((track, trackIdx) => {
-    const { notes } = resolveArrangedMelodyTrackNotes(
-      track,
-      session.midiTracks || [],
-      session.midiClips || [],
-      beatsPerMeasureForExport
-    );
+    const notes = (track.notes || []).filter((n) => !n.muted);
     if (notes.length === 0 && tracksToExport.length > 1) return;
 
     const midiTrack = midi.addTrack();
@@ -430,59 +416,13 @@ export function exportSessionToMidi(session: ExportSessionMidiParams, type: 'nor
     const patternChain = session.patternChain || [];
     const isPatternRepeatOn = session.isPatternRepeatOn;
     const beatsPerMeasure = beatsPerMeasureForExport;
-    const drumResolution = resolveArrangedDrumClips(
-      session.midiTracks || [],
-      session.midiClips || [],
-      session.drumArrangementMode
-    );
 
-    if (drumResolution.isPlaylistControlled) {
-      drumResolution.audibleDrumClips.forEach((clip) => {
-        const patternIdx = Math.max(0, clip.drumPatternIndex ?? 0);
-        const patternLen = session.patternLengths?.[patternIdx] || 16;
-        const stepDuration = beatsPerMeasure / patternLen;
-        const winStart = Math.max(0, clip.offsetBeats || 0);
-        const dur = Math.max(0, clip.durationBeats || 0);
-        const winEnd = winStart + dur;
-        if (dur <= 1e-6) return;
-
-        maxBeat = Math.max(maxBeat, clip.startBeat + dur);
-        const firstCycle = Math.floor(winStart / beatsPerMeasure);
-        const lastCycle = Math.floor((winEnd - 1e-6) / beatsPerMeasure);
-
-        for (let cycle = firstCycle; cycle <= lastCycle; cycle++) {
-          const cycleBase = cycle * beatsPerMeasure;
-          for (let stepIdx = 0; stepIdx < patternLen; stepIdx++) {
-            const localBeat = cycleBase + stepIdx * stepDuration;
-            if (localBeat < winStart - 1e-6 || localBeat >= winEnd - 1e-6) continue;
-            const stepBeat = clip.startBeat + (localBeat - winStart);
-            const time = tempoMap.beatToSeconds(stepBeat);
-            const duration = Math.max(0.05, Math.min(0.2, tempoMap.getDurationSeconds(stepBeat, stepDuration)));
-
-            drumChannels.forEach((ch) => {
-              if (ch.muted) return;
-              const dStep = ch.patterns?.[patternIdx]?.[stepIdx];
-              if (dStep && dStep.isActive) {
-                const gmNote = getDrumGMNote(ch.id, ch.name);
-                const vel = typeof dStep.velocity === 'number' ? dStep.velocity : 0.8;
-                const volFactor = typeof ch.volume === 'number' ? ch.volume / 100 : 0.8;
-                drumsTrack.addNote({
-                  midi: gmNote,
-                  time,
-                  duration,
-                  velocity: Math.max(0.1, Math.min(1.0, vel * volFactor))
-                });
-              }
-            });
-          }
-        }
-      });
-    } else if (!isPatternRepeatOn && patternChain.length > 0) {
+    if (!isPatternRepeatOn && patternChain.length > 0) {
       const linearClips = normalizePatternChainToLinear(patternChain);
 
       linearClips.forEach((clip) => {
         const patternIdx = clip.patternIndex;
-        if (patternIdx < 0) return;
+        if (patternIdx < 0 || clip.isMuted) return;
 
         const clipStartBeat = clip.startMeasure * beatsPerMeasure;
         const clipEndBeat = (clip.startMeasure + clip.durationMeasures) * beatsPerMeasure;
@@ -536,7 +476,7 @@ export function exportSessionToMidi(session: ExportSessionMidiParams, type: 'nor
 
       if (hasActiveSteps) {
         for (let m = 0; m < totalMeasures; m++) {
-          const measureStartBeat = m * 4;
+          const measureStartBeat = m * beatsPerMeasure;
           for (let stepIdx = 0; stepIdx < patternLen; stepIdx++) {
             const stepBeat = measureStartBeat + (stepIdx * stepDuration);
             if (stepBeat >= maxBeat) break;

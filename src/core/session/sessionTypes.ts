@@ -55,6 +55,7 @@ export interface DrumSessionState {
   customSamples?: CustomDrumSample[];
   patternLengths?: number[];
   drumPatternNames?: string[];
+  /** Campo legado conservado solo para migración retrocompatible */
   drumArrangementMode?: 'sequencer' | 'playlist';
   currentDrumPatternEdit?: number;
   drumTimelineViewport?: { scrollLeft: number; zoomLevel: number };

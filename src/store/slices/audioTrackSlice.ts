@@ -119,7 +119,7 @@ export const createAudioTrackSlice: StateCreator<
     set({
       audioTracks: [...state.audioTracks, newTrack],
       selectedTrackId: id,
-      selectedPlaylistTrackKind: 'audio'
+      selectedPlaylistTrack: { kind: 'audio', trackId: id }
     });
     return id;
   },
@@ -147,10 +147,10 @@ export const createAudioTrackSlice: StateCreator<
   },
 
   setSelectedTrackId: (id) => {
-    set({
+    set((state) => ({
       selectedTrackId: id,
-      ...(id ? { selectedPlaylistTrackKind: 'audio' as const } : {})
-    });
+      ...(id ? { selectedPlaylistTrack: { kind: 'audio' as const, trackId: id } } : { selectedPlaylistTrack: state.selectedPlaylistTrack })
+    }));
   },
 
   addAudioClip: (clip) => {
@@ -273,7 +273,13 @@ export const createAudioTrackSlice: StateCreator<
             : [...state.selectedClipIds, id]
         };
       }
-      return { selectedClipIds: [id], selectedMidiClipIds: [] };
+      return {
+        selectedClipIds: [id],
+        selectedChordIds: [],
+        selectedChordId: null,
+        selectedMelodyRegionRefs: [],
+        selectedChainIds: []
+      };
     });
   },
 

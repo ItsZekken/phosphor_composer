@@ -135,6 +135,17 @@ export function usePianoRollShortcuts({
           onSelectTool?.('select');
           return;
         }
+        if (keyLower === 'm' && selectedNoteIds.length > 0) {
+          e.preventDefault();
+          const selected = (melodyNotes || []).filter((n) => selectedNoteIds.includes(n.id));
+          if (selected.length > 0) {
+            const allMuted = selected.every((n) => Boolean(n.muted));
+            updateMelodyNotesBatch(
+              selected.map((n) => ({ id: n.id, changes: { muted: !allMuted ? true : undefined } }))
+            );
+          }
+          return;
+        }
       }
 
       // Delete / Backspace: eliminar notas seleccionadas en una sola operación atómica

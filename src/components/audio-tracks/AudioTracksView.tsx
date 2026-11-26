@@ -1,8 +1,14 @@
 /**
  * AudioTracksView.tsx
- * Estación unificada de Playlist / Tracks (MIDI Tracks de Patrones estilo FL Studio + Audio Tracks multitrack).
- * Orquesta el Pattern Picker lateral, la barra de herramientas, la regla musical con acordes,
- * los carriles MIDI y de Audio sincronizados, selección por caja (Lasso) y atajos de teclado DAW.
+ * Estación unificada de TRACKS 1:1 en Phosphor:
+ * - ARMONÍA (1:1 con Chord Palette -> `chordBlocks` y `channels.chords`)
+ * - PIANO ROLL (1:1 por cada canal de instrumento -> `tracks[].notes` + `regions`)
+ * - BATERÍA (1:1 con Drum Sequencer -> `patternChain` y `channels.drums`)
+ * - AUDIO MULTITRACK (`audioTracks` y `audioClips`)
+ *
+ * Todas las ediciones en Tracks (pintar, mover, recortar, estirar/repetir, dividir,
+ * copiar/pegar, duplicar, silenciar, borrar, selección Lasso y atajos de teclado)
+ * mutan directamente las fuentes únicas de verdad con historial Zundo atómico.
  */
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
@@ -15,13 +21,35 @@ import { AudioTracksToolbar } from './AudioTracksToolbar';
 import { AudioTimelineRuler } from './AudioTimelineRuler';
 import { AudioPlayhead } from './AudioPlayhead';
 import { AudioTrackHeader, AudioTrackLane } from './AudioTrackLane';
-import { MidiTrackHeader, MidiTrackLane } from './MidiTrackLane';
+import { HarmonyTrackHeader, HarmonyTrackLane } from './HarmonyTrackLane';
+import { MelodyTrackHeader, MelodyTrackLane } from './MelodyTrackLane';
+import { DrumTrackHeader, DrumTrackLane } from './DrumTrackLane';
 import { PatternPickerSidebar } from './PatternPickerSidebar';
 import { AudioLatencyModal } from './AudioLatencyModal';
+import { ConfirmModal } from '../ui/ConfirmModal';
 import { useTimelineNavigation } from '../../hooks/useTimelineNavigation';
 import { isTypingTarget, isModalBlockingShortcuts } from '../../core/shortcuts/isTypingTarget';
 import { importAudioFilesToTracks, isSupportedAudioFile } from '../../core/session/projectFileImport';
 import { getBeatsPerMeasure } from '../../core/audio/arrangementResolver';
+import {
+  deleteMelodyRegions,
+  duplicateMelodyRegions,
+  extractMelodyRegionClipboard,
+  moveOrCloneMelodyRegions,
+  pasteMelodyRegions,
+  reconcileTrackRegions,
+  roundBeat,
+  toggleMuteMelodyRegions
+} from '../../core/audio/melodyRegionUtils';
+import {
+  normalizePatternChainItems,
+  normalizePatternChainToLinear,
+  type AudioClip,
+  type ChordBlock,
+  type PatternChainItem,
+  type SelectedMelodyRegionRef
+} from '../../utils/typeDefinitions';
+import { generateId } from '../../utils/idGenerator';
 
 interface MarqueeRect {
   x1: number;
@@ -32,61 +60,47 @@ interface MarqueeRect {
 
 export const AudioTracksView: React.FC = () => {
   const {
-    audioTracks,
-    audioClips,
-    midiTracks,
-    midiClips,
     chordBlocks,
     tracks,
+    patternChain,
+    audioTracks,
+    audioClips,
     bpm,
     timeSignature,
     recordingRms,
     audioTimelineViewport,
     playlistTool,
-    addMidiTrack,
+    addPianoRollTrack,
+    removePianoRollTrack,
     addAudioTrack,
+    splitChordBlock,
+    splitMelodyRegion,
+    splitChainItem,
     splitAudioClip,
-    splitMidiClip,
-    duplicateAudioClip,
-    duplicateSelectedMidiClips,
-    toggleClipMute,
-    toggleMidiClipMute,
-    removeAudioClip,
-    removeMidiClipsBatch,
-    clearClipSelection,
-    clearMidiClipSelection,
-    copySelectedMidiClips,
-    pasteMidiClips,
+    clearAllPlaylistSelections,
     setAudioTimelineViewport,
     startAudioRecording,
     setPlaylistTool
   } = useSongStore(
     useShallow((state) => ({
-      audioTracks: state.audioTracks,
-      audioClips: state.audioClips,
-      midiTracks: state.midiTracks,
-      midiClips: state.midiClips,
-      chordBlocks: state.chordBlocks,
-      tracks: state.tracks,
+      chordBlocks: state.chordBlocks || [],
+      tracks: state.tracks || [],
+      patternChain: state.patternChain || [],
+      audioTracks: state.audioTracks || [],
+      audioClips: state.audioClips || [],
       bpm: state.bpm,
       timeSignature: state.timeSignature,
       recordingRms: state.recordingRms,
       audioTimelineViewport: state.audioTimelineViewport,
       playlistTool: state.playlistTool,
-      addMidiTrack: state.addMidiTrack,
+      addPianoRollTrack: state.addPianoRollTrack,
+      removePianoRollTrack: state.removePianoRollTrack,
       addAudioTrack: state.addAudioTrack,
+      splitChordBlock: state.splitChordBlock,
+      splitMelodyRegion: state.splitMelodyRegion,
+      splitChainItem: state.splitChainItem,
       splitAudioClip: state.splitAudioClip,
-      splitMidiClip: state.splitMidiClip,
-      duplicateAudioClip: state.duplicateAudioClip,
-      duplicateSelectedMidiClips: state.duplicateSelectedMidiClips,
-      toggleClipMute: state.toggleClipMute,
-      toggleMidiClipMute: state.toggleMidiClipMute,
-      removeAudioClip: state.removeAudioClip,
-      removeMidiClipsBatch: state.removeMidiClipsBatch,
-      clearClipSelection: state.clearClipSelection,
-      clearMidiClipSelection: state.clearMidiClipSelection,
-      copySelectedMidiClips: state.copySelectedMidiClips,
-      pasteMidiClips: state.pasteMidiClips,
+      clearAllPlaylistSelections: state.clearAllPlaylistSelections,
       setAudioTimelineViewport: state.setAudioTimelineViewport,
       startAudioRecording: state.startAudioRecording,
       setPlaylistTool: state.setPlaylistTool
@@ -101,20 +115,15 @@ export const AudioTracksView: React.FC = () => {
   const suppressNextBgClickRef = useRef(false);
   const [dragOver, setDragOver] = useState(false);
   const [marquee, setMarquee] = useState<MarqueeRect | null>(null);
+  const [trackPendingDelete, setTrackPendingDelete] = useState<{ id: string; name: string } | null>(
+    null
+  );
 
   const beatsPerMeasure = getBeatsPerMeasure(timeSignature);
 
-  // Calcular longitud total de la línea de tiempo abarcando MIDI clips, Audio clips, Acordes y Melodías
+  // Calcular longitud total de la línea de tiempo abarcando las 4 capas 1:1
   const maxContentEndBeat = useMemo(() => {
     let maxEnd = 32;
-    for (const clip of audioClips) {
-      const end = clip.startBeat + clip.durationSeconds * (bpm / 60);
-      if (end > maxEnd) maxEnd = end;
-    }
-    for (const clip of midiClips) {
-      const end = clip.startBeat + clip.durationBeats;
-      if (end > maxEnd) maxEnd = end;
-    }
     for (const cb of chordBlocks) {
       const end = cb.startBeat + cb.durationBeats;
       if (end > maxEnd) maxEnd = end;
@@ -124,13 +133,37 @@ export const AudioTracksView: React.FC = () => {
         const end = n.startBeat + n.durationBeats;
         if (end > maxEnd) maxEnd = end;
       }
+      for (const r of t.regions || []) {
+        const end = r.startBeat + r.durationBeats;
+        if (end > maxEnd) maxEnd = end;
+      }
+    }
+    for (const d of normalizePatternChainToLinear(patternChain)) {
+      const end = (d.startMeasure + d.durationMeasures) * beatsPerMeasure;
+      if (end > maxEnd) maxEnd = end;
+    }
+    for (const clip of audioClips) {
+      const end = clip.startBeat + clip.durationSeconds * (bpm / 60);
+      if (end > maxEnd) maxEnd = end;
     }
     return maxEnd;
-  }, [audioClips, midiClips, chordBlocks, tracks, bpm]);
+  }, [chordBlocks, tracks, patternChain, audioClips, bpm, beatsPerMeasure]);
 
-  const totalBeats = Math.max(64, Math.ceil((maxContentEndBeat + 16) / beatsPerMeasure) * beatsPerMeasure);
+  const totalBeats = Math.max(
+    64,
+    Math.ceil((maxContentEndBeat + 16) / beatsPerMeasure) * beatsPerMeasure
+  );
   const zoomLevel = audioTimelineViewport.zoomLevel || 60;
   const totalTimelineWidth = totalBeats * zoomLevel;
+
+  const isTimelineCompletelyEmpty = useMemo(
+    () =>
+      chordBlocks.length === 0 &&
+      tracks.every((t) => !t.notes || t.notes.length === 0) &&
+      patternChain.length === 0 &&
+      audioClips.length === 0,
+    [chordBlocks, tracks, patternChain, audioClips]
+  );
 
   // 1. Sincronización bidireccional del scroll vertical entre Cabeceras y Carriles
   const handleTimelineScroll = useCallback(() => {
@@ -155,7 +188,7 @@ export const AudioTracksView: React.FC = () => {
     });
   }, []);
 
-  // 2. Atajos de teclado unificados estilo DAW / FL Studio Playlist
+  // 2. Atajos de teclado unificados 1:1 para todas las capas (Armonía, Piano Roll, Batería, Audio)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const state = useSongStore.getState();
@@ -168,8 +201,14 @@ export const AudioTracksView: React.FC = () => {
 
       const keyLower = e.key.toLowerCase();
       const isCtrlOrCmd = e.ctrlKey || e.metaKey;
+      const barBeats = getBeatsPerMeasure(state.timeSignature);
+      const hasChordSel = state.selectedChordIds.length > 0;
+      const hasMelodySel = state.selectedMelodyRegionRefs.length > 0;
+      const hasDrumSel = state.selectedChainIds.length > 0;
+      const hasAudioSel = state.selectedClipIds.length > 0;
+      const hasAnySel = hasChordSel || hasMelodySel || hasDrumSel || hasAudioSel;
 
-      // Herramientas rápidas (P = Pintar, C = Navaja, E = Seleccionar)
+      // Herramientas rápidas (P = Pincel, C = Navaja, E = Seleccionar)
       if (!isCtrlOrCmd && !e.altKey && !e.shiftKey) {
         if (keyLower === 'p') {
           e.preventDefault();
@@ -188,81 +227,635 @@ export const AudioTracksView: React.FC = () => {
         }
       }
 
-      // Tecla S: Dividir clip MIDI o Audio seleccionado (o bajo el cabezal) en la posición del cabezal
+      // Tecla S: Dividir bloques/regiones/clips seleccionados (o bajo el cabezal) en currentBeat
       if (keyLower === 's' && !isCtrlOrCmd && !e.altKey && !e.shiftKey) {
         e.preventDefault();
-        if (state.selectedMidiClipIds.length > 0) {
-          state.selectedMidiClipIds.forEach((id) => splitMidiClip(id, state.currentBeat));
-        } else if (state.selectedClipIds.length > 0) {
-          state.selectedClipIds.forEach((id) => splitAudioClip(id, state.currentBeat));
-        } else if (state.selectedPlaylistTrackKind === 'midi' && state.selectedMidiTrackId) {
-          const midiClip = state.midiClips.find(
-            (c) =>
-              c.midiTrackId === state.selectedMidiTrackId &&
-              state.currentBeat > c.startBeat + 0.06 &&
-              state.currentBeat < c.startBeat + c.durationBeats - 0.06
+        const curBeat = state.currentBeat;
+        const curMeasure = curBeat / barBeats;
+        const linearDrums = normalizePatternChainToLinear(state.patternChain);
+
+        if (hasAnySel) {
+          state.selectedChordIds.forEach((id) => {
+            const b = state.chordBlocks.find((c) => c.id === id);
+            if (b && curBeat > b.startBeat + 0.06 && curBeat < b.startBeat + b.durationBeats - 0.06) {
+              splitChordBlock(id, curBeat);
+            }
+          });
+          state.selectedMelodyRegionRefs.forEach((ref) => {
+            const tr = state.tracks.find((t) => t.id === ref.trackId);
+            if (!tr) return;
+            const reg = reconcileTrackRegions(tr.id, tr.notes, tr.regions, barBeats).find(
+              (r) => r.id === ref.regionId
+            );
+            if (reg && curBeat > reg.startBeat + 0.06 && curBeat < reg.startBeat + reg.durationBeats - 0.06) {
+              splitMelodyRegion(ref.trackId, ref.regionId, curBeat);
+            }
+          });
+          state.selectedChainIds.forEach((id) => {
+            const d = linearDrums.find((c) => c.id === id);
+            if (d && curMeasure > d.startMeasure + 0.05 && curMeasure < d.startMeasure + d.durationMeasures - 0.05) {
+              splitChainItem(id, curMeasure);
+            }
+          });
+          state.selectedClipIds.forEach((id) => {
+            const c = state.audioClips.find((a) => a.id === id);
+            if (
+              c &&
+              curBeat > c.startBeat + 0.06 &&
+              curBeat < c.startBeat + (c.durationSeconds * state.bpm) / 60 - 0.06
+            ) {
+              splitAudioClip(id, curBeat);
+            }
+          });
+        } else if (state.selectedPlaylistTrack.kind === 'harmony') {
+          const b = state.chordBlocks.find(
+            (c) => curBeat > c.startBeat + 0.06 && curBeat < c.startBeat + c.durationBeats - 0.06
           );
-          if (midiClip) splitMidiClip(midiClip.id, state.currentBeat);
-        } else if (state.selectedTrackId) {
-          const trackClip = state.audioClips.find(
-            (c) =>
-              c.trackId === state.selectedTrackId &&
-              state.currentBeat >= c.startBeat &&
-              state.currentBeat <= c.startBeat + (c.durationSeconds * state.bpm) / 60
+          if (b) splitChordBlock(b.id, curBeat);
+        } else if (state.selectedPlaylistTrack.kind === 'melody') {
+          const melodyTrackId = state.selectedPlaylistTrack.trackId;
+          const tr = state.tracks.find((t) => t.id === melodyTrackId);
+          if (tr) {
+            const reg = reconcileTrackRegions(tr.id, tr.notes, tr.regions, barBeats).find(
+              (r) => curBeat > r.startBeat + 0.06 && curBeat < r.startBeat + r.durationBeats - 0.06
+            );
+            if (reg) splitMelodyRegion(tr.id, reg.id, curBeat);
+          }
+        } else if (state.selectedPlaylistTrack.kind === 'drums') {
+          const d = linearDrums.find(
+            (c) => curMeasure > c.startMeasure + 0.05 && curMeasure < c.startMeasure + c.durationMeasures - 0.05
           );
-          if (trackClip) splitAudioClip(trackClip.id, state.currentBeat);
+          if (d) splitChainItem(d.id, curMeasure);
+        } else {
+          const audioTrackId = state.selectedPlaylistTrack.trackId || state.selectedTrackId;
+          const c = state.audioClips.find(
+            (a) =>
+              a.trackId === audioTrackId &&
+              curBeat > a.startBeat + 0.06 &&
+              curBeat < a.startBeat + (a.durationSeconds * state.bpm) / 60 - 0.06
+          );
+          if (c) splitAudioClip(c.id, curBeat);
         }
         return;
       }
 
-      // Teclas Supr / Backspace: Eliminar clips MIDI y/o Audio seleccionados
+      // Helper de borrado atómico en las 4 capas (compartido por Supr/Backspace y Ctrl+X)
+      const deleteAllSelectedAtomic = () => {
+        const chordSet = new Set(state.selectedChordIds);
+        const drumSet = new Set(state.selectedChainIds);
+        const audioSet = new Set(state.selectedClipIds);
+
+        const nextChordBlocks = hasChordSel
+          ? state.chordBlocks.filter((b) => !chordSet.has(b.id))
+          : state.chordBlocks;
+        const nextTracks = hasMelodySel
+          ? deleteMelodyRegions(state.tracks, state.selectedMelodyRegionRefs, barBeats)
+          : state.tracks;
+        const nextActiveTrack = nextTracks.find((t) => t.id === state.activeTrackId);
+        const nextPatternChain = hasDrumSel
+          ? normalizePatternChainItems(state.patternChain).filter((c) => !drumSet.has(c.id))
+          : state.patternChain;
+        const nextAudioClips = hasAudioSel
+          ? state.audioClips.filter((c) => !audioSet.has(c.id))
+          : state.audioClips;
+
+        useSongStore.setState({
+          chordBlocks: nextChordBlocks,
+          tracks: nextTracks,
+          melodyNotes: nextActiveTrack ? nextActiveTrack.notes : state.melodyNotes,
+          patternChain: nextPatternChain,
+          audioClips: nextAudioClips,
+          selectedChordIds: [],
+          selectedChordId: null,
+          selectedMelodyRegionRefs: [],
+          selectedChainIds: [],
+          selectedClipIds: []
+        });
+        if (state.isAutoSuggestions) useSongStore.getState().updateSuggestions();
+      };
+
+      // Teclas Supr / Backspace: Eliminar selección en todas las capas (1 paso Undo)
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        const hasMidiSel = state.selectedMidiClipIds.length > 0;
-        const hasAudioSel = state.selectedClipIds.length > 0;
-        if (hasMidiSel || hasAudioSel) {
+        if (hasAnySel) {
           e.preventDefault();
-          if (hasMidiSel) removeMidiClipsBatch(state.selectedMidiClipIds);
-          if (hasAudioSel) state.selectedClipIds.forEach((id) => removeAudioClip(id));
+          deleteAllSelectedAtomic();
         }
         return;
       }
 
-      // Ctrl+A: Seleccionar todos los clips
+      // Ctrl+A: Seleccionar todo en las 4 capas
       if (isCtrlOrCmd && keyLower === 'a') {
         e.preventDefault();
+        const allChordIds = state.chordBlocks.map((b) => b.id);
+        const allMelodyRefs: SelectedMelodyRegionRef[] = [];
+        for (const tr of state.tracks) {
+          for (const reg of reconcileTrackRegions(tr.id, tr.notes, tr.regions, barBeats)) {
+            allMelodyRefs.push({ trackId: tr.id, regionId: reg.id });
+          }
+        }
+        const allDrumIds = normalizePatternChainToLinear(state.patternChain).map((c) => c.id);
+        const allAudioIds = state.audioClips.map((c) => c.id);
+
         useSongStore.setState({
-          selectedMidiClipIds: state.midiClips.map((c) => c.id),
-          selectedClipIds: state.audioClips.map((c) => c.id)
+          selectedChordIds: allChordIds,
+          selectedChordId: allChordIds.length === 1 ? allChordIds[0] : null,
+          selectedMelodyRegionRefs: allMelodyRefs,
+          selectedChainIds: allDrumIds,
+          selectedClipIds: allAudioIds
         });
         return;
       }
 
-      // Ctrl+C / Ctrl+V: Copiar y Pegar clips MIDI
-      if (isCtrlOrCmd && keyLower === 'c' && state.selectedMidiClipIds.length > 0) {
+      // Ctrl+C / Ctrl+X: Copiar o Cortar todas las capas seleccionadas juntas
+      if (isCtrlOrCmd && (keyLower === 'c' || keyLower === 'x') && hasAnySel) {
         e.preventDefault();
-        copySelectedMidiClips();
+        const chordClip = hasChordSel
+          ? state.chordBlocks
+              .filter((b) => state.selectedChordIds.includes(b.id))
+              .sort((a, b) => a.startBeat - b.startBeat)
+              .map((b) => ({ ...b }))
+          : [];
+        const melodyClip = hasMelodySel
+          ? extractMelodyRegionClipboard(state.tracks, state.selectedMelodyRegionRefs, barBeats)
+          : [];
+        const drumClip = hasDrumSel
+          ? normalizePatternChainItems(state.patternChain)
+              .filter((c) => state.selectedChainIds.includes(c.id))
+              .sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0))
+              .map((c) => ({ ...c }))
+          : [];
+        const audioClip = hasAudioSel
+          ? state.audioClips
+              .filter((c) => state.selectedClipIds.includes(c.id))
+              .sort((a, b) => a.startBeat - b.startBeat)
+              .map((c) => ({ ...c }))
+          : [];
+
+        useSongStore.setState({
+          chordClipboard: chordClip,
+          melodyRegionClipboard: melodyClip,
+          chainClipboard: drumClip,
+          audioClipClipboard: audioClip
+        });
+
+        if (keyLower === 'x') {
+          deleteAllSelectedAtomic();
+        }
         return;
       }
 
-      if (isCtrlOrCmd && keyLower === 'v' && state.midiClipClipboard.length > 0) {
-        e.preventDefault();
-        pasteMidiClips();
+      // Ctrl+V: Pegar todas las capas copiadas en el cabezal conservando alineación relativa (1 paso Undo)
+      if (isCtrlOrCmd && keyLower === 'v') {
+        const hasChordCb = state.chordClipboard.length > 0;
+        const hasMelodyCb = state.melodyRegionClipboard.length > 0;
+        const hasDrumCb = state.chainClipboard.length > 0;
+        const hasAudioCb = state.audioClipClipboard.length > 0;
+
+        if (hasChordCb || hasMelodyCb || hasDrumCb || hasAudioCb) {
+          e.preventDefault();
+          const targetBeat = Math.max(0, roundBeat(state.currentBeat || 0));
+
+          const chordOrigin = hasChordCb
+            ? Math.min(...state.chordClipboard.map((b) => b.startBeat))
+            : Infinity;
+          const melodyOrigin = hasMelodyCb
+            ? Math.min(
+                ...state.melodyRegionClipboard.map(
+                  (m) => m.originalStartBeat ?? m.relativeStartBeat
+                )
+              )
+            : Infinity;
+          const drumCbLinear = hasDrumCb ? normalizePatternChainToLinear(state.chainClipboard) : [];
+          const drumOrigin = hasDrumCb
+            ? Math.min(...drumCbLinear.map((d) => d.startMeasure * barBeats))
+            : Infinity;
+          const audioOrigin = hasAudioCb
+            ? Math.min(...state.audioClipClipboard.map((a) => a.startBeat))
+            : Infinity;
+
+          const globalOrigin = Math.min(chordOrigin, melodyOrigin, drumOrigin, audioOrigin);
+
+          // 1. Pegar acordes
+          let nextChordBlocks = state.chordBlocks;
+          const pastedChordIds: string[] = [];
+          if (hasChordCb) {
+            const addedChords: ChordBlock[] = state.chordClipboard.map((b) => {
+              const id = generateId();
+              pastedChordIds.push(id);
+              return {
+                ...b,
+                id,
+                startBeat: Math.max(0, roundBeat(targetBeat + (b.startBeat - globalOrigin)))
+              };
+            });
+            nextChordBlocks = [...state.chordBlocks, ...addedChords].sort(
+              (a, b) => a.startBeat - b.startBeat
+            );
+          }
+
+          // 2. Pegar regiones melódicas (materializa notas reales 1:1 en tracks)
+          let nextTracks = state.tracks;
+          let pastedMelodyRefs: SelectedMelodyRegionRef[] = [];
+          if (hasMelodyCb) {
+            const melodyBaseBeat = Math.max(
+              0,
+              roundBeat(targetBeat + (melodyOrigin - globalOrigin))
+            );
+            const fallbackTrackId =
+              state.selectedPlaylistTrack.kind === 'melody'
+                ? state.selectedPlaylistTrack.trackId
+                : state.activeTrackId;
+            const res = pasteMelodyRegions(
+              state.tracks,
+              state.melodyRegionClipboard,
+              melodyBaseBeat,
+              fallbackTrackId,
+              barBeats
+            );
+            nextTracks = res.tracks;
+            pastedMelodyRefs = res.nextSelectedRefs;
+          }
+
+          // 3. Pegar clips de batería
+          let nextPatternChain = state.patternChain;
+          const pastedDrumIds: string[] = [];
+          if (hasDrumCb) {
+            const baseChain = normalizePatternChainItems(state.patternChain);
+            const addedDrums: PatternChainItem[] = drumCbLinear.map((d) => {
+              const id = `chain-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+              pastedDrumIds.push(id);
+              const nextStartBeat = Math.max(
+                0,
+                roundBeat(targetBeat + (d.startMeasure * barBeats - globalOrigin))
+              );
+              const nextStartMeasure = Math.round((nextStartBeat / barBeats) * 16) / 16;
+              return {
+                id,
+                type: 'pattern',
+                patternIndex: d.patternIndex,
+                startMeasure: nextStartMeasure,
+                durationMeasures: d.durationMeasures,
+                repeatCount: Math.max(1, Math.round(d.durationMeasures)),
+                isMuted: d.isMuted
+              };
+            });
+            nextPatternChain = [...baseChain, ...addedDrums].sort(
+              (a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0)
+            );
+          }
+
+          // 4. Pegar clips de audio
+          let nextAudioClips = state.audioClips;
+          const pastedAudioIds: string[] = [];
+          if (hasAudioCb) {
+            const validTrackIds = new Set(state.audioTracks.map((t) => t.id));
+            const fallbackAudioTrack =
+              state.selectedPlaylistTrack.kind === 'audio'
+                ? state.selectedPlaylistTrack.trackId
+                : state.selectedTrackId || state.audioTracks[0]?.id;
+
+            const addedAudio: AudioClip[] = state.audioClipClipboard
+              .filter((a) => validTrackIds.has(a.trackId) || Boolean(fallbackAudioTrack))
+              .map((a) => {
+                const id = `clip_${generateId()}`;
+                pastedAudioIds.push(id);
+                return {
+                  ...a,
+                  id,
+                  trackId: validTrackIds.has(a.trackId)
+                    ? a.trackId
+                    : (fallbackAudioTrack as string),
+                  startBeat: Math.max(0, roundBeat(targetBeat + (a.startBeat - globalOrigin)))
+                };
+              });
+            nextAudioClips = [...state.audioClips, ...addedAudio];
+          }
+
+          const activeTrack = nextTracks.find((t) => t.id === state.activeTrackId);
+          useSongStore.setState({
+            chordBlocks: nextChordBlocks,
+            tracks: nextTracks,
+            melodyNotes: activeTrack ? activeTrack.notes : state.melodyNotes,
+            patternChain: nextPatternChain,
+            audioClips: nextAudioClips,
+            selectedChordIds: pastedChordIds,
+            selectedChordId: pastedChordIds.length === 1 ? pastedChordIds[0] : null,
+            selectedMelodyRegionRefs: pastedMelodyRefs,
+            selectedChainIds: pastedDrumIds,
+            selectedClipIds: pastedAudioIds
+          });
+          if (state.isAutoSuggestions) useSongStore.getState().updateSuggestions();
+        }
         return;
       }
 
-      // Ctrl+0: Zoom to Fit (encuadrar todos los clips MIDI y Audio)
+      // Ctrl+D: Duplicar selección combinada a continuación (1 paso Undo)
+      if (isCtrlOrCmd && keyLower === 'd' && hasAnySel) {
+        e.preventDefault();
+        let minStart = Infinity;
+        let maxEnd = 0;
+
+        const selChords = state.chordBlocks.filter((b) => state.selectedChordIds.includes(b.id));
+        selChords.forEach((b) => {
+          minStart = Math.min(minStart, b.startBeat);
+          maxEnd = Math.max(maxEnd, b.startBeat + b.durationBeats);
+        });
+
+        state.selectedMelodyRegionRefs.forEach((ref) => {
+          const tr = state.tracks.find((t) => t.id === ref.trackId);
+          if (!tr) return;
+          const reg = reconcileTrackRegions(tr.id, tr.notes, tr.regions, barBeats).find(
+            (r) => r.id === ref.regionId
+          );
+          if (reg) {
+            minStart = Math.min(minStart, reg.startBeat);
+            maxEnd = Math.max(maxEnd, reg.startBeat + reg.durationBeats);
+          }
+        });
+
+        const linearDrums = normalizePatternChainToLinear(state.patternChain);
+        const selDrums = linearDrums.filter((d) => state.selectedChainIds.includes(d.id));
+        selDrums.forEach((d) => {
+          minStart = Math.min(minStart, d.startMeasure * barBeats);
+          maxEnd = Math.max(maxEnd, (d.startMeasure + d.durationMeasures) * barBeats);
+        });
+
+        const selAudio = state.audioClips.filter((c) => state.selectedClipIds.includes(c.id));
+        selAudio.forEach((c) => {
+          minStart = Math.min(minStart, c.startBeat);
+          maxEnd = Math.max(maxEnd, c.startBeat + (c.durationSeconds * state.bpm) / 60);
+        });
+
+        if (!Number.isFinite(minStart)) return;
+        const spanBeats = Math.max(0.25, roundBeat(maxEnd - minStart));
+
+        // 1. Duplicar acordes
+        let nextChordBlocks = state.chordBlocks;
+        const dupChordIds: string[] = [];
+        if (selChords.length > 0) {
+          const clones: ChordBlock[] = selChords.map((b) => {
+            const id = generateId();
+            dupChordIds.push(id);
+            return { ...b, id, startBeat: roundBeat(b.startBeat + spanBeats) };
+          });
+          nextChordBlocks = [...state.chordBlocks, ...clones].sort(
+            (a, b) => a.startBeat - b.startBeat
+          );
+        }
+
+        // 2. Duplicar regiones de Piano Roll
+        let nextTracks = state.tracks;
+        let dupMelodyRefs: SelectedMelodyRegionRef[] = [];
+        if (hasMelodySel) {
+          const res = duplicateMelodyRegions(
+            state.tracks,
+            state.selectedMelodyRegionRefs,
+            barBeats,
+            spanBeats
+          );
+          nextTracks = res.tracks;
+          dupMelodyRefs = res.nextSelectedRefs;
+        }
+
+        // 3. Duplicar clips de batería
+        let nextPatternChain = state.patternChain;
+        const dupDrumIds: string[] = [];
+        if (selDrums.length > 0) {
+          const baseChain = normalizePatternChainItems(state.patternChain);
+          const spanMeasures = spanBeats / barBeats;
+          const clones: PatternChainItem[] = selDrums.map((d) => {
+            const id = `chain-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+            dupDrumIds.push(id);
+            return {
+              id,
+              type: 'pattern',
+              patternIndex: d.patternIndex,
+              startMeasure: Math.round((d.startMeasure + spanMeasures) * 16) / 16,
+              durationMeasures: d.durationMeasures,
+              repeatCount: Math.max(1, Math.round(d.durationMeasures)),
+              isMuted: d.isMuted
+            };
+          });
+          nextPatternChain = [...baseChain, ...clones].sort(
+            (a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0)
+          );
+        }
+
+        // 4. Duplicar clips de audio
+        let nextAudioClips = state.audioClips;
+        const dupAudioIds: string[] = [];
+        if (selAudio.length > 0) {
+          const clones: AudioClip[] = selAudio.map((c) => {
+            const id = `clip_${generateId()}`;
+            dupAudioIds.push(id);
+            return { ...c, id, startBeat: roundBeat(c.startBeat + spanBeats) };
+          });
+          nextAudioClips = [...state.audioClips, ...clones];
+        }
+
+        const activeTrack = nextTracks.find((t) => t.id === state.activeTrackId);
+        useSongStore.setState({
+          chordBlocks: nextChordBlocks,
+          tracks: nextTracks,
+          melodyNotes: activeTrack ? activeTrack.notes : state.melodyNotes,
+          patternChain: nextPatternChain,
+          audioClips: nextAudioClips,
+          selectedChordIds: dupChordIds,
+          selectedChordId: dupChordIds.length === 1 ? dupChordIds[0] : null,
+          selectedMelodyRegionRefs: dupMelodyRefs,
+          selectedChainIds: dupDrumIds,
+          selectedClipIds: dupAudioIds
+        });
+        if (state.isAutoSuggestions) useSongStore.getState().updateSuggestions();
+        return;
+      }
+
+      // M: Silenciar / reactivar bloques/regiones/clips seleccionados en todas las capas (1 paso Undo)
+      if (keyLower === 'm' && !isCtrlOrCmd && !e.altKey && !e.shiftKey && hasAnySel) {
+        e.preventDefault();
+        const chordSet = new Set(state.selectedChordIds);
+        const drumSet = new Set(state.selectedChainIds);
+        const audioSet = new Set(state.selectedClipIds);
+
+        let nextChordBlocks = state.chordBlocks;
+        if (hasChordSel) {
+          const sel = state.chordBlocks.filter((b) => chordSet.has(b.id));
+          const anyActive = sel.some((b) => b.type !== 'silence' && b.type !== 'break');
+          nextChordBlocks = state.chordBlocks.map((b) =>
+            chordSet.has(b.id) ? { ...b, type: anyActive ? 'silence' : 'play' } : b
+          );
+        }
+
+        const nextTracks = hasMelodySel
+          ? toggleMuteMelodyRegions(state.tracks, state.selectedMelodyRegionRefs, barBeats)
+          : state.tracks;
+
+        let nextPatternChain = state.patternChain;
+        if (hasDrumSel) {
+          const normalized = normalizePatternChainItems(state.patternChain);
+          const sel = normalized.filter((c) => drumSet.has(c.id));
+          const anyActive = sel.some((c) => !c.isMuted);
+          nextPatternChain = normalized.map((c) =>
+            drumSet.has(c.id) ? { ...c, isMuted: anyActive } : c
+          );
+        }
+
+        let nextAudioClips = state.audioClips;
+        if (hasAudioSel) {
+          const sel = state.audioClips.filter((c) => audioSet.has(c.id));
+          const anyActive = sel.some((c) => !c.isMuted);
+          nextAudioClips = state.audioClips.map((c) =>
+            audioSet.has(c.id) ? { ...c, isMuted: anyActive } : c
+          );
+        }
+
+        const activeTrack = nextTracks.find((t) => t.id === state.activeTrackId);
+        useSongStore.setState({
+          chordBlocks: nextChordBlocks,
+          tracks: nextTracks,
+          melodyNotes: activeTrack ? activeTrack.notes : state.melodyNotes,
+          patternChain: nextPatternChain,
+          audioClips: nextAudioClips
+        });
+        return;
+      }
+
+      // Flechas Izquierda / Derecha: Desplazar toda la selección por el snap activo (1 paso Undo)
+      if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !isCtrlOrCmd && hasAnySel) {
+        e.preventDefault();
+        const snapStep = e.altKey
+          ? 0.25
+          : state.audioSnapGrid === 'bar'
+          ? barBeats
+          : state.audioSnapGrid === '1/2'
+          ? 0.5
+          : state.audioSnapGrid === '1/4'
+          ? 0.25
+          : state.audioSnapGrid === '1/8'
+          ? 0.125
+          : state.audioSnapGrid === '1/16'
+          ? 0.0625
+          : 1;
+        const rawDelta = (e.key === 'ArrowRight' ? 1 : -1) * snapStep;
+
+        let minStart = Infinity;
+        state.chordBlocks
+          .filter((b) => state.selectedChordIds.includes(b.id))
+          .forEach((b) => {
+            minStart = Math.min(minStart, b.startBeat);
+          });
+        state.selectedMelodyRegionRefs.forEach((ref) => {
+          const tr = state.tracks.find((t) => t.id === ref.trackId);
+          if (!tr) return;
+          const reg = reconcileTrackRegions(tr.id, tr.notes, tr.regions, barBeats).find(
+            (r) => r.id === ref.regionId
+          );
+          if (reg) minStart = Math.min(minStart, reg.startBeat);
+        });
+        const linearDrums = normalizePatternChainToLinear(state.patternChain);
+        linearDrums
+          .filter((d) => state.selectedChainIds.includes(d.id))
+          .forEach((d) => {
+            minStart = Math.min(minStart, d.startMeasure * barBeats);
+          });
+        state.audioClips
+          .filter((c) => state.selectedClipIds.includes(c.id))
+          .forEach((c) => {
+            minStart = Math.min(minStart, c.startBeat);
+          });
+
+        if (!Number.isFinite(minStart)) return;
+        const safeDelta = roundBeat(Math.max(-minStart, rawDelta));
+        if (Math.abs(safeDelta) < 0.0001) return;
+
+        const chordSet = new Set(state.selectedChordIds);
+        const drumSet = new Set(state.selectedChainIds);
+        const audioSet = new Set(state.selectedClipIds);
+
+        const nextChordBlocks = hasChordSel
+          ? state.chordBlocks
+              .map((b) =>
+                chordSet.has(b.id)
+                  ? { ...b, startBeat: Math.max(0, roundBeat(b.startBeat + safeDelta)) }
+                  : b
+              )
+              .sort((a, b) => a.startBeat - b.startBeat)
+          : state.chordBlocks;
+
+        let nextTracks = state.tracks;
+        let nextMelodyRefs = state.selectedMelodyRegionRefs;
+        if (hasMelodySel) {
+          const res = moveOrCloneMelodyRegions(
+            state.tracks,
+            state.selectedMelodyRegionRefs,
+            safeDelta,
+            0,
+            false,
+            barBeats
+          );
+          nextTracks = res.tracks;
+          nextMelodyRefs = res.nextSelectedRefs;
+        }
+
+        const nextPatternChain = hasDrumSel
+          ? normalizePatternChainItems(state.patternChain)
+              .map((c) =>
+                drumSet.has(c.id)
+                  ? {
+                      ...c,
+                      startMeasure: Math.max(
+                        0,
+                        Math.round(((c.startMeasure ?? 0) + safeDelta / barBeats) * 16) / 16
+                      )
+                    }
+                  : c
+              )
+              .sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0))
+          : state.patternChain;
+
+        const nextAudioClips = hasAudioSel
+          ? state.audioClips.map((c) =>
+              audioSet.has(c.id)
+                ? { ...c, startBeat: Math.max(0, roundBeat(c.startBeat + safeDelta)) }
+                : c
+            )
+          : state.audioClips;
+
+        const activeTrack = nextTracks.find((t) => t.id === state.activeTrackId);
+        useSongStore.setState({
+          chordBlocks: nextChordBlocks,
+          tracks: nextTracks,
+          melodyNotes: activeTrack ? activeTrack.notes : state.melodyNotes,
+          patternChain: nextPatternChain,
+          audioClips: nextAudioClips,
+          selectedMelodyRegionRefs: nextMelodyRefs
+        });
+        return;
+      }
+
+      // Ctrl+0: Zoom to Fit abarcando todas las capas
       if (isCtrlOrCmd && e.key === '0') {
         e.preventDefault();
         const viewport = timelineViewportRef.current;
         const starts: number[] = [];
         const ends: number[] = [];
+        state.chordBlocks.forEach((b) => {
+          starts.push(b.startBeat);
+          ends.push(b.startBeat + b.durationBeats);
+        });
+        state.tracks.forEach((tr) => {
+          reconcileTrackRegions(tr.id, tr.notes, tr.regions, barBeats).forEach((r) => {
+            starts.push(r.startBeat);
+            ends.push(r.startBeat + r.durationBeats);
+          });
+        });
+        normalizePatternChainToLinear(state.patternChain).forEach((d) => {
+          starts.push(d.startMeasure * barBeats);
+          ends.push((d.startMeasure + d.durationMeasures) * barBeats);
+        });
         state.audioClips.forEach((c) => {
           starts.push(c.startBeat);
           ends.push(c.startBeat + (c.durationSeconds * state.bpm) / 60);
-        });
-        state.midiClips.forEach((c) => {
-          starts.push(c.startBeat);
-          ends.push(c.startBeat + c.durationBeats);
         });
 
         if (!viewport || starts.length === 0) {
@@ -284,82 +877,13 @@ export const AudioTracksView: React.FC = () => {
         return;
       }
 
-      // Ctrl+D: Duplicar clips seleccionados (MIDI y/o Audio)
-      if (isCtrlOrCmd && keyLower === 'd') {
-        const hasMidiSel = state.selectedMidiClipIds.length > 0;
-        const hasAudioSel = state.selectedClipIds.length > 0;
-        if (hasMidiSel || hasAudioSel) {
-          e.preventDefault();
-          if (hasMidiSel) duplicateSelectedMidiClips();
-          if (hasAudioSel) state.selectedClipIds.forEach((id) => duplicateAudioClip(id));
-        }
-        return;
-      }
-
-      // M: Silenciar / activar clips seleccionados
-      if (keyLower === 'm' && !isCtrlOrCmd && !e.altKey && !e.shiftKey) {
-        const hasMidiSel = state.selectedMidiClipIds.length > 0;
-        const hasAudioSel = state.selectedClipIds.length > 0;
-        if (hasMidiSel || hasAudioSel) {
-          e.preventDefault();
-          if (hasMidiSel) state.selectedMidiClipIds.forEach((id) => toggleMidiClipMute(id));
-          if (hasAudioSel) state.selectedClipIds.forEach((id) => toggleClipMute(id));
-        }
-        return;
-      }
-
-      // Flechas Izquierda / Derecha: Mover clips seleccionados por el snap activo
-      if (
-        (e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
-        !isCtrlOrCmd &&
-        (state.selectedMidiClipIds.length > 0 || state.selectedClipIds.length > 0)
-      ) {
-        e.preventDefault();
-        const barBeats = getBeatsPerMeasure(state.timeSignature);
-        const snapStep =
-          e.altKey ? 0.25 :
-          state.audioSnapGrid === 'bar' ? barBeats :
-          state.audioSnapGrid === '1/2' ? 0.5 :
-          state.audioSnapGrid === '1/4' ? 0.25 :
-          state.audioSnapGrid === '1/8' ? 0.125 :
-          state.audioSnapGrid === '1/16' ? 0.0625 :
-          1;
-        const delta = (e.key === 'ArrowRight' ? 1 : -1) * snapStep;
-
-        if (state.selectedMidiClipIds.length > 0) {
-          const selected = state.midiClips.filter((c) => state.selectedMidiClipIds.includes(c.id));
-          const minStart = selected.reduce((m, c) => Math.min(m, c.startBeat), Infinity);
-          const safeDelta = Math.max(-minStart, delta);
-          if (safeDelta !== 0) {
-            state.updateMidiClipsBatch(
-              selected.map((c) => ({
-                id: c.id,
-                changes: { startBeat: Math.max(0, c.startBeat + safeDelta) }
-              }))
-            );
-          }
-        }
-        if (state.selectedClipIds.length > 0) {
-          const updateClip = state.updateAudioClip;
-          state.selectedClipIds.forEach((clipId) => {
-            const clip = state.audioClips.find((c) => c.id === clipId);
-            if (clip) {
-              updateClip(clipId, { startBeat: Math.max(0, clip.startBeat + delta) });
-            }
-          });
-        }
-        return;
-      }
-
-      // Escape: Volver a herramienta Pincel o deseleccionar clips
+      // Escape: Volver a herramienta Pincel o limpiar selección
       if (e.key === 'Escape') {
         if (state.playlistTool !== 'paint') {
           setPlaylistTool('paint');
         } else {
-          clearClipSelection();
-          clearMidiClipSelection();
+          clearAllPlaylistSelections();
         }
-        return;
       }
     };
 
@@ -368,18 +892,11 @@ export const AudioTracksView: React.FC = () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [
+    splitChordBlock,
+    splitMelodyRegion,
+    splitChainItem,
     splitAudioClip,
-    splitMidiClip,
-    removeAudioClip,
-    removeMidiClipsBatch,
-    duplicateAudioClip,
-    duplicateSelectedMidiClips,
-    toggleClipMute,
-    toggleMidiClipMute,
-    clearClipSelection,
-    clearMidiClipSelection,
-    copySelectedMidiClips,
-    pasteMidiClips,
+    clearAllPlaylistSelections,
     setAudioTimelineViewport,
     setPlaylistTool
   ]);
@@ -391,15 +908,23 @@ export const AudioTracksView: React.FC = () => {
     zoomLevel: zoomLevel / 60,
     minZoom: 20 / 60,
     maxZoom: 3.0,
-    onZoomChange: useCallback((nextScale: number) => {
-      setAudioTimelineViewport({ zoomLevel: Math.max(20, Math.min(180, Math.round(nextScale * 60))) });
-    }, [setAudioTimelineViewport]),
-    onScrollChange: useCallback((nextLeft: number) => {
-      setAudioTimelineViewport({ scrollLeft: nextLeft });
-    }, [setAudioTimelineViewport])
+    onZoomChange: useCallback(
+      (nextScale: number) => {
+        setAudioTimelineViewport({
+          zoomLevel: Math.max(20, Math.min(180, Math.round(nextScale * 60)))
+        });
+      },
+      [setAudioTimelineViewport]
+    ),
+    onScrollChange: useCallback(
+      (nextLeft: number) => {
+        setAudioTimelineViewport({ scrollLeft: nextLeft });
+      },
+      [setAudioTimelineViewport]
+    )
   });
 
-  // 4. Selección por área (Marquee / Lasso) en modo Seleccionar o Ctrl+Arrastrar
+  // 4. Selección por área (Marquee / Lasso) unificada across Armonía, Piano Roll, Batería y Audio
   const handleLanesPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     const target = e.target as HTMLElement;
@@ -418,7 +943,9 @@ export const AudioTracksView: React.FC = () => {
 
     const isAdditive = e.shiftKey;
     const initialState = useSongStore.getState();
-    const baseMidiSel = isAdditive ? [...initialState.selectedMidiClipIds] : [];
+    const baseChordSel = isAdditive ? [...initialState.selectedChordIds] : [];
+    const baseMelodySel = isAdditive ? [...initialState.selectedMelodyRegionRefs] : [];
+    const baseDrumSel = isAdditive ? [...initialState.selectedChainIds] : [];
     const baseAudioSel = isAdditive ? [...initialState.selectedClipIds] : [];
 
     let didMarqueeDrag = false;
@@ -439,8 +966,15 @@ export const AudioTracksView: React.FC = () => {
       const maxY = Math.max(startY, curY);
 
       const state = useSongStore.getState();
-      const laneNodes = container.querySelectorAll<HTMLElement>('[data-midi-track-id], [data-track-id]');
-      const hitMidiSet = new Set<string>(baseMidiSel);
+      const barBeats = getBeatsPerMeasure(state.timeSignature);
+      const laneNodes = container.querySelectorAll<HTMLElement>(
+        '[data-harmony-lane], [data-melody-track-id], [data-drum-lane], [data-track-id]'
+      );
+
+      const hitChordSet = new Set<string>(baseChordSel);
+      const hitMelodyMap = new Map<string, SelectedMelodyRegionRef>();
+      baseMelodySel.forEach((r) => hitMelodyMap.set(`${r.trackId}::${r.regionId}`, r));
+      const hitDrumSet = new Set<string>(baseDrumSel);
       const hitAudioSet = new Set<string>(baseAudioSel);
 
       laneNodes.forEach((laneEl) => {
@@ -448,30 +982,54 @@ export const AudioTracksView: React.FC = () => {
         const laneBottom = laneTop + laneEl.offsetHeight;
         if (laneBottom < minY || laneTop > maxY) return;
 
-        const midiTrackId = laneEl.dataset.midiTrackId;
-        if (midiTrackId) {
-          state.midiClips
-            .filter((c) => c.midiTrackId === midiTrackId)
-            .forEach((c) => {
-              const cx1 = c.startBeat * zoomLevel;
-              const cx2 = cx1 + c.durationBeats * zoomLevel;
-              if (cx2 >= minX && cx1 <= maxX) hitMidiSet.add(c.id);
-            });
+        if (laneEl.dataset.harmonyLane) {
+          state.chordBlocks.forEach((b) => {
+            const cx1 = b.startBeat * zoomLevel;
+            const cx2 = cx1 + b.durationBeats * zoomLevel;
+            if (cx2 >= minX && cx1 <= maxX) hitChordSet.add(b.id);
+          });
         }
+
+        const melodyTrackId = laneEl.dataset.melodyTrackId;
+        if (melodyTrackId) {
+          const tr = state.tracks.find((t) => t.id === melodyTrackId);
+          if (tr) {
+            reconcileTrackRegions(tr.id, tr.notes, tr.regions, barBeats).forEach((reg) => {
+              const cx1 = reg.startBeat * zoomLevel;
+              const cx2 = cx1 + reg.durationBeats * zoomLevel;
+              if (cx2 >= minX && cx1 <= maxX) {
+                hitMelodyMap.set(`${tr.id}::${reg.id}`, { trackId: tr.id, regionId: reg.id });
+              }
+            });
+          }
+        }
+
+        if (laneEl.dataset.drumLane) {
+          normalizePatternChainToLinear(state.patternChain).forEach((d) => {
+            const cx1 = d.startMeasure * barBeats * zoomLevel;
+            const cx2 = cx1 + d.durationMeasures * barBeats * zoomLevel;
+            if (cx2 >= minX && cx1 <= maxX) hitDrumSet.add(d.id);
+          });
+        }
+
         const audioTrackId = laneEl.dataset.trackId;
         if (audioTrackId) {
           state.audioClips
             .filter((c) => c.trackId === audioTrackId)
             .forEach((c) => {
               const cx1 = c.startBeat * zoomLevel;
-              const cx2 = cx1 + (c.durationSeconds * (state.bpm / 60)) * zoomLevel;
+              const cx2 = cx1 + c.durationSeconds * (state.bpm / 60) * zoomLevel;
               if (cx2 >= minX && cx1 <= maxX) hitAudioSet.add(c.id);
             });
         }
       });
 
+      const nextChordIds = Array.from(hitChordSet);
       useSongStore.setState({
-        selectedMidiClipIds: Array.from(hitMidiSet),
+        selectedChordIds: nextChordIds,
+        selectedChordId: nextChordIds.length === 1 ? nextChordIds[0] : null,
+        selectedMelodyRegionRefs: Array.from(hitMelodyMap.values()),
+        selectedChainIds: Array.from(hitDrumSet),
         selectedClipIds: Array.from(hitAudioSet)
       });
     };
@@ -494,7 +1052,7 @@ export const AudioTracksView: React.FC = () => {
     window.addEventListener('pointercancel', onUp);
   };
 
-  // 5. Deselección al hacer click en espacio vacío
+  // 5. Deselección al hacer clic en espacio vacío
   const handleTimelineBackgroundClick = (e: React.MouseEvent) => {
     if (suppressNextBgClickRef.current) {
       suppressNextBgClickRef.current = false;
@@ -504,10 +1062,10 @@ export const AudioTracksView: React.FC = () => {
     if (
       e.target === e.currentTarget ||
       target.classList.contains('audio-track-lane') ||
-      target.classList.contains('audio-lanes-container')
+      target.classList.contains('audio-lanes-container') ||
+      target.classList.contains('tracks-empty-lane-hint')
     ) {
-      clearClipSelection();
-      clearMidiClipSelection();
+      clearAllPlaylistSelections();
     }
   };
 
@@ -557,17 +1115,16 @@ export const AudioTracksView: React.FC = () => {
       {/* Barra de herramientas superior unificada */}
       <AudioTracksToolbar />
 
-      {/* Espacio de trabajo: Pattern Picker (Izq) + Cabeceras (Centro-Izq) + Timeline (Der) */}
+      {/* Espacio de trabajo: Paleta & Patrones (Izq) + Cabeceras 1:1 (Centro-Izq) + Timeline (Der) */}
       <div className="audio-workspace">
-        {/* Panel Selector de Patrones MIDI y Clips de Audio estilo FL Studio */}
         <PatternPickerSidebar />
 
         {/* Columna de Cabeceras de Pistas fijas con scroll vertical sincronizado */}
         <div className="audio-headers-column">
           <div className="audio-headers-top-spacer">
-            <span>PISTAS / PLAYLIST</span>
+            <span>TRACKS · 1:1</span>
             <span className="headers-count-badge">
-              {midiTracks.length}M · {audioTracks.length}A
+              {tracks.length}PR · {audioTracks.length}A
             </span>
           </div>
           <div
@@ -575,24 +1132,40 @@ export const AudioTracksView: React.FC = () => {
             className="audio-headers-list"
             onScroll={handleHeadersScroll}
           >
-            {/* Cabecera de sección MIDI TRACKS */}
-            <div className="tracks-section-bar midi-section-bar">
-              <span>MIDI / PATRONES</span>
+            {/* 1. ARMONÍA (Chord Palette 1:1) */}
+            <div className="tracks-section-bar harmony-section-bar">
+              <span>ARMONÍA · CHORD PALETTE</span>
+            </div>
+            <HarmonyTrackHeader />
+
+            {/* 2. PIANO ROLL (Canales de Instrumento 1:1) */}
+            <div className="tracks-section-bar melody-section-bar">
+              <span>PIANO ROLL · MELODÍAS</span>
               <button
                 type="button"
                 className="tracks-section-add-btn"
-                onClick={() => addMidiTrack()}
-                title="Añadir pista MIDI"
+                onClick={() => addPianoRollTrack()}
+                title="Añadir nueva pista de Piano Roll"
               >
                 <Plus size={11} />
               </button>
             </div>
-            {midiTracks.map((track) => {
-              const count = midiClips.filter((c) => c.midiTrackId === track.id).length;
-              return <MidiTrackHeader key={track.id} track={track} clipCount={count} />;
-            })}
+            {tracks.map((track) => (
+              <MelodyTrackHeader
+                key={track.id}
+                track={track}
+                canDelete={tracks.length > 1}
+                onRequestDeleteTrack={(id, name) => setTrackPendingDelete({ id, name })}
+              />
+            ))}
 
-            {/* Cabecera de sección AUDIO TRACKS */}
+            {/* 3. BATERÍA (Drum Sequencer 1:1) */}
+            <div className="tracks-section-bar drum-section-bar">
+              <span>BATERÍA · DRUM SEQUENCER</span>
+            </div>
+            <DrumTrackHeader />
+
+            {/* 4. AUDIO MULTITRACK */}
             <div className="tracks-section-bar audio-section-bar">
               <span>AUDIO MULTITRACK</span>
               <button
@@ -614,7 +1187,7 @@ export const AudioTracksView: React.FC = () => {
           </div>
         </div>
 
-        {/* Columna Derecha: Regla, Playhead y Carriles MIDI + Audio */}
+        {/* Columna Derecha: Regla, Playhead y Carriles 1:1 sincronizados */}
         <div
           ref={timelineViewportRef}
           className="audio-timeline-viewport"
@@ -622,7 +1195,7 @@ export const AudioTracksView: React.FC = () => {
           onScroll={handleTimelineScroll}
         >
           <div className="audio-timeline-inner" style={{ width: totalTimelineWidth }}>
-            {/* Regla de compases con referencia armónica */}
+            {/* Regla de compases */}
             <AudioTimelineRuler
               totalBeats={totalBeats}
               zoomLevel={zoomLevel}
@@ -632,31 +1205,45 @@ export const AudioTracksView: React.FC = () => {
             {/* Cabezal de reproducción animado a 60 FPS */}
             <AudioPlayhead zoomLevel={zoomLevel} />
 
-            {/* Carriles sincronizados (MIDI Tracks arriba + Audio Tracks abajo) */}
+            {/* Carriles sincronizados (Armonía -> Piano Roll -> Batería -> Audio) */}
             <div
               ref={lanesContainerRef}
               className="audio-lanes-container"
               onPointerDown={handleLanesPointerDown}
             >
-              {/* Separador alineado con tracks-section-bar MIDI (22px) */}
-              <div className="tracks-lane-section-spacer midi-spacer" style={{ width: totalTimelineWidth }} />
+              {/* 1. Separador + Carril ARMONÍA */}
+              <div
+                className="tracks-lane-section-spacer harmony-spacer"
+                style={{ width: totalTimelineWidth }}
+              />
+              <HarmonyTrackLane zoomLevel={zoomLevel} totalWidth={totalTimelineWidth} />
 
-              {midiTracks.map((track) => {
-                const trackClips = midiClips.filter((c) => c.midiTrackId === track.id);
-                return (
-                  <MidiTrackLane
-                    key={track.id}
-                    track={track}
-                    clips={trackClips}
-                    zoomLevel={zoomLevel}
-                    totalWidth={totalTimelineWidth}
-                  />
-                );
-              })}
+              {/* 2. Separador + Carriles PIANO ROLL */}
+              <div
+                className="tracks-lane-section-spacer melody-spacer"
+                style={{ width: totalTimelineWidth }}
+              />
+              {tracks.map((track) => (
+                <MelodyTrackLane
+                  key={track.id}
+                  track={track}
+                  zoomLevel={zoomLevel}
+                  totalWidth={totalTimelineWidth}
+                />
+              ))}
 
-              {/* Separador alineado con tracks-section-bar AUDIO (22px) */}
-              <div className="tracks-lane-section-spacer audio-spacer" style={{ width: totalTimelineWidth }} />
+              {/* 3. Separador + Carril BATERÍA */}
+              <div
+                className="tracks-lane-section-spacer drum-spacer"
+                style={{ width: totalTimelineWidth }}
+              />
+              <DrumTrackLane zoomLevel={zoomLevel} totalWidth={totalTimelineWidth} />
 
+              {/* 4. Separador + Carriles AUDIO MULTITRACK */}
+              <div
+                className="tracks-lane-section-spacer audio-spacer"
+                style={{ width: totalTimelineWidth }}
+              />
               {audioTracks.map((track) => {
                 const trackClips = audioClips.filter((c) => c.trackId === track.id);
                 return (
@@ -684,8 +1271,8 @@ export const AudioTracksView: React.FC = () => {
               )}
             </div>
 
-            {/* Guía compacta debajo de las pistas cuando la Playlist está vacía */}
-            {midiClips.length === 0 && audioClips.length === 0 && (
+            {/* Guía compacta debajo de las pistas cuando el proyecto está vacío */}
+            {isTimelineCompletelyEmpty && (
               <div className="audio-tracks-empty-watermark compact-playlist-hint">
                 <input
                   ref={emptyFileInputRef}
@@ -695,9 +1282,12 @@ export const AudioTracksView: React.FC = () => {
                   style={{ display: 'none' }}
                   onChange={handleEmptyImportChange}
                 />
-                <div className="watermark-title">PLAYLIST DE PATRONES MIDI &amp; AUDIO</div>
+                <div className="watermark-title">VISTA GENERAL DE TRACKS (1:1)</div>
                 <div className="watermark-subtitle">
-                  Selecciona un patrón de <strong>Drum Machine</strong> o <strong>Melodía</strong> en el panel izquierdo y haz clic o arrastra sobre cualquier <strong>Track MIDI</strong> para secuenciarlo (doble clic en un clip para editarlo). También puedes importar audio o pulsar <strong>R</strong> para grabar.
+                  <strong>Armonía</strong>, cada canal de <strong>Piano Roll</strong> y{' '}
+                  <strong>Batería</strong> comparten exactamente la misma línea de tiempo con sus
+                  editores. Pinta acordes o patrones desde el panel izquierdo, haz doble clic en
+                  cualquier pista para abrir su editor, o importa / graba audio.
                 </div>
                 <div className="audio-tracks-empty-actions">
                   <button
@@ -728,6 +1318,27 @@ export const AudioTracksView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Modal de confirmación para eliminar canal de Piano Roll con notas */}
+      <ConfirmModal
+        isOpen={Boolean(trackPendingDelete)}
+        title="Eliminar Pista de Piano Roll"
+        message={
+          trackPendingDelete
+            ? `¿Seguro que deseas eliminar la pista "${trackPendingDelete.name}" y todas sus notas? Esta acción también eliminará su canal en el Mixer.`
+            : ''
+        }
+        confirmText="Eliminar Pista"
+        cancelText="Cancelar"
+        isDanger={true}
+        onConfirm={() => {
+          if (trackPendingDelete) {
+            removePianoRollTrack(trackPendingDelete.id);
+          }
+          setTrackPendingDelete(null);
+        }}
+        onCancel={() => setTrackPendingDelete(null)}
+      />
 
       {/* Modal de Calibración de Latencia */}
       <AudioLatencyModal />

@@ -31,7 +31,6 @@ export class AudioTrackEngine {
    */
   public scheduleWindow(startSec: number, endSec: number, currentAudioSeconds: number, tempoMap: TempoMap): void {
     const state = useSongStore.getState();
-    if (state.playbackMode === 'pattern') return;
     const clips = state.audioClips;
     if (!clips || clips.length === 0) return;
 

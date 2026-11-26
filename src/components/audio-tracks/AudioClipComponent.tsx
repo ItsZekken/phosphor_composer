@@ -165,7 +165,7 @@ export const AudioClipComponent: React.FC<AudioClipComponentProps> = ({
   const snapBeat = (beat: number, grid: AudioSnapGrid): number => {
     if (grid === 'off') return Math.max(0, beat);
     let step = 1;
-    if (grid === 'bar') step = 4;
+    if (grid === 'bar') step = beatsPerMeasure;
     else if (grid === 'beat') step = 1;
     else if (grid === '1/2') step = 0.5;
     else if (grid === '1/4') step = 0.25;

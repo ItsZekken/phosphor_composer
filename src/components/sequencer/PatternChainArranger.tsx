@@ -21,8 +21,8 @@ import {
   Wand2,
   Sparkles,
   Play,
-  ArrowUpRight,
-  Radio
+  VolumeX,
+  Volume2
 } from 'lucide-react';
 
 const PATTERN_PALETTE = [
@@ -137,15 +137,10 @@ export const PatternChainArranger: React.FC = () => {
     fillChainToSong,
     clearPatternChain,
     removeChainItem,
+    toggleMuteChainItem,
     chainClipboard,
     drumTimelineViewport,
-    setDrumTimelineViewport,
-    drumArrangementMode,
-    setDrumArrangementMode,
-    midiClips,
-    setSelectedPatternRef,
-    setActiveView,
-    importDrumChainToMidiTrack
+    setDrumTimelineViewport
   } = useSongStore(useShallow(state => ({
     patternChain: state.patternChain || [],
     drumChannels: state.drumChannels || [],
@@ -176,22 +171,11 @@ export const PatternChainArranger: React.FC = () => {
     fillChainToSong: state.fillChainToSong,
     clearPatternChain: state.clearPatternChain,
     removeChainItem: state.removeChainItem,
+    toggleMuteChainItem: state.toggleMuteChainItem,
     chainClipboard: state.chainClipboard || [],
     drumTimelineViewport: state.drumTimelineViewport,
-    setDrumTimelineViewport: state.setDrumTimelineViewport,
-    drumArrangementMode: state.drumArrangementMode,
-    setDrumArrangementMode: state.setDrumArrangementMode,
-    midiClips: state.midiClips || [],
-    setSelectedPatternRef: state.setSelectedPatternRef,
-    setActiveView: state.setActiveView,
-    importDrumChainToMidiTrack: state.importDrumChainToMidiTrack
+    setDrumTimelineViewport: state.setDrumTimelineViewport
   })));
-
-  const playlistDrumClipsCount = useMemo(
-    () => midiClips.filter((c) => c.sourceType === 'drums').length,
-    [midiClips]
-  );
-  const isPlaylistControlled = drumArrangementMode === 'playlist' || playlistDrumClipsCount > 0;
 
   const beatsPerMeasure = timeSignature === '3/4' ? 3 : timeSignature === '6/8' ? 6 : 4;
   const totalPatterns = drumChannels[0]?.patterns?.length || 8;
@@ -449,6 +433,12 @@ export const PatternChainArranger: React.FC = () => {
         return;
       }
 
+      if (!isCtrlOrCmd && !e.altKey && !e.shiftKey && keyLower === 'm' && selectedChainIds.length > 0) {
+        e.preventDefault();
+        selectedChainIds.forEach((cid) => toggleMuteChainItem(cid));
+        return;
+      }
+
       if (isCtrlOrCmd && keyLower === 'c') {
         if (selectedChainIds.length > 0) {
           e.preventDefault();
@@ -534,7 +524,8 @@ export const PatternChainArranger: React.FC = () => {
     duplicateSelectedChainItems,
     selectAllChainItems,
     deleteSelectedChainItems,
-    updateChainItemsBatch
+    updateChainItemsBatch,
+    toggleMuteChainItem
   ]);
 
   // Scrubbing desde regla de compases
@@ -850,57 +841,6 @@ export const PatternChainArranger: React.FC = () => {
           <span className="chain-meta-summary">
             {linearClips.length} {linearClips.length === 1 ? 'clip' : 'clips'} · {Math.ceil(maxClipEndMeasure)} c.
           </span>
-
-          {isPlaylistControlled ? (
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-              <button
-                type="button"
-                className="piano-playlist-link-btn is-playlist"
-                onClick={() => {
-                  setSelectedPatternRef({ sourceType: 'drums', drumPatternIndex: currentDrumPatternEdit });
-                  setActiveView('audio-tracks');
-                }}
-                title="Los patrones de batería se están secuenciando en los MIDI Tracks de TRACKS. Clic para abrir TRACKS."
-              >
-                <Radio size={11} />
-                <span>EN TRACKS ({playlistDrumClipsCount})</span>
-                <ArrowUpRight size={11} />
-              </button>
-              {playlistDrumClipsCount === 0 && (
-                <button
-                  type="button"
-                  className="physical-btn"
-                  style={{ fontSize: '0.64rem', padding: '0 6px', height: '22px' }}
-                  onClick={() => setDrumArrangementMode('sequencer')}
-                  title="Devolver control al secuenciador local"
-                >
-                  Usar local
-                </button>
-              )}
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="piano-playlist-link-btn"
-              onClick={() => {
-                if (linearClips.length > 0) {
-                  importDrumChainToMidiTrack();
-                } else {
-                  setSelectedPatternRef({ sourceType: 'drums', drumPatternIndex: currentDrumPatternEdit });
-                }
-                setActiveView('audio-tracks');
-              }}
-              title={
-                linearClips.length > 0
-                  ? 'Exportar esta cadena de batería a un MIDI Track en TRACKS (Playlist)'
-                  : 'Secuenciar este patrón de batería en TRACKS (Playlist)'
-              }
-            >
-              <Radio size={11} />
-              <span>{linearClips.length > 0 ? 'ENVIAR A TRACKS' : 'SECUENCIAR EN TRACKS'}</span>
-              <ArrowUpRight size={11} />
-            </button>
-          )}
         </div>
 
         {/* Brocha de Patrones (Click selecciona, Drag suelta en el timeline) */}
@@ -1189,6 +1129,8 @@ export const PatternChainArranger: React.FC = () => {
                     width: `${widthPx}px`,
                     borderColor: isSelected ? '#ffd875' : color,
                     backgroundColor: `${color}24`,
+                    opacity: clip.isMuted ? 0.42 : 1,
+                    filter: clip.isMuted ? 'saturate(0.3)' : undefined,
                     cursor: isSliceToolActive ? 'crosshair' : 'grab',
                     '--clip-color': color
                   } as React.CSSProperties}
@@ -1241,7 +1183,9 @@ export const PatternChainArranger: React.FC = () => {
                       P{clip.patternIndex + 1}
                     </span>
                     {widthPx > 62 && (
-                      <span className="drum-clip-span">{formatMeasureRange(renderStart, renderDur)}</span>
+                      <span className="drum-clip-span">
+                        {clip.isMuted ? 'MUTE' : formatMeasureRange(renderStart, renderDur)}
+                      </span>
                     )}
                   </div>
 
@@ -1418,6 +1362,18 @@ export const PatternChainArranger: React.FC = () => {
             }}
           >
             <Layers size={13} /> Duplicar (Ctrl+D)
+          </button>
+
+          <button
+            type="button"
+            className="menu-item"
+            onClick={() => {
+              toggleMuteChainItem(clipContextMenu.clip.id);
+              setClipContextMenu(null);
+            }}
+          >
+            {clipContextMenu.clip.isMuted ? <Volume2 size={13} /> : <VolumeX size={13} />}
+            {clipContextMenu.clip.isMuted ? 'Activar clip (M)' : 'Silenciar clip (M)'}
           </button>
 
           <hr className="menu-separator" />

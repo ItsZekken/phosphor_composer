@@ -19,7 +19,6 @@ import { AudioTransport } from '../core/audio/engine/AudioTransport';
 import { AudioTrackEngine } from '../core/audio/engine/AudioTrackEngine';
 import { LookaheadScheduler } from '../core/audio/lookaheadScheduler';
 import { normalizePatternChainToLinear, type ChannelConfig, type SynthSettings, type PianoRollTrack } from '../utils/typeDefinitions';
-import { resolveArrangedDrumClips } from '../core/audio/arrangementResolver';
 import type { PatternDef } from '../patterns/patternTypes';
 import { exportStageToMp4 } from '../core/video/stageVideoExporter';
 import { ensurePhosphorWorkletRegistered, getNativeAudioContext } from '../core/audio/worklet/PhosphorWorkletNode';
@@ -41,10 +40,7 @@ const didTracksMusicalContentChange = (prev: PianoRollTrack[] | undefined, next:
     if (
       prev[i].id !== next[i].id ||
       prev[i].channelId !== next[i].channelId ||
-      prev[i].notes !== next[i].notes ||
-      prev[i].patterns !== next[i].patterns ||
-      prev[i].activePatternId !== next[i].activePatternId ||
-      prev[i].arrangementMode !== next[i].arrangementMode
+      prev[i].notes !== next[i].notes
     ) {
       return true;
     }
@@ -191,32 +187,7 @@ class ToneEngine {
         let localStepIndex = 0;
         let currentChainItemId: string | null = null;
 
-        const drumRes = resolveArrangedDrumClips(state.midiTracks, state.midiClips, state.drumArrangementMode);
-
-        if (state.playbackMode === 'pattern') {
-          patternIndex = state.currentDrumPatternEdit;
-          const beatInMeasure = ((beat % beatsPerMeasure) + beatsPerMeasure) % beatsPerMeasure;
-          const patternLen = state.patternLengths?.[patternIndex] || 16;
-          localStepIndex = Math.min(patternLen - 1, Math.max(0, Math.floor((beatInMeasure / beatsPerMeasure) * patternLen)));
-        } else if (drumRes.isPlaylistControlled) {
-          const loopBeats = Math.max(beatsPerMeasure, this.cachedMaxBeat || beatsPerMeasure);
-          const wrappedBeat = ((beat % loopBeats) + loopBeats) % loopBeats;
-          const activeDrumClip = drumRes.audibleDrumClips.find(
-            (c) => wrappedBeat >= c.startBeat - 1e-6 && wrappedBeat < c.startBeat + c.durationBeats - 1e-6
-          );
-          if (activeDrumClip) {
-            patternIndex = Math.max(0, activeDrumClip.drumPatternIndex ?? 0);
-            currentChainItemId = activeDrumClip.id;
-            const localBeat = (activeDrumClip.offsetBeats || 0) + (wrappedBeat - activeDrumClip.startBeat);
-            const beatInMeasure = ((localBeat % beatsPerMeasure) + beatsPerMeasure) % beatsPerMeasure;
-            const patternLen = state.patternLengths?.[patternIndex] || 16;
-            localStepIndex = Math.min(patternLen - 1, Math.max(0, Math.floor((beatInMeasure / beatsPerMeasure) * patternLen)));
-          } else {
-            patternIndex = state.currentDrumPatternEdit;
-            currentChainItemId = null;
-            localStepIndex = -1;
-          }
-        } else if (!state.isPatternRepeatOn && state.patternChain && state.patternChain.length > 0) {
+        if (!state.isPatternRepeatOn && state.patternChain && state.patternChain.length > 0) {
           if (state.patternChain !== this.cachedPatternChainRef) {
             this.cachedPatternChainRef = state.patternChain;
             this.cachedLinearPatternChain = normalizePatternChainToLinear(state.patternChain);
@@ -228,7 +199,7 @@ class ToneEngine {
           let activeClip: typeof linearClips[number] | undefined;
           for (let i = 0; i < linearClips.length; i++) {
             const c = linearClips[i];
-            if (currentMeasure >= c.startMeasure - 1e-6 && currentMeasure < c.startMeasure + c.durationMeasures - 1e-6) {
+            if (!c.isMuted && currentMeasure >= c.startMeasure - 1e-6 && currentMeasure < c.startMeasure + c.durationMeasures - 1e-6) {
               activeClip = c;
               break;
             }
@@ -424,14 +395,7 @@ class ToneEngine {
     let prevTempoMarkers = initialState.tempoMarkers;
     let prevAudioTracks = initialState.audioTracks;
     let prevAudioClips = initialState.audioClips;
-    let prevMidiTracks = initialState.midiTracks;
-    let prevMidiClips = initialState.midiClips;
-    let prevDrumArrangementMode = initialState.drumArrangementMode;
     let prevPatternLengths = initialState.patternLengths;
-    let prevPlaybackMode = initialState.playbackMode;
-    let prevSelectedPatternRef = initialState.selectedPatternRef;
-    let prevActiveView = initialState.activeView;
-    let prevActiveTrackId = initialState.activeTrackId;
 
     this.unsubscribeStore = useSongStore.subscribe((state) => {
       this.cachedIsKeyboardMelodyEnabled = state.isKeyboardMelodyEnabled;
@@ -484,16 +448,12 @@ class ToneEngine {
       }
       if (state.currentDrumPatternEdit !== prevCurrentDrumPatternEdit) {
         prevCurrentDrumPatternEdit = state.currentDrumPatternEdit;
-        if (state.isPatternRepeatOn || state.playbackMode === 'pattern') {
+        if (state.isPatternRepeatOn) {
           musicalContentChanged = true;
         }
       }
       if (state.patternLengths !== prevPatternLengths) {
         prevPatternLengths = state.patternLengths;
-        musicalContentChanged = true;
-      }
-      if (state.drumArrangementMode !== prevDrumArrangementMode) {
-        prevDrumArrangementMode = state.drumArrangementMode;
         musicalContentChanged = true;
       }
 
@@ -604,7 +564,7 @@ class ToneEngine {
         this.updateSustain(state.sustain);
       }
 
-      // 10. Pistas y Clips de Audio y MIDI Multitrack
+      // 10. Pistas y Clips de Audio Multitrack
       if (state.audioTracks !== prevAudioTracks) {
         prevAudioTracks = state.audioTracks;
         this.mixerGraph.syncAudioTracks(state.audioTracks || []);
@@ -613,39 +573,6 @@ class ToneEngine {
       if (state.audioClips !== prevAudioClips) {
         prevAudioClips = state.audioClips;
         musicalContentChanged = true;
-      }
-      if (state.midiTracks !== prevMidiTracks) {
-        prevMidiTracks = state.midiTracks;
-        musicalContentChanged = true;
-      }
-      if (state.midiClips !== prevMidiClips) {
-        prevMidiClips = state.midiClips;
-        musicalContentChanged = true;
-      }
-      if (state.playbackMode !== prevPlaybackMode) {
-        prevPlaybackMode = state.playbackMode;
-        this.audioTrackEngine.stop();
-        musicalContentChanged = true;
-        if (state.isPlaying) {
-          this.syncTimeline();
-          const currentLive = this.lookaheadScheduler.getLiveBeat();
-          if (currentLive >= this.cachedMaxBeat) {
-            this.seekToBeat(0);
-          }
-        }
-      }
-      if (state.selectedPatternRef !== prevSelectedPatternRef) {
-        prevSelectedPatternRef = state.selectedPatternRef;
-        if (state.playbackMode === 'pattern') {
-          musicalContentChanged = true;
-        }
-      }
-      if (state.activeView !== prevActiveView || state.activeTrackId !== prevActiveTrackId) {
-        prevActiveView = state.activeView;
-        prevActiveTrackId = state.activeTrackId;
-        if (state.playbackMode === 'pattern') {
-          musicalContentChanged = true;
-        }
       }
 
       // 11. Hot-Reloading: sincronización continua en caliente si hay reproducción activa
@@ -1009,15 +936,10 @@ class ToneEngine {
     const scheduled = scheduleStoreTimeline(state);
     this.cachedMaxBeat = scheduled.totalBeats;
 
-    const effectiveLooping = state.playbackMode === 'pattern' ? true : state.isLooping;
-    this.lookaheadScheduler.setEvents(scheduled, bpm, effectiveLooping, state.tempoMarkers);
+    this.lookaheadScheduler.setEvents(scheduled, bpm, state.isLooping, state.tempoMarkers);
     this.mixerGraph.syncAudioTracks(state.audioTracks || []);
 
-    const loopEndSeconds =
-      state.playbackMode === 'pattern'
-        ? Math.max(0.1, scheduled.totalDurationSeconds)
-        : Math.max(0.1, scheduled.totalDurationSeconds - 2.0);
-    this.transportManager.setLoop(effectiveLooping, 0, loopEndSeconds);
+    this.transportManager.setLoop(state.isLooping, 0, Math.max(0.1, scheduled.totalDurationSeconds - 2.0));
   }
 
   private updateSustain(sustain: boolean) {

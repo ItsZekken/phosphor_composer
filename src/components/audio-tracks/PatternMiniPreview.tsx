@@ -1,7 +1,7 @@
 /**
  * PatternMiniPreview.tsx
- * Renderizador ligero en Canvas 2D de miniaturas de notas MIDI (Piano Roll) y pasos de batería (Drum Sequencer)
- * para las tarjetas del Pattern Picker y los bloques de patrones en la Playlist estilo FL Studio.
+ * Renderizador ligero en Canvas 2D de miniaturas de notas reales de Melodía (Piano Roll 1:1)
+ * y pasos de batería (Drum Sequencer 1:1) para el panel lateral y los clips en Tracks.
  */
 
 import React, { useRef, useEffect } from 'react';
@@ -9,10 +9,11 @@ import type { DrumChannel, MelodyNote } from '../../utils/typeDefinitions';
 
 interface MelodyMiniPreviewProps {
   kind: 'melody';
+  /** Notas reales dentro de la región, ya normalizadas a [0..durationBeats] */
   notes: MelodyNote[];
-  patternLengthBeats: number;
   durationBeats: number;
-  offsetBeats?: number;
+  /** Si la región fue repetida/estirada, dibuja marcadores sutiles de ciclo cada N beats */
+  loopLengthBeats?: number;
   color: string;
   width: number;
   height: number;
@@ -57,24 +58,20 @@ export const PatternMiniPreview: React.FC<PatternMiniPreviewProps> = React.memo(
     ctx.clearRect(0, 0, w, h);
 
     const dur = Math.max(0.25, props.durationBeats);
-    const offset = Math.max(0, props.offsetBeats || 0);
-    const winStart = offset;
-    const winEnd = offset + dur;
     const pxPerBeat = w / dur;
 
     if (props.kind === 'melody') {
       const notes = props.notes || [];
-      const patLen = Math.max(0.25, props.patternLengthBeats);
+      const loopLen = props.loopLengthBeats;
 
-      // Divisores de bucle si el clip repite el patrón
-      if (props.showLoopMarkers && dur > patLen + 0.01) {
+      // Divisores de bucle sutiles si el clip fue repetido/estirado
+      if (props.showLoopMarkers && loopLen && loopLen >= 0.25 && dur > loopLen + 0.01) {
         ctx.save();
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 2]);
-        const firstMarkerCycle = Math.floor(winStart / patLen) + 1;
-        for (let c = firstMarkerCycle; c * patLen < winEnd - 0.01; c++) {
-          const x = Math.round((c * patLen - winStart) * pxPerBeat) + 0.5;
+        for (let b = loopLen; b < dur - 0.01; b += loopLen) {
+          const x = Math.round(b * pxPerBeat) + 0.5;
           ctx.beginPath();
           ctx.moveTo(x, 0);
           ctx.lineTo(x, h);
@@ -84,7 +81,6 @@ export const PatternMiniPreview: React.FC<PatternMiniPreviewProps> = React.memo(
       }
 
       if (notes.length === 0) {
-        // Línea guía sutil cuando el patrón aún está vacío
         ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
         ctx.fillRect(4, Math.floor(h / 2), Math.max(0, w - 8), 1);
         return;
@@ -105,29 +101,22 @@ export const PatternMiniPreview: React.FC<PatternMiniPreviewProps> = React.memo(
       const usableH = Math.max(4, h - padY * 2);
       const noteH = Math.max(2, Math.min(4.5, usableH / Math.min(span, 12)));
 
-      const firstCycle = Math.floor(winStart / patLen);
-      const lastCycle = Math.floor((winEnd - 1e-6) / patLen);
-
       ctx.fillStyle = props.color || '#a78bfa';
 
-      for (let cycle = firstCycle; cycle <= lastCycle; cycle++) {
-        const cycleBase = cycle * patLen;
-        for (let i = 0; i < notes.length; i++) {
-          const n = notes[i];
-          if (n.startBeat >= patLen - 1e-6) continue;
-          const localStart = cycleBase + n.startBeat;
-          const localEnd = Math.min(winEnd, localStart + n.durationBeats);
-          if (localEnd <= winStart || localStart >= winEnd) continue;
+      for (let i = 0; i < notes.length; i++) {
+        const n = notes[i];
+        const localStart = n.startBeat;
+        const localEnd = Math.min(dur, localStart + n.durationBeats);
+        if (localEnd <= 0 || localStart >= dur) continue;
 
-          const clippedStart = Math.max(winStart, localStart);
-          const x = (clippedStart - winStart) * pxPerBeat;
-          const nw = Math.max(2, (localEnd - clippedStart) * pxPerBeat - 0.5);
-          const normY = (topMidi - n.midi) / span;
-          const y = padY + normY * (usableH - noteH);
+        const clippedStart = Math.max(0, localStart);
+        const x = clippedStart * pxPerBeat;
+        const nw = Math.max(2, (localEnd - clippedStart) * pxPerBeat - 0.5);
+        const normY = (topMidi - n.midi) / span;
+        const y = padY + normY * (usableH - noteH);
 
-          ctx.globalAlpha = 0.65 + (n.velocity ?? 0.8) * 0.35;
-          ctx.fillRect(x, y, nw, noteH);
-        }
+        ctx.globalAlpha = n.muted ? 0.22 : 0.65 + (n.velocity ?? 0.8) * 0.35;
+        ctx.fillRect(x, y, nw, noteH);
       }
       ctx.globalAlpha = 1;
       return;
@@ -135,6 +124,9 @@ export const PatternMiniPreview: React.FC<PatternMiniPreviewProps> = React.memo(
 
     // --- DRUMS ---
     const patLen = Math.max(1, props.beatsPerMeasure || 4);
+    const offset = Math.max(0, props.offsetBeats || 0);
+    const winStart = offset;
+    const winEnd = offset + dur;
     const stepsCount = Math.max(4, props.patternSteps || 16);
     const stepDur = patLen / stepsCount;
 
@@ -161,7 +153,6 @@ export const PatternMiniPreview: React.FC<PatternMiniPreviewProps> = React.memo(
     });
 
     if (activeChannels.length === 0) {
-      // Marcadores discretos de rejilla para patrón vacío
       ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
       const tickCount = Math.min(16, Math.max(4, Math.floor(w / 10)));
       for (let i = 0; i < tickCount; i++) {

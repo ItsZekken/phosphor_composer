@@ -10,7 +10,6 @@ export const initialTransportState: TransportState = {
   detectedKey: null,
   timeSignature: '4/4',
   isPlaying: false,
-  playbackMode: 'song',
   currentBeat: 0,
   playbackStep: 0,
   isLooping: true,
@@ -84,8 +83,6 @@ export const createTransportSlice: SliceCreator<TransportState & TransportAction
       };
     }
   }),
-
-  setPlaybackMode: (playbackMode) => set({ playbackMode }),
 
   setCurrentBeat: (currentBeat) => {
     const oldBeat = get().currentBeat;

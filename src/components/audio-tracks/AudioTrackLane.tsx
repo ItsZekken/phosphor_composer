@@ -35,7 +35,7 @@ export const AudioTrackHeader: React.FC<AudioTrackHeaderProps> = ({
   liveRms = 0
 }) => {
   const selectedTrackId = useSongStore((state) => state.selectedTrackId);
-  const selectedPlaylistTrackKind = useSongStore((state) => state.selectedPlaylistTrackKind);
+  const selectedPlaylistTrack = useSongStore((state) => state.selectedPlaylistTrack);
   const setSelectedTrackId = useSongStore((state) => state.setSelectedTrackId);
   const updateAudioTrack = useSongStore((state) => state.updateAudioTrack);
   const removeAudioTrack = useSongStore((state) => state.removeAudioTrack);
@@ -44,7 +44,7 @@ export const AudioTrackHeader: React.FC<AudioTrackHeaderProps> = ({
 
   const [trackName, setTrackName] = useState(track.name);
   const [playbackRms, setPlaybackRms] = useState(0);
-  const isSelected = selectedPlaylistTrackKind === 'audio' && selectedTrackId === track.id;
+  const isSelected = selectedPlaylistTrack.kind === 'audio' && selectedTrackId === track.id;
 
   const trackDb = normalizeTrackDb(track.volume);
   const faderPos = dbToFaderPos(trackDb);

@@ -18,8 +18,7 @@ import type {
   PatternChainItem,
   PianoRollTrack,
   StyleMarker,
-  TempoMarker,
-  PlaybackMode
+  TempoMarker
 } from '../utils/typeDefinitions';
 import type { PatternDef } from '../patterns/patternTypes';
 
@@ -37,7 +36,6 @@ export interface TransportState {
   detectedKey: string | null;
   timeSignature: TimeSignature;
   isPlaying: boolean;
-  playbackMode: PlaybackMode;
   currentBeat: number;
   playbackStep: number;
   isLooping: boolean;
@@ -65,7 +63,6 @@ export interface TransportActions {
   setIsAutoKey: (isAutoKey: boolean) => void;
   setTimeSignature: (timeSignature: TimeSignature) => void;
   setPlaying: (isPlaying: boolean) => void;
-  setPlaybackMode: (mode: PlaybackMode) => void;
   setCurrentBeat: (beat: number) => void;
   setPlaybackStep: (step: number) => void;
   setLooping: (isLooping: boolean) => void;
@@ -164,14 +161,6 @@ export interface TrackActions {
   setPianoRollGridSnap: (snap: PianoRollGridSnap) => void;
   updateMelodyNotesBatch: (updates: Array<{ id: string; changes: Partial<MelodyNote> }>) => void;
   removeMelodyNotesBatch: (ids: string[]) => void;
-  setActiveTrackPattern: (trackId: string, patternId: string) => void;
-  addMelodyPattern: (trackId: string, name?: string, lengthBeats?: number) => string | null;
-  duplicateMelodyPattern: (trackId: string, patternId: string) => string | null;
-  renameMelodyPattern: (trackId: string, patternId: string, name: string) => void;
-  setMelodyPatternLength: (trackId: string, patternId: string, lengthBeats?: number) => void;
-  clearMelodyPattern: (trackId: string, patternId: string) => void;
-  removeMelodyPattern: (trackId: string, patternId: string) => void;
-  setTrackArrangementMode: (trackId: string, mode: 'direct' | 'playlist') => void;
 }
 
 export interface DrumState {
@@ -180,7 +169,6 @@ export interface DrumState {
   activeDrumKitId: string;
   patternLengths: number[];
   drumPatternNames: string[];
-  drumArrangementMode: 'sequencer' | 'playlist';
   userDrumPatternEdit: number;
   currentDrumPatternEdit: number;
   isLiveFollowLocked: boolean;
@@ -200,7 +188,6 @@ export interface DrumActions {
   setCurrentDrumPatternEditLive: (pattern: number) => void;
   setDrumPatternLength: (patternIndex: number, length: number) => void;
   renameDrumPattern: (patternIndex: number, name: string) => void;
-  setDrumArrangementMode: (mode: 'sequencer' | 'playlist') => void;
   addDrumChannel: (channel: DrumChannel) => void;
   updateDrumChannel: (id: string, updates: Partial<DrumChannel>) => void;
   removeDrumChannel: (id: string) => void;
@@ -223,9 +210,10 @@ export interface DrumActions {
   selectAllChainItems: () => void;
   copySelectedChainItems: () => void;
   cutSelectedChainItems: () => void;
-  pasteChainItems: (targetId?: string) => void;
+  pasteChainItems: (targetId?: string, targetMeasure?: number) => void;
   duplicateSelectedChainItems: () => void;
   deleteSelectedChainItems: () => void;
+  toggleMuteChainItem: (id: string) => void;
   groupSelectedChainItems: () => void;
   ungroupSelectedChainItems: () => void;
   setDrumTimelineViewport: (viewport: Partial<{ scrollLeft: number; zoomLevel: number }>) => void;
@@ -324,8 +312,8 @@ export type SongStore = TransportState &
   UIActions &
   import('./slices/audioTrackSlice').AudioTrackState &
   import('./slices/audioTrackSlice').AudioTrackActions &
-  import('./slices/midiTrackSlice').MidiTrackState &
-  import('./slices/midiTrackSlice').MidiTrackActions &
+  import('./slices/playlistSlice').PlaylistState &
+  import('./slices/playlistSlice').PlaylistActions &
   ProjectActions;
 
 export type SliceCreator<T> = StateCreator<SongStore, [], [], T>;

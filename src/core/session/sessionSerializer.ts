@@ -20,7 +20,7 @@ import type { NoteClass, ScaleType } from '../music';
 import { normalizePitchClass, noteToMidi } from '../music';
 import { normalizeSynthSettings } from '../audio/engine/synthPresets';
 import { normalizePatternChainItems } from '../../utils/typeDefinitions';
-import { ensureTrackPatterns } from '../audio/arrangementResolver';
+import { materializeLegacyMidiArrangement } from '../audio/arrangementResolver';
 
 export const createEmptyPatterns = (numPatterns = 8, length = 16) => 
   Array.from({ length: numPatterns }).map(() => 
@@ -135,7 +135,8 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
           midi: typeof n.midi === 'number' ? n.midi : noteToMidi(noteName),
           startBeat: typeof n.startBeat === 'number' ? n.startBeat : 0,
           durationBeats: typeof n.durationBeats === 'number' ? n.durationBeats : 1,
-          velocity: typeof n.velocity === 'number' ? n.velocity : 0.8
+          velocity: typeof n.velocity === 'number' ? n.velocity : 0.8,
+          ...(n.muted ? { muted: true } : {})
         };
       })
     : [];
@@ -151,43 +152,34 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
               midi: typeof n.midi === 'number' ? n.midi : noteToMidi(noteName),
               startBeat: typeof n.startBeat === 'number' ? n.startBeat : 0,
               durationBeats: typeof n.durationBeats === 'number' ? n.durationBeats : 1,
-              velocity: typeof n.velocity === 'number' ? n.velocity : 0.8
+              velocity: typeof n.velocity === 'number' ? n.velocity : 0.8,
+              ...(n.muted ? { muted: true } : {})
             };
           })
         : [];
 
       const trackId = t.id || `track_melody_${index + 1}`;
-      const baseTrack: PianoRollTrack = {
+      return {
         id: trackId,
         name: t.name || `Pista ${index + 1}`,
         channelId: t.channelId || (index === 0 ? 'melody' : `ch_${t.id || `track_${index + 1}`}`),
         color: t.color || '#ff00aa',
         notes: trackNotes,
-        patterns: Array.isArray(t.patterns) && t.patterns.length > 0 ? t.patterns : undefined,
-        activePatternId: typeof t.activePatternId === 'string' ? t.activePatternId : undefined,
-        arrangementMode: t.arrangementMode === 'playlist' ? 'playlist' : 'direct',
+        ...(Array.isArray(t.regions) && t.regions.length > 0 ? { regions: t.regions } : {}),
+        ...(Array.isArray(t.patterns) && t.patterns.length > 0 ? { patterns: t.patterns } : {}),
+        ...(typeof t.activePatternId === 'string' ? { activePatternId: t.activePatternId } : {}),
+        ...(t.arrangementMode ? { arrangementMode: t.arrangementMode } : {}),
         viewport: t.viewport || { ...DEFAULT_VIEWPORT }
-      };
-      const ensured = ensureTrackPatterns(baseTrack);
-      return {
-        ...baseTrack,
-        patterns: ensured.patterns,
-        activePatternId: ensured.activePatternId,
-        notes: ensured.activePattern.notes
       };
     });
 
     // Si la primera pista no tiene notas pero existía melodyNotes plano en la raíz, sincronizar
     if (rawNotes.length > 0 && tracks[0].notes.length === 0) {
       tracks[0].notes = rawNotes;
-      if (tracks[0].patterns && tracks[0].patterns[0]) {
-        tracks[0].patterns[0] = { ...tracks[0].patterns[0], notes: rawNotes };
-      }
       warnings.push('Se migraron notas planas de melodyNotes a la primera pista de Piano Roll.');
     }
   } else {
     // Si no había tracks definidos (v1 plano), construir la pista inicial
-    const firstPatId = 'pat_melody_1_1';
     tracks = [
       {
         id: 'track_melody_1',
@@ -195,9 +187,6 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
         channelId: 'melody',
         color: '#ff00aa',
         notes: rawNotes,
-        patterns: [{ id: firstPatId, name: 'Patrón 1', notes: rawNotes }],
-        activePatternId: firstPatId,
-        arrangementMode: 'direct',
         viewport: { ...DEFAULT_VIEWPORT }
       }
     ];
@@ -210,10 +199,29 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
     ? raw.activeTrackId
     : tracks[0].id;
 
-  // 4. Normalizar Baterías (migrar cadena secuencial legada a clips lineales)
+  // 4. Normalizar Baterías y materializar cualquier arreglo legado de MIDI Tracks al modelo 1:1
   const rawChain = Array.isArray(raw.patternChain) ? raw.patternChain : [];
-  const patternChain = normalizePatternChainItems(rawChain);
-  const isPatternRepeatOn = Boolean(raw.isPatternRepeatOn);
+  const rawNormalizedChain = normalizePatternChainItems(rawChain);
+  const rawIsPatternRepeatOn = Boolean(raw.isPatternRepeatOn);
+  const legacyMidiTracks = (raw as any).midi?.tracks || (raw as any).midiTracks || [];
+  const legacyMidiClips = (raw as any).midi?.clips || (raw as any).midiClips || [];
+  const legacyDrumMode =
+    (raw as any).drumArrangementMode === 'playlist' || (raw as any).drums?.drumArrangementMode === 'playlist'
+      ? ('playlist' as const)
+      : ('sequencer' as const);
+
+  const materialized = materializeLegacyMidiArrangement({
+    tracks,
+    patternChain: rawNormalizedChain,
+    isPatternRepeatOn: rawIsPatternRepeatOn,
+    drumArrangementMode: legacyDrumMode,
+    midiTracks: legacyMidiTracks,
+    midiClips: legacyMidiClips,
+    timeSignature
+  });
+  tracks = materialized.tracks;
+  const patternChain = materialized.patternChain;
+  const isPatternRepeatOn = materialized.isPatternRepeatOn;
   const activeDrumKitId = typeof raw.activeDrumKitId === 'string' ? raw.activeDrumKitId : 'kit_1';
 
   let drumChannels: DrumChannel[] = DEFAULT_DRUM_CHANNELS;
@@ -314,10 +322,6 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
         : Array.isArray((raw as any).drums?.drumPatternNames)
         ? (raw as any).drums.drumPatternNames
         : [],
-      drumArrangementMode:
-        (raw as any).drumArrangementMode === 'playlist' || (raw as any).drums?.drumArrangementMode === 'playlist'
-          ? 'playlist'
-          : 'sequencer',
       drumTimelineViewport: (raw as any).drumTimelineViewport || (raw as any).drums?.drumTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 }
     },
     mixer: {
@@ -328,10 +332,6 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
       tracks: (raw as any).audio?.tracks || (raw as any).audioTracks || [],
       clips: (raw as any).audio?.clips || (raw as any).audioClips || [],
       latencyMs: (raw as any).audio?.latencyMs ?? 20
-    },
-    midi: {
-      tracks: (raw as any).midi?.tracks || (raw as any).midiTracks || [],
-      clips: (raw as any).midi?.clips || (raw as any).midiClips || []
     },
     ui: {
       isCrtEnabled: raw.isCrtEnabled,
@@ -394,18 +394,23 @@ export function deserializeSession(rawInput: unknown): { session: SessionV2; war
         }
       });
     }
-    // Normalizar patrones de melodía en sesiones v2 previas
-    if (Array.isArray(parsedObj.tracks)) {
-      parsedObj.tracks = parsedObj.tracks.map((t: PianoRollTrack) => {
-        const ensured = ensureTrackPatterns(t);
-        return {
-          ...t,
-          patterns: ensured.patterns,
-          activePatternId: ensured.activePatternId,
-          notes: ensured.activePattern.notes
-        };
-      });
+    // Materializar arreglos legados de MIDI Tracks si existieran en la sesión v2
+    const materializedV2 = materializeLegacyMidiArrangement({
+      tracks: Array.isArray(parsedObj.tracks) ? parsedObj.tracks : [],
+      patternChain: Array.isArray(parsedObj.drums?.patternChain) ? parsedObj.drums.patternChain : [],
+      isPatternRepeatOn: Boolean(parsedObj.drums?.isPatternRepeatOn),
+      drumArrangementMode: parsedObj.drums?.drumArrangementMode,
+      midiTracks: parsedObj.midi?.tracks,
+      midiClips: parsedObj.midi?.clips,
+      timeSignature: parsedObj.transport?.timeSignature
+    });
+    parsedObj.tracks = materializedV2.tracks;
+    if (parsedObj.drums) {
+      parsedObj.drums.patternChain = materializedV2.patternChain;
+      parsedObj.drums.isPatternRepeatOn = materializedV2.isPatternRepeatOn;
+      delete parsedObj.drums.drumArrangementMode;
     }
+    delete parsedObj.midi;
     return { session: parsedObj as SessionV2, warnings: [] };
   }
 
@@ -418,23 +423,12 @@ export function deserializeSession(rawInput: unknown): { session: SessionV2; war
  */
 export function serializeSession(state: any, metadataUpdates?: Partial<SessionMetadata>): SessionV2 {
   const synchronizedTracks: PianoRollTrack[] = (state.tracks || []).map((t: PianoRollTrack) => {
-    const ensured = ensureTrackPatterns(t);
-    if (t.id === state.activeTrackId && state.melodyNotes) {
-      const nextPatterns = ensured.patterns.map((p) =>
-        p.id === ensured.activePatternId ? { ...p, notes: state.melodyNotes } : p
-      );
-      return {
-        ...t,
-        patterns: nextPatterns,
-        activePatternId: ensured.activePatternId,
-        notes: state.melodyNotes
-      };
-    }
+    const { patterns: _p, activePatternId: _a, arrangementMode: _m, ...clean } = t;
+    const notes = t.id === state.activeTrackId && state.melodyNotes ? state.melodyNotes : (t.notes || []);
     return {
-      ...t,
-      patterns: ensured.patterns,
-      activePatternId: ensured.activePatternId,
-      notes: ensured.activePattern.notes
+      ...clean,
+      notes,
+      ...(Array.isArray(t.regions) && t.regions.length > 0 ? { regions: t.regions } : {})
     };
   });
 
@@ -474,7 +468,6 @@ export function serializeSession(state: any, metadataUpdates?: Partial<SessionMe
       customSamples: normalizeSessionCustomSamples(state.customDrumSamples),
       patternLengths: state.patternLengths || Array.from({ length: (state.drumChannels || DEFAULT_DRUM_CHANNELS)[0]?.patterns?.length || 8 }).map(() => 16),
       drumPatternNames: state.drumPatternNames || [],
-      drumArrangementMode: state.drumArrangementMode || 'sequencer',
       currentDrumPatternEdit: state.currentDrumPatternEdit,
       drumTimelineViewport: state.drumTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 }
     },
@@ -496,10 +489,6 @@ export function serializeSession(state: any, metadataUpdates?: Partial<SessionMe
       tracks: state.audioTracks || [],
       clips: state.audioClips || [],
       latencyMs: state.audioLatencyCalibrationMs ?? 20
-    },
-    midi: {
-      tracks: state.midiTracks || [],
-      clips: state.midiClips || []
     },
     ui: {
       isCrtEnabled: state.isCrtEnabled,

@@ -28,7 +28,6 @@ export const GlobalScrubber: React.FC = () => {
     melodyNotes,
     patternChain,
     audioClips,
-    midiClips,
     activeView
   } = useSongStore(
     useShallow((state) => ({
@@ -41,7 +40,6 @@ export const GlobalScrubber: React.FC = () => {
       melodyNotes: state.melodyNotes || [],
       patternChain: state.patternChain || [],
       audioClips: state.audioClips || [],
-      midiClips: state.midiClips || [],
       activeView: state.activeView
     }))
   );
@@ -105,18 +103,13 @@ export const GlobalScrubber: React.FC = () => {
       if (end > maxBeat) maxBeat = end;
     }
 
-    for (let i = 0; i < midiClips.length; i++) {
-      const end = midiClips[i].startBeat + midiClips[i].durationBeats;
-      if (end > maxBeat) maxBeat = end;
-    }
-
     const engineMax = toneEngine.getMaxBeat();
     if (engineMax > maxBeat) maxBeat = engineMax;
 
     const minBeats = Math.max(16, beatsPerMeasure * 4);
     const padded = Math.max(minBeats, Math.ceil(maxBeat / beatsPerMeasure) * beatsPerMeasure);
     return padded;
-  }, [chordBlocks, tracks, melodyNotes, patternChain, audioClips, midiClips, bpm, beatsPerMeasure]);
+  }, [chordBlocks, tracks, melodyNotes, patternChain, audioClips, bpm, beatsPerMeasure]);
 
   const ticks = useMemo<StructuralTick[]>(() => {
     if (totalBeats <= 0) return [];

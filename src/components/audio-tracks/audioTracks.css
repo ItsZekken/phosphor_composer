@@ -1207,7 +1207,7 @@
   border: 1px dashed rgba(255, 255, 255, 0.1);
 }
 
-/* --- SEPARADORES DE SECCIÓN MIDI vs AUDIO (22px sincronizados) --- */
+/* --- SEPARADORES DE SECCIÓN 1:1 (ARMONÍA / PIANO ROLL / BATERÍA / AUDIO — 22px sincronizados) --- */
 .tracks-section-bar {
   height: 22px;
   min-height: 22px;
@@ -1224,9 +1224,21 @@
   border-bottom: 1px solid #2e283d;
 }
 
-.tracks-section-bar.midi-section-bar {
-  background: linear-gradient(90deg, rgba(45, 212, 191, 0.12) 0%, rgba(28, 24, 38, 0.95) 100%);
+.tracks-section-bar.harmony-section-bar {
+  background: linear-gradient(90deg, rgba(96, 165, 250, 0.14) 0%, rgba(28, 24, 38, 0.95) 100%);
+  color: #93c5fd;
+}
+
+.tracks-section-bar.melody-section-bar {
+  background: linear-gradient(90deg, rgba(167, 139, 250, 0.14) 0%, rgba(28, 24, 38, 0.95) 100%);
+  color: #c4b5fd;
+  border-top: 1px solid #3c3450;
+}
+
+.tracks-section-bar.drum-section-bar {
+  background: linear-gradient(90deg, rgba(45, 212, 191, 0.14) 0%, rgba(28, 24, 38, 0.95) 100%);
   color: #5eead4;
+  border-top: 1px solid #3c3450;
 }
 
 .tracks-section-bar.audio-section-bar {
@@ -1260,8 +1272,18 @@
   border-bottom: 1px solid #2e283d;
 }
 
-.tracks-lane-section-spacer.midi-spacer {
-  background: rgba(45, 212, 191, 0.035);
+.tracks-lane-section-spacer.harmony-spacer {
+  background: rgba(96, 165, 250, 0.04);
+}
+
+.tracks-lane-section-spacer.melody-spacer {
+  background: rgba(167, 139, 250, 0.04);
+  border-top: 1px solid #3c3450;
+}
+
+.tracks-lane-section-spacer.drum-spacer {
+  background: rgba(45, 212, 191, 0.04);
+  border-top: 1px solid #3c3450;
 }
 
 .tracks-lane-section-spacer.audio-spacer {
@@ -1460,4 +1482,260 @@
   margin: 1.25rem auto 1.5rem;
   padding: 0.85rem 1.25rem;
   max-width: 560px;
+}
+
+/* ============================================================================
+   PHOSPHOR 1:1 TRACKS (ARMONÍA / PIANO ROLL / BATERÍA / PALETA LATERAL)
+   ============================================================================ */
+
+.tracks-fixed-name {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.tracks-open-editor-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #8c82a5;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.65;
+  transition: all 0.14s ease;
+}
+
+.audio-track-header:hover .tracks-open-editor-btn {
+  opacity: 1;
+}
+
+.tracks-open-editor-btn:hover {
+  color: #ffd875;
+  border-color: rgba(255, 216, 117, 0.4);
+  background: rgba(255, 216, 117, 0.12);
+}
+
+.midi-track-type-pill.clickable-pill {
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.midi-track-type-pill.clickable-pill:hover {
+  background: rgba(255, 255, 255, 0.1);
+  filter: brightness(1.2);
+}
+
+.drum-loop-mode-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 216, 117, 0.55);
+  background: rgba(245, 158, 11, 0.18);
+  color: #ffd875;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.56rem;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.14s ease;
+}
+
+.drum-loop-mode-pill:hover {
+  background: rgba(245, 158, 11, 0.32);
+  color: #ffffff;
+}
+
+/* Bloques de Acorde 1:1 en el carril de Armonía */
+.chord-track-clip-body {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px 5px;
+  background: linear-gradient(180deg, rgba(18, 16, 28, 0.65) 0%, rgba(12, 10, 20, 0.88) 100%);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.chord-track-clip-symbol {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #f3f1f9;
+  line-height: 1.05;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  letter-spacing: 0.01em;
+}
+
+.chord-track-clip-sub {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.55rem;
+  color: rgba(186, 178, 210, 0.78);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  line-height: 1.1;
+}
+
+.chord-track-role-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  pointer-events: none;
+}
+
+/* Estados en vivo y bypass del carril de Batería */
+.drum-track-clip.playing-live {
+  box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.75), 0 0 12px rgba(45, 212, 191, 0.45);
+  border-color: #2dd4bf !important;
+}
+
+.drum-track-lane.lane-bypassed {
+  opacity: 0.52;
+  background-blend-mode: overlay;
+}
+
+.drum-track-lane.lane-bypassed::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(245, 158, 11, 0.04) 0px,
+    rgba(245, 158, 11, 0.04) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+}
+
+/* Hint inline para carriles vacíos */
+.tracks-empty-lane-hint {
+  position: sticky;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  padding-left: 12px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.72rem;
+  color: rgba(168, 159, 192, 0.45);
+  pointer-events: none;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* Paleta de acordes diatónicos en PatternPickerSidebar */
+.picker-chord-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.picker-chord-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 5px 7px 7px;
+  border-radius: 4px;
+  background: #201c2a;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: #f1eef9;
+  cursor: grab;
+  overflow: hidden;
+  transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.picker-chord-chip:hover {
+  background: #282338;
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.picker-chord-chip:active {
+  cursor: grabbing;
+}
+
+.picker-chord-chip.selected {
+  background: #262238;
+  border-color: var(--chord-role-color, #60a5fa);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--chord-role-color, #60a5fa) 35%, transparent),
+    inset 0 0 10px color-mix(in srgb, var(--chord-role-color, #60a5fa) 14%, transparent);
+}
+
+.picker-chord-name {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #f6f4fc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.picker-chord-deg {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.58rem;
+  color: #a89fc0;
+  flex-shrink: 0;
+}
+
+.picker-chord-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2.5px;
+  background: var(--chord-role-color, #60a5fa);
+  opacity: 0.85;
+}
+
+/* Acceso rápido a canales de Piano Roll en PatternPickerSidebar */
+.picker-melody-quick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.picker-melody-quick-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  border-radius: 4px;
+  background: #1f1b29;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: #e4dff0;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.12s ease;
+}
+
+.picker-melody-quick-row:hover {
+  background: #292338;
+  border-color: rgba(167, 139, 250, 0.45);
+  color: #ffffff;
 }

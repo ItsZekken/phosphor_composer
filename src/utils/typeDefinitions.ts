@@ -41,6 +41,7 @@ export interface MelodyNote {
   startBeat: number;
   durationBeats: number;
   velocity: number;
+  muted?: boolean;
 }
 
 export interface GhostNote {
@@ -168,8 +169,22 @@ export interface MelodyPattern {
   id: string;
   name: string;
   notes: MelodyNote[];
-  /** Duración explícita en beats (undefined = auto-ajuste a compases enteros según notas, mín 1 compás) */
+  /** Duración explícita en beats (solo para migración de sesiones previas) */
   lengthBeats?: number;
+}
+
+/**
+ * Región / clip visual 1:1 sobre las notas reales de un PianoRollTrack.
+ * Las notas siempre viven en `PianoRollTrack.notes`; las regiones son ventanas
+ * estructurales sincronizadas 1:1 con el Piano Roll para editar frases en Tracks.
+ */
+export interface MelodyRegion {
+  id: string;
+  name?: string;
+  startBeat: number;
+  durationBeats: number;
+  /** Duración base del motivo cuando la región se estira/repite en Tracks */
+  loopLengthBeats?: number;
 }
 
 export interface PianoRollTrack {
@@ -178,6 +193,8 @@ export interface PianoRollTrack {
   color: string;
   channelId: string;
   notes: MelodyNote[];
+  regions?: MelodyRegion[];
+  /** Campos legados solo para migración retrocompatible de sesiones anteriores */
   patterns?: MelodyPattern[];
   activePatternId?: string;
   arrangementMode?: 'direct' | 'playlist';
@@ -247,6 +264,7 @@ export interface PatternChainItem {
   patternIndex?: number;      // 0 a N, o -1 para silencio legado
   startMeasure?: number;      // Posición lineal absoluta en compases (base 0, soporta decimales ej: 3.5)
   durationMeasures?: number;  // Duración lineal exacta en compases (ej: 1, 2, 4, 0.5)
+  isMuted?: boolean;          // Silencio individual sincronizado entre Drum Sequencer y Tracks
   items?: PatternChainItem[]; // Legado (se aplana automáticamente a clips lineales)
 }
 
@@ -255,6 +273,7 @@ export interface LinearDrumClip {
   patternIndex: number;
   startMeasure: number;
   durationMeasures: number;
+  isMuted?: boolean;
 }
 
 export interface FlatChainStep {
@@ -305,7 +324,8 @@ export const normalizePatternChainToLinear = (chain: PatternChainItem[]): Linear
           id: item.id,
           patternIndex: Math.max(0, item.patternIndex ?? 0),
           startMeasure: start,
-          durationMeasures: dur
+          durationMeasures: dur,
+          ...(item.isMuted ? { isMuted: true } : {})
         });
       }
       sequentialCursor = Math.max(sequentialCursor, start + dur);
@@ -315,7 +335,8 @@ export const normalizePatternChainToLinear = (chain: PatternChainItem[]): Linear
           id: item.id || `clip_${sequentialCursor}`,
           patternIndex: Math.max(0, item.patternIndex ?? 0),
           startMeasure: sequentialCursor,
-          durationMeasures: dur
+          durationMeasures: dur,
+          ...(item.isMuted ? { isMuted: true } : {})
         });
       }
       sequentialCursor += dur;
@@ -335,7 +356,8 @@ export const normalizePatternChainItems = (chain: PatternChainItem[]): PatternCh
     patternIndex: clip.patternIndex,
     startMeasure: clip.startMeasure,
     durationMeasures: clip.durationMeasures,
-    repeatCount: Math.max(1, Math.round(clip.durationMeasures))
+    repeatCount: Math.max(1, Math.round(clip.durationMeasures)),
+    ...(clip.isMuted ? { isMuted: true } : {})
   }));
 };
 
@@ -351,6 +373,7 @@ export const flattenPatternChain = (chain: PatternChainItem[]): FlatChainStep[] 
   }));
 
   for (const clip of clips) {
+    if (clip.isMuted) continue;
     const startM = Math.max(0, Math.floor(clip.startMeasure));
     const endM = Math.min(totalMeasures, Math.ceil(clip.startMeasure + clip.durationMeasures));
     for (let m = startM; m < endM; m++) {
@@ -397,9 +420,31 @@ export interface AudioTracksTimelineViewport {
   zoomLevel: number; // Píxeles por beat (default 60)
 }
 
-export type PlaybackMode = 'song' | 'pattern';
 export type PlaylistTool = 'paint' | 'slice' | 'select';
 
+export type PlaylistTrackSelection =
+  | { kind: 'harmony' }
+  | { kind: 'melody'; trackId: string }
+  | { kind: 'drums' }
+  | { kind: 'audio'; trackId: string };
+
+export interface SelectedMelodyRegionRef {
+  trackId: string;
+  regionId: string;
+}
+
+export interface MelodyRegionClipboardItem {
+  trackId: string;
+  relativeStartBeat: number;
+  originalStartBeat?: number;
+  durationBeats: number;
+  loopLengthBeats?: number;
+  name?: string;
+  /** Notas normalizadas relativas al inicio (0..durationBeats) de la región copiada */
+  notes: MelodyNote[];
+}
+
+/** Tipos legados conservados solo para migración retrocompatible de sesiones anteriores */
 export interface MidiTrack {
   id: string;
   name: string;
@@ -407,17 +452,6 @@ export interface MidiTrack {
   muted: boolean;
   solo: boolean;
 }
-
-export type SelectedPatternRef =
-  | {
-      sourceType: 'drums';
-      drumPatternIndex: number;
-    }
-  | {
-      sourceType: 'melody';
-      melodyTrackId: string;
-      melodyPatternId: string;
-    };
 
 export interface MidiPatternClip {
   id: string;

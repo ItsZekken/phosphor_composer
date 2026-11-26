@@ -1,8 +1,10 @@
 /**
  * PatternPickerSidebar.tsx
- * Panel lateral izquierdo de Patrones y Audio estilo FL Studio Picker Panel.
- * Permite seleccionar, arrastrar, crear, duplicar, renombrar y abrir para edición
- * tanto patrones de la Drum Machine como patrones de cada Melodía del Piano Roll.
+ * Panel lateral de bloques Phosphor para la vista Tracks:
+ * - Acordes diatónicos de la tonalidad activa (para pintar/arrastrar al track de Armonía 1:1)
+ * - Patrones de Drum Machine P1..PN (para pintar/arrastrar al track de Batería 1:1)
+ * - Acceso rápido a pistas de Piano Roll
+ * - Biblioteca de clips de Audio importados/grabados
  */
 
 import React, { useMemo, useState, useEffect, useRef } from 'react';
@@ -19,26 +21,28 @@ import {
   Upload,
   Grid3X3,
   Music,
-  Sparkles
+  LayoutGrid
 } from 'lucide-react';
 import { useSongStore } from '../../store/songStore';
 import { useShallow } from 'zustand/react/shallow';
-import type { SelectedPatternRef } from '../../utils/typeDefinitions';
+import { getDiatonicChords, getChordRomanDegree } from '../../core/music';
+import { getChordRole } from '../chord-player/chordRoleUtils';
 import {
-  ensureTrackPatterns,
   getBeatsPerMeasure,
   getDrumPatternColor,
-  getDrumPatternName,
-  getMelodyPatternLengthBeats
+  getDrumPatternName
 } from '../../core/audio/arrangementResolver';
+import { normalizePatternChainToLinear } from '../../utils/typeDefinitions';
+import { toneEngine } from '../../audio/toneEngine';
 import { PatternMiniPreview } from './PatternMiniPreview';
+import { CHORD_DRAG_MIME } from './HarmonyTrackLane';
+import { DRUM_PATTERN_DRAG_MIME } from './DrumTrackLane';
 import { ContextMenuContainer } from '../ui/ContextMenuContainer';
 import { importAudioFilesToTracks, isSupportedAudioFile } from '../../core/session/projectFileImport';
 
-export const PATTERN_DRAG_MIME = 'application/x-phosphor-pattern';
 export const AUDIO_CLIP_DRAG_MIME = 'application/x-phosphor-audio-source';
 
-/** Icono compacto estilo teclado MIDI (inspirado en FL Studio Pattern Clip) */
+/** Icono compacto estilo teclado MIDI */
 export const MidiKeysMiniIcon: React.FC<{ color?: string; size?: number }> = ({
   color = 'currentColor',
   size = 12
@@ -58,12 +62,12 @@ export const MidiKeysMiniIcon: React.FC<{ color?: string; size?: number }> = ({
   </svg>
 );
 
-type PickerFilter = 'all' | 'drums' | 'melodies';
+type PickerFilter = 'all' | 'chords' | 'drums';
 
-interface PickerContextMenuState {
+interface DrumCtxMenuState {
   x: number;
   y: number;
-  source: SelectedPatternRef;
+  patternIndex: number;
 }
 
 export const PatternPickerSidebar: React.FC = () => {
@@ -72,17 +76,19 @@ export const PatternPickerSidebar: React.FC = () => {
     setIsPickerOpen,
     pickerTab,
     setPickerTab,
-    selectedPatternRef,
-    setSelectedPatternRef,
+    key,
+    scale,
+    chordOctaveShift,
+    selectedHarmonyBrushChord,
+    setSelectedHarmonyBrushChord,
     drumChannels,
     patternLengths,
     drumPatternNames,
-    drumArrangementMode,
     currentDrumPatternEdit,
+    setCurrentDrumPatternEdit,
     patternChain,
     tracks,
     channels,
-    midiClips,
     audioClips,
     timeSignature,
     addDrumPattern,
@@ -91,14 +97,9 @@ export const PatternPickerSidebar: React.FC = () => {
     clearDrumPattern,
     removeDrumPattern,
     addPianoRollTrack,
-    addMelodyPattern,
-    duplicateMelodyPattern,
-    renameMelodyPattern,
-    setMelodyPatternLength,
-    clearMelodyPattern,
-    removeMelodyPattern,
-    importDrumChainToMidiTrack,
-    jumpToPatternEditor,
+    jumpToHarmonyEditor,
+    jumpToMelodyEditor,
+    jumpToDrumEditor,
     setPlaylistTool
   } = useSongStore(
     useShallow((state) => ({
@@ -106,17 +107,19 @@ export const PatternPickerSidebar: React.FC = () => {
       setIsPickerOpen: state.setIsPickerOpen,
       pickerTab: state.pickerTab,
       setPickerTab: state.setPickerTab,
-      selectedPatternRef: state.selectedPatternRef,
-      setSelectedPatternRef: state.setSelectedPatternRef,
+      key: state.key || 'C',
+      scale: state.scale || 'major',
+      chordOctaveShift: state.chordOctaveShift || 0,
+      selectedHarmonyBrushChord: state.selectedHarmonyBrushChord || 'C',
+      setSelectedHarmonyBrushChord: state.setSelectedHarmonyBrushChord,
       drumChannels: state.drumChannels || [],
       patternLengths: state.patternLengths || [],
       drumPatternNames: state.drumPatternNames || [],
-      drumArrangementMode: state.drumArrangementMode,
-      currentDrumPatternEdit: state.currentDrumPatternEdit,
+      currentDrumPatternEdit: state.currentDrumPatternEdit || 0,
+      setCurrentDrumPatternEdit: state.setCurrentDrumPatternEdit,
       patternChain: state.patternChain || [],
       tracks: state.tracks || [],
       channels: state.channels || {},
-      midiClips: state.midiClips || [],
       audioClips: state.audioClips || [],
       timeSignature: state.timeSignature || '4/4',
       addDrumPattern: state.addDrumPattern,
@@ -125,27 +128,23 @@ export const PatternPickerSidebar: React.FC = () => {
       clearDrumPattern: state.clearDrumPattern,
       removeDrumPattern: state.removeDrumPattern,
       addPianoRollTrack: state.addPianoRollTrack,
-      addMelodyPattern: state.addMelodyPattern,
-      duplicateMelodyPattern: state.duplicateMelodyPattern,
-      renameMelodyPattern: state.renameMelodyPattern,
-      setMelodyPatternLength: state.setMelodyPatternLength,
-      clearMelodyPattern: state.clearMelodyPattern,
-      removeMelodyPattern: state.removeMelodyPattern,
-      importDrumChainToMidiTrack: state.importDrumChainToMidiTrack,
-      jumpToPatternEditor: state.jumpToPatternEditor,
+      jumpToHarmonyEditor: state.jumpToHarmonyEditor,
+      jumpToMelodyEditor: state.jumpToMelodyEditor,
+      jumpToDrumEditor: state.jumpToDrumEditor,
       setPlaylistTool: state.setPlaylistTool
     }))
   );
 
   const [filter, setFilter] = useState<PickerFilter>('all');
   const [showAllEmptyDrums, setShowAllEmptyDrums] = useState(false);
-  const [ctxMenu, setCtxMenu] = useState<PickerContextMenuState | null>(null);
-  const [renamingKey, setRenamingKey] = useState<string | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<DrumCtxMenuState | null>(null);
+  const [renamingDrumIdx, setRenamingDrumIdx] = useState<number | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const audioInputRef = useRef<HTMLInputElement | null>(null);
 
   const beatsPerMeasure = getBeatsPerMeasure(timeSignature);
   const totalDrumPatterns = drumChannels[0]?.patterns?.length || 8;
+  const diatonicChords = useMemo(() => getDiatonicChords(key, scale), [key, scale]);
 
   // Cerrar menú contextual al clicar fuera o pulsar Escape
   useEffect(() => {
@@ -166,14 +165,12 @@ export const PatternPickerSidebar: React.FC = () => {
     };
   }, [ctxMenu]);
 
-  // Calcular qué patrones de batería tienen pasos activos o clips colocados
+  // Calcular metadatos de patrones de batería en la cadena lineal
   const drumPatternMeta = useMemo(() => {
+    const linear = normalizePatternChainToLinear(patternChain);
     const usedInClips = new Map<number, number>();
-    for (const c of midiClips) {
-      if (c.sourceType === 'drums') {
-        const idx = Math.max(0, c.drumPatternIndex ?? 0);
-        usedInClips.set(idx, (usedInClips.get(idx) || 0) + 1);
-      }
+    for (const c of linear) {
+      usedInClips.set(c.patternIndex, (usedInClips.get(c.patternIndex) || 0) + 1);
     }
 
     const list: Array<{
@@ -205,28 +202,21 @@ export const PatternPickerSidebar: React.FC = () => {
       });
     }
     return list;
-  }, [drumChannels, patternLengths, drumPatternNames, totalDrumPatterns, midiClips]);
+  }, [drumChannels, patternLengths, drumPatternNames, totalDrumPatterns, patternChain]);
 
   const visibleDrumPatterns = useMemo(() => {
     if (showAllEmptyDrums) return drumPatternMeta;
-    const selectedDrumIdx = selectedPatternRef.sourceType === 'drums' ? selectedPatternRef.drumPatternIndex : -1;
     return drumPatternMeta.filter(
       (p) =>
         p.index === 0 ||
         p.hasHits ||
         p.clipCount > 0 ||
-        p.index === currentDrumPatternEdit ||
-        p.index === selectedDrumIdx
+        p.index === currentDrumPatternEdit
     );
-  }, [drumPatternMeta, showAllEmptyDrums, currentDrumPatternEdit, selectedPatternRef]);
+  }, [drumPatternMeta, showAllEmptyDrums, currentDrumPatternEdit]);
 
   const hiddenEmptyDrumCount = drumPatternMeta.length - visibleDrumPatterns.length;
-  const totalDrumClipsInPlaylist = useMemo(
-    () => midiClips.filter((c) => c.sourceType === 'drums').length,
-    [midiClips]
-  );
 
-  // Biblioteca única de clips/fuentes de audio disponibles en el proyecto
   const uniqueAudioSources = useMemo(() => {
     const map = new Map<string, { bufferId: string; name: string; durationSeconds: number }>();
     for (const c of audioClips) {
@@ -241,28 +231,27 @@ export const PatternPickerSidebar: React.FC = () => {
     return Array.from(map.values());
   }, [audioClips]);
 
-  const handleSelectPattern = (ref: SelectedPatternRef) => {
-    setSelectedPatternRef(ref);
+  const handleSelectChordBrush = (chord: string) => {
+    setSelectedHarmonyBrushChord(chord);
+    setPlaylistTool('paint');
+    toneEngine.playChordPreview(chord, chordOctaveShift);
+  };
+
+  const handleSelectDrumPattern = (idx: number) => {
+    setCurrentDrumPatternEdit(idx);
     setPlaylistTool('paint');
   };
 
   const handleAddDrumPatternQuick = () => {
-    // Si hay un slot vacío oculto (P2..P8), seleccionarlo primero; si todos tienen contenido, crear uno nuevo
     const firstHiddenEmpty = drumPatternMeta.find(
       (p) => !visibleDrumPatterns.some((v) => v.index === p.index)
     );
     if (firstHiddenEmpty) {
-      handleSelectPattern({ sourceType: 'drums', drumPatternIndex: firstHiddenEmpty.index });
+      handleSelectDrumPattern(firstHiddenEmpty.index);
     } else {
       const newIdx = addDrumPattern();
-      handleSelectPattern({ sourceType: 'drums', drumPatternIndex: newIdx });
+      handleSelectDrumPattern(newIdx);
     }
-  };
-
-  const handleDragPatternStart = (e: React.DragEvent, ref: SelectedPatternRef) => {
-    handleSelectPattern(ref);
-    e.dataTransfer.setData(PATTERN_DRAG_MIME, JSON.stringify(ref));
-    e.dataTransfer.effectAllowed = 'copy';
   };
 
   const handleAudioImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -280,27 +269,27 @@ export const PatternPickerSidebar: React.FC = () => {
           type="button"
           className="pattern-picker-expand-btn"
           onClick={() => setIsPickerOpen(true)}
-          title="Mostrar Selector de Patrones MIDI y Audio (Picker)"
+          title="Mostrar Paleta de Acordes, Batería y Audio"
         >
           <ChevronRight size={14} />
-          <span className="pattern-picker-vertical-label">PATRONES</span>
+          <span className="pattern-picker-vertical-label">PALETA</span>
         </button>
       </div>
     );
   }
 
   return (
-    <aside className="pattern-picker-sidebar" aria-label="Selector de patrones MIDI y clips de audio">
-      {/* Cabecera de pestañas estilo FL Studio (Patrones MIDI / Clips Audio) */}
+    <aside className="pattern-picker-sidebar" aria-label="Paleta de Acordes, Patrones de Batería y Clips de Audio">
+      {/* Pestañas superiores */}
       <div className="pattern-picker-tabs">
         <button
           type="button"
-          className={`pattern-picker-tab ${pickerTab === 'patterns' ? 'active' : ''}`}
-          onClick={() => setPickerTab('patterns')}
-          title="Patrones MIDI (Drum Machine y Melodías)"
+          className={`pattern-picker-tab ${pickerTab === 'palette' ? 'active' : ''}`}
+          onClick={() => setPickerTab('palette')}
+          title="Acordes de la escala, Patrones de Batería y Pistas de Piano Roll"
         >
-          <MidiKeysMiniIcon size={14} />
-          <span>PATRONES</span>
+          <LayoutGrid size={13} />
+          <span>PALETA</span>
         </button>
         <button
           type="button"
@@ -308,22 +297,21 @@ export const PatternPickerSidebar: React.FC = () => {
           onClick={() => setPickerTab('audio')}
           title="Clips de Audio cargados en el proyecto"
         >
-          <AudioWaveform size={14} />
+          <AudioWaveform size={13} />
           <span>AUDIO</span>
         </button>
         <button
           type="button"
           className="pattern-picker-collapse-btn"
           onClick={() => setIsPickerOpen(false)}
-          title="Contraer panel de patrones"
+          title="Contraer panel lateral"
         >
           <ChevronLeft size={13} />
         </button>
       </div>
 
-      {pickerTab === 'patterns' ? (
+      {pickerTab === 'palette' ? (
         <>
-          {/* Filtros rápidos */}
           <div className="pattern-picker-filters">
             <button
               type="button"
@@ -334,48 +322,82 @@ export const PatternPickerSidebar: React.FC = () => {
             </button>
             <button
               type="button"
+              className={`picker-filter-pill ${filter === 'chords' ? 'active' : ''}`}
+              onClick={() => setFilter('chords')}
+            >
+              ACORDES
+            </button>
+            <button
+              type="button"
               className={`picker-filter-pill ${filter === 'drums' ? 'active' : ''}`}
               onClick={() => setFilter('drums')}
             >
               DRUMS
             </button>
-            <button
-              type="button"
-              className={`picker-filter-pill ${filter === 'melodies' ? 'active' : ''}`}
-              onClick={() => setFilter('melodies')}
-            >
-              MELODÍAS
-            </button>
           </div>
 
           <div className="pattern-picker-hint">
-            Clic selecciona pincel · Arrastra o haz clic en un MIDI Track para pintar
+            Clic selecciona pincel · Arrastra o pinta directamente en su pista 1:1
           </div>
 
           <div className="pattern-picker-scroll">
-            {/* SECCIÓN 1: DRUM MACHINE */}
+            {/* SECCIÓN 1: ACORDES DIATÓNICOS (1:1 con Chord Palette) */}
+            {(filter === 'all' || filter === 'chords') && (
+              <div className="picker-section">
+                <div className="picker-section-header">
+                  <div className="picker-section-title">
+                    <LayoutGrid size={11} style={{ color: '#60a5fa' }} />
+                    <span>ACORDES ({key} {scale})</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="picker-icon-btn"
+                    onClick={() => jumpToHarmonyEditor()}
+                    title="Abrir Chord Palette completa (Alt+1)"
+                  >
+                    <ExternalLink size={11} />
+                  </button>
+                </div>
+
+                <div className="picker-chord-grid">
+                  {diatonicChords.map((chord) => {
+                    const isSelected = selectedHarmonyBrushChord === chord;
+                    const degree = getChordRomanDegree(chord, key, scale);
+                    const role = getChordRole(chord, key, scale);
+                    return (
+                      <div
+                        key={chord}
+                        draggable
+                        onDragStart={(e) => {
+                          setSelectedHarmonyBrushChord(chord);
+                          setPlaylistTool('paint');
+                          e.dataTransfer.setData(CHORD_DRAG_MIME, chord);
+                          e.dataTransfer.effectAllowed = 'copy';
+                        }}
+                        onClick={() => handleSelectChordBrush(chord)}
+                        className={`picker-chord-chip ${isSelected ? 'selected' : ''}`}
+                        style={{ '--role-accent': `var(--role-${role})` } as React.CSSProperties}
+                        title={`${chord} (${degree}) — Clic: pincel y audición · Arrastrar: colocar en pista de Armonía`}
+                      >
+                        <span className="picker-chord-name">{chord}</span>
+                        <span className="picker-chord-deg">{degree}</span>
+                        <span className="picker-chord-bar" />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* SECCIÓN 2: DRUM MACHINE (1:1 con Drum Sequencer) */}
             {(filter === 'all' || filter === 'drums') && (
               <div className="picker-section">
                 <div className="picker-section-header">
                   <div className="picker-section-title">
                     <Grid3X3 size={11} style={{ color: '#2dd4bf' }} />
                     <span>DRUM MACHINE</span>
-                    {drumArrangementMode === 'playlist' && totalDrumClipsInPlaylist > 0 && (
-                      <span className="picker-section-badge">{totalDrumClipsInPlaylist}</span>
-                    )}
                   </div>
                   <div className="picker-section-actions">
-                    {patternChain.length > 0 && totalDrumClipsInPlaylist === 0 && (
-                      <button
-                        type="button"
-                        className="picker-mini-text-btn"
-                        onClick={() => importDrumChainToMidiTrack()}
-                        title="Importar la cadena actual del Drum Sequencer a un MIDI Track"
-                      >
-                        <Sparkles size={10} />
-                        <span>Importar</span>
-                      </button>
-                    )}
                     <button
                       type="button"
                       className="picker-icon-btn"
@@ -389,37 +411,32 @@ export const PatternPickerSidebar: React.FC = () => {
 
                 <div className="picker-cards-list">
                   {visibleDrumPatterns.map((dp) => {
-                    const isSelected =
-                      selectedPatternRef.sourceType === 'drums' &&
-                      selectedPatternRef.drumPatternIndex === dp.index;
-                    const key = `drum_${dp.index}`;
-                    const isRenaming = renamingKey === key;
+                    const isSelected = currentDrumPatternEdit === dp.index;
+                    const isRenaming = renamingDrumIdx === dp.index;
 
                     return (
                       <div
-                        key={key}
+                        key={`drum_${dp.index}`}
                         draggable={!isRenaming}
-                        onDragStart={(e) =>
-                          handleDragPatternStart(e, { sourceType: 'drums', drumPatternIndex: dp.index })
-                        }
-                        onClick={() =>
-                          handleSelectPattern({ sourceType: 'drums', drumPatternIndex: dp.index })
-                        }
-                        onDoubleClick={() =>
-                          jumpToPatternEditor({ sourceType: 'drums', drumPatternIndex: dp.index })
-                        }
+                        onDragStart={(e) => {
+                          handleSelectDrumPattern(dp.index);
+                          e.dataTransfer.setData(DRUM_PATTERN_DRAG_MIME, String(dp.index));
+                          e.dataTransfer.effectAllowed = 'copy';
+                        }}
+                        onClick={() => handleSelectDrumPattern(dp.index)}
+                        onDoubleClick={() => jumpToDrumEditor(dp.index)}
                         onContextMenu={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
                           setCtxMenu({
                             x: e.clientX,
                             y: e.clientY,
-                            source: { sourceType: 'drums', drumPatternIndex: dp.index }
+                            patternIndex: dp.index
                           });
                         }}
                         className={`picker-pattern-card ${isSelected ? 'selected' : ''}`}
                         style={{ '--pattern-accent': dp.color } as React.CSSProperties}
-                        title={`${dp.name} (${dp.steps} pasos) — Clic: pincel · Arrastrar: colocar · Doble clic: editar en Drum Sequencer`}
+                        title={`${dp.name} (${dp.steps} pasos) — Clic: pincel · Arrastrar: colocar en pista de Batería · Doble clic: editar en Drum Sequencer`}
                       >
                         {isSelected && <span className="picker-selected-arrow" aria-hidden="true" />}
                         <div className="picker-card-top">
@@ -434,27 +451,29 @@ export const PatternPickerSidebar: React.FC = () => {
                               onChange={(e) => setRenameDraft(e.target.value)}
                               onBlur={() => {
                                 renameDrumPattern(dp.index, renameDraft);
-                                setRenamingKey(null);
+                                setRenamingDrumIdx(null);
                               }}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter') {
                                   renameDrumPattern(dp.index, renameDraft);
-                                  setRenamingKey(null);
+                                  setRenamingDrumIdx(null);
                                 } else if (e.key === 'Escape') {
-                                  setRenamingKey(null);
+                                  setRenamingDrumIdx(null);
                                 }
                               }}
                             />
                           ) : (
                             <span className="picker-card-name">{dp.name}</span>
                           )}
-                          <span className="picker-card-meta">1c</span>
+                          <span className="picker-card-meta">
+                            {dp.clipCount > 0 ? `×${dp.clipCount}` : '1c'}
+                          </span>
                           <button
                             type="button"
                             className="picker-card-edit-btn"
                             onClick={(e) => {
                               e.stopPropagation();
-                              jumpToPatternEditor({ sourceType: 'drums', drumPatternIndex: dp.index });
+                              jumpToDrumEditor(dp.index);
                             }}
                             title="Abrir en Drum Sequencer"
                           >
@@ -500,178 +519,49 @@ export const PatternPickerSidebar: React.FC = () => {
               </div>
             )}
 
-            {/* SECCIÓN 2: MELODÍAS (Cada pista del Piano Roll y sus patrones) */}
-            {(filter === 'all' || filter === 'melodies') && (
+            {/* SECCIÓN 3: ACCESO RÁPIDO A CANALES DE PIANO ROLL */}
+            {filter === 'all' && (
               <div className="picker-section">
                 <div className="picker-section-header">
                   <div className="picker-section-title">
                     <Music size={11} style={{ color: '#a78bfa' }} />
-                    <span>MELODÍAS (PIANO ROLL)</span>
+                    <span>PIANO ROLL</span>
                   </div>
                   <button
                     type="button"
                     className="picker-mini-text-btn"
                     onClick={() => addPianoRollTrack()}
-                    title="Crear una nueva pista de instrumento melódico"
+                    title="Crear una nueva pista de instrumento en Piano Roll y Tracks"
                   >
                     <Plus size={10} />
-                    <span>Melodía</span>
+                    <span>Pista</span>
                   </button>
                 </div>
 
-                {tracks.map((track) => {
-                  const { patterns } = ensureTrackPatterns(track);
-                  const instType = channels[track.channelId]?.instrument === 'piano' ? 'PIANO' : 'SYNTH';
-                  const trackClipCount = midiClips.filter(
-                    (c) => c.sourceType === 'melody' && c.melodyTrackId === track.id
-                  ).length;
-
-                  return (
-                    <div key={track.id} className="picker-melody-group">
-                      <div className="picker-melody-group-header">
+                <div className="picker-melody-quick-list">
+                  {tracks.map((track) => {
+                    const inst = channels[track.channelId]?.instrument === 'piano' ? 'PIANO' : 'SYNTH';
+                    const count = track.notes?.length || 0;
+                    return (
+                      <button
+                        key={track.id}
+                        type="button"
+                        className="picker-melody-quick-row"
+                        onClick={() => jumpToMelodyEditor(track.id)}
+                        title={`Abrir ${track.name} en Piano Roll (${count} notas)`}
+                      >
                         <span
                           className="picker-melody-dot"
                           style={{ backgroundColor: track.color || '#a78bfa' }}
                         />
                         <span className="picker-melody-name">{track.name}</span>
-                        <span className="picker-melody-inst">{instType}</span>
-                        {trackClipCount > 0 && (
-                          <span className="picker-section-badge">{trackClipCount}</span>
-                        )}
-                        <button
-                          type="button"
-                          className="picker-icon-btn"
-                          onClick={() => {
-                            const newPatId = addMelodyPattern(track.id);
-                            if (newPatId) {
-                              handleSelectPattern({
-                                sourceType: 'melody',
-                                melodyTrackId: track.id,
-                                melodyPatternId: newPatId
-                              });
-                            }
-                          }}
-                          title={`Crear nuevo patrón para ${track.name}`}
-                        >
-                          <Plus size={11} />
-                        </button>
-                      </div>
-
-                      <div className="picker-cards-list">
-                        {patterns.map((pat) => {
-                          const isSelected =
-                            selectedPatternRef.sourceType === 'melody' &&
-                            selectedPatternRef.melodyTrackId === track.id &&
-                            selectedPatternRef.melodyPatternId === pat.id;
-                          const patLenBeats = getMelodyPatternLengthBeats(pat, beatsPerMeasure);
-                          const barsLabel = `${Math.round((patLenBeats / beatsPerMeasure) * 10) / 10}c`;
-                          const key = `mel_${track.id}_${pat.id}`;
-                          const isRenaming = renamingKey === key;
-
-                          return (
-                            <div
-                              key={key}
-                              draggable={!isRenaming}
-                              onDragStart={(e) =>
-                                handleDragPatternStart(e, {
-                                  sourceType: 'melody',
-                                  melodyTrackId: track.id,
-                                  melodyPatternId: pat.id
-                                })
-                              }
-                              onClick={() =>
-                                handleSelectPattern({
-                                  sourceType: 'melody',
-                                  melodyTrackId: track.id,
-                                  melodyPatternId: pat.id
-                                })
-                              }
-                              onDoubleClick={() =>
-                                jumpToPatternEditor({
-                                  sourceType: 'melody',
-                                  melodyTrackId: track.id,
-                                  melodyPatternId: pat.id
-                                })
-                              }
-                              onContextMenu={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setCtxMenu({
-                                  x: e.clientX,
-                                  y: e.clientY,
-                                  source: {
-                                    sourceType: 'melody',
-                                    melodyTrackId: track.id,
-                                    melodyPatternId: pat.id
-                                  }
-                                });
-                              }}
-                              className={`picker-pattern-card ${isSelected ? 'selected' : ''}`}
-                              style={{ '--pattern-accent': track.color || '#a78bfa' } as React.CSSProperties}
-                              title={`${track.name} · ${pat.name} (${barsLabel}) — Clic: pincel · Arrastrar: colocar · Doble clic: editar en Piano Roll`}
-                            >
-                              {isSelected && <span className="picker-selected-arrow" aria-hidden="true" />}
-                              <div className="picker-card-top">
-                                <MidiKeysMiniIcon color={track.color || '#a78bfa'} size={12} />
-                                {isRenaming ? (
-                                  <input
-                                    type="text"
-                                    className="picker-rename-input"
-                                    value={renameDraft}
-                                    autoFocus
-                                    onClick={(e) => e.stopPropagation()}
-                                    onChange={(e) => setRenameDraft(e.target.value)}
-                                    onBlur={() => {
-                                      renameMelodyPattern(track.id, pat.id, renameDraft);
-                                      setRenamingKey(null);
-                                    }}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') {
-                                        renameMelodyPattern(track.id, pat.id, renameDraft);
-                                        setRenamingKey(null);
-                                      } else if (e.key === 'Escape') {
-                                        setRenamingKey(null);
-                                      }
-                                    }}
-                                  />
-                                ) : (
-                                  <span className="picker-card-name">{pat.name}</span>
-                                )}
-                                <span className="picker-card-meta">{barsLabel}</span>
-                                <button
-                                  type="button"
-                                  className="picker-card-edit-btn"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    jumpToPatternEditor({
-                                      sourceType: 'melody',
-                                      melodyTrackId: track.id,
-                                      melodyPatternId: pat.id
-                                    });
-                                  }}
-                                  title="Abrir en Piano Roll"
-                                >
-                                  <ExternalLink size={10} />
-                                </button>
-                              </div>
-                              <div className="picker-card-preview">
-                                <PatternMiniPreview
-                                  kind="melody"
-                                  notes={pat.notes || []}
-                                  patternLengthBeats={patLenBeats}
-                                  durationBeats={patLenBeats}
-                                  color={track.color || '#a78bfa'}
-                                  width={186}
-                                  height={18}
-                                />
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
+                        <span className="picker-melody-inst">{inst}</span>
+                        <span className="picker-card-meta">{count}n</span>
+                        <ExternalLink size={10} style={{ color: '#ffd875', opacity: 0.75 }} />
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
@@ -734,200 +624,81 @@ export const PatternPickerSidebar: React.FC = () => {
         </div>
       )}
 
-      {/* Menú contextual de Patrón en el Picker */}
+      {/* Menú contextual de Patrón de Batería */}
       {ctxMenu && (
         <ContextMenuContainer
           x={ctxMenu.x}
           y={ctxMenu.y}
           className="picker-context-menu custom-context-menu"
         >
-          {ctxMenu.source.sourceType === 'drums' ? (
-            (() => {
-              const pIdx = ctxMenu.source.drumPatternIndex;
-              const pName = getDrumPatternName(pIdx, drumPatternNames);
-              return (
-                <>
-                  <div className="menu-header">
-                    <span>{pName}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="menu-item"
-                    onClick={() => {
-                      jumpToPatternEditor({ sourceType: 'drums', drumPatternIndex: pIdx });
-                      setCtxMenu(null);
-                    }}
-                  >
-                    <ExternalLink size={12} /> Editar en Drum Sequencer
-                  </button>
-                  <button
-                    type="button"
-                    className="menu-item"
-                    onClick={() => {
-                      setRenamingKey(`drum_${pIdx}`);
-                      setRenameDraft(pName);
-                      setCtxMenu(null);
-                    }}
-                  >
-                    <Edit3 size={12} /> Renombrar patrón
-                  </button>
-                  <button
-                    type="button"
-                    className="menu-item"
-                    onClick={() => {
-                      const newIdx = duplicateDrumPattern(pIdx);
-                      handleSelectPattern({ sourceType: 'drums', drumPatternIndex: newIdx });
-                      setCtxMenu(null);
-                    }}
-                  >
-                    <Copy size={12} /> Duplicar patrón
-                  </button>
-                  <button
-                    type="button"
-                    className="menu-item"
-                    onClick={() => {
-                      clearDrumPattern(pIdx);
-                      setCtxMenu(null);
-                    }}
-                  >
-                    <Eraser size={12} /> Limpiar pasos
-                  </button>
-                  {totalDrumPatterns > 1 && (
-                    <>
-                      <hr className="menu-separator" />
-                      <button
-                        type="button"
-                        className="menu-danger"
-                        onClick={() => {
-                          removeDrumPattern(pIdx);
-                          setCtxMenu(null);
-                        }}
-                      >
-                        <Trash2 size={12} /> Eliminar patrón
-                      </button>
-                    </>
-                  )}
-                </>
-              );
-            })()
-          ) : (
-            (() => {
-              const { melodyTrackId, melodyPatternId } = ctxMenu.source;
-              const track = tracks.find((t) => t.id === melodyTrackId);
-              if (!track) return null;
-              const { patterns } = ensureTrackPatterns(track);
-              const pat = patterns.find((p) => p.id === melodyPatternId);
-              if (!pat) return null;
-              return (
-                <>
-                  <div className="menu-header">
-                    <span>{track.name} · {pat.name}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="menu-item"
-                    onClick={() => {
-                      jumpToPatternEditor({
-                        sourceType: 'melody',
-                        melodyTrackId,
-                        melodyPatternId
-                      });
-                      setCtxMenu(null);
-                    }}
-                  >
-                    <ExternalLink size={12} /> Editar en Piano Roll
-                  </button>
-                  <button
-                    type="button"
-                    className="menu-item"
-                    onClick={() => {
-                      setRenamingKey(`mel_${melodyTrackId}_${melodyPatternId}`);
-                      setRenameDraft(pat.name);
-                      setCtxMenu(null);
-                    }}
-                  >
-                    <Edit3 size={12} /> Renombrar patrón
-                  </button>
-                  <button
-                    type="button"
-                    className="menu-item"
-                    onClick={() => {
-                      const newId = duplicateMelodyPattern(melodyTrackId, melodyPatternId);
-                      if (newId) {
-                        handleSelectPattern({
-                          sourceType: 'melody',
-                          melodyTrackId,
-                          melodyPatternId: newId
-                        });
-                      }
-                      setCtxMenu(null);
-                    }}
-                  >
-                    <Copy size={12} /> Duplicar patrón
-                  </button>
-
-                  <hr className="menu-separator" />
-                  <div style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', fontWeight: 700, padding: '2px 8px' }}>
-                    DURACIÓN
-                  </div>
-                  <div style={{ display: 'flex', gap: '3px', padding: '4px 6px' }}>
-                    <button
-                      type="button"
-                      className={`physical-segment-btn ${!pat.lengthBeats ? 'active' : ''}`}
-                      style={{ fontSize: '0.65rem', padding: '2px 5px', height: '21px' }}
-                      onClick={() => {
-                        setMelodyPatternLength(melodyTrackId, melodyPatternId, undefined);
-                        setCtxMenu(null);
-                      }}
-                    >
-                      Auto
-                    </button>
-                    {[1, 2, 4, 8].map((bars) => {
-                      const beats = bars * beatsPerMeasure;
-                      return (
-                        <button
-                          key={bars}
-                          type="button"
-                          className={`physical-segment-btn ${pat.lengthBeats === beats ? 'active' : ''}`}
-                          style={{ fontSize: '0.65rem', padding: '2px 5px', height: '21px' }}
-                          onClick={() => {
-                            setMelodyPatternLength(melodyTrackId, melodyPatternId, beats);
-                            setCtxMenu(null);
-                          }}
-                        >
-                          {bars}c
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <hr className="menu-separator" />
-                  <button
-                    type="button"
-                    className="menu-item"
-                    onClick={() => {
-                      clearMelodyPattern(melodyTrackId, melodyPatternId);
-                      setCtxMenu(null);
-                    }}
-                  >
-                    <Eraser size={12} /> Limpiar notas
-                  </button>
-                  {patterns.length > 1 && (
+          {(() => {
+            const pIdx = ctxMenu.patternIndex;
+            const pName = getDrumPatternName(pIdx, drumPatternNames);
+            return (
+              <>
+                <div className="menu-header">
+                  <span>{pName}</span>
+                </div>
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={() => {
+                    jumpToDrumEditor(pIdx);
+                    setCtxMenu(null);
+                  }}
+                >
+                  <ExternalLink size={12} /> Editar en Drum Sequencer
+                </button>
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={() => {
+                    setRenamingDrumIdx(pIdx);
+                    setRenameDraft(pName);
+                    setCtxMenu(null);
+                  }}
+                >
+                  <Edit3 size={12} /> Renombrar patrón
+                </button>
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={() => {
+                    const newIdx = duplicateDrumPattern(pIdx);
+                    handleSelectDrumPattern(newIdx);
+                    setCtxMenu(null);
+                  }}
+                >
+                  <Copy size={12} /> Duplicar patrón
+                </button>
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={() => {
+                    clearDrumPattern(pIdx);
+                    setCtxMenu(null);
+                  }}
+                >
+                  <Eraser size={12} /> Limpiar pasos
+                </button>
+                {totalDrumPatterns > 1 && (
+                  <>
+                    <hr className="menu-separator" />
                     <button
                       type="button"
                       className="menu-danger"
                       onClick={() => {
-                        removeMelodyPattern(melodyTrackId, melodyPatternId);
+                        removeDrumPattern(pIdx);
                         setCtxMenu(null);
                       }}
                     >
                       <Trash2 size={12} /> Eliminar patrón
                     </button>
-                  )}
-                </>
-              );
-            })()
-          )}
+                  </>
+                )}
+              </>
+            );
+          })()}
         </ContextMenuContainer>
       )}
     </aside>

@@ -1,10 +1,10 @@
 /**
  * AudioTracksToolbar.tsx
- * Barra superior unificada para la estación de Playlist / Tracks (MIDI Tracks de Patrones + Audio Tracks).
- * Sigue la estética de hardware analógico Phosphor (UnifiedToolbar, botones físicos, bandejas táctiles).
+ * Barra superior unificada para la vista TRACKS 1:1 de Phosphor
+ * (Armonía / Piano Roll / Batería / Audio Multitrack).
  */
 
-import React, { useRef } from 'react';
+import React, { useMemo, useRef } from 'react';
 import {
   Plus,
   Mic,
@@ -26,22 +26,27 @@ import { waveformService } from '../../core/audio/waveformService';
 import { getNativeAudioContext } from '../../core/audio/worklet/PhosphorWorkletNode';
 import { generateId } from '../../utils/idGenerator';
 import { getBeatsPerMeasure } from '../../core/audio/arrangementResolver';
+import { reconcileTrackRegions } from '../../core/audio/melodyRegionUtils';
+import { normalizePatternChainToLinear } from '../../utils/typeDefinitions';
 
 export const AudioTracksToolbar: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const {
+    chordBlocks,
+    tracks,
+    patternChain,
     audioTracks,
     audioClips,
-    midiTracks,
-    midiClips,
+    channels,
     bpm,
     timeSignature,
+    selectedPlaylistTrack,
     selectedTrackId,
-    selectedMidiTrackId,
-    selectedPlaylistTrackKind,
+    selectedChordIds,
+    selectedMelodyRegionRefs,
+    selectedChainIds,
     selectedClipIds,
-    selectedMidiClipIds,
     currentBeat,
     isRecordingAudio,
     armedTrackId,
@@ -50,13 +55,16 @@ export const AudioTracksToolbar: React.FC = () => {
     audioLatencyCalibrationMs,
     playlistTool,
     isPickerOpen,
+    toggleMute,
+    toggleSolo,
+    addPianoRollTrack,
     addAudioTrack,
     updateAudioTrack,
-    addMidiTrack,
-    updateMidiTrack,
     addAudioClip,
+    splitChordBlock,
+    splitMelodyRegion,
+    splitChainItem,
     splitAudioClip,
-    splitMidiClip,
     setAudioSnapGrid,
     setAudioTimelineViewport,
     setIsLatencyModalOpen,
@@ -66,17 +74,20 @@ export const AudioTracksToolbar: React.FC = () => {
     setIsPickerOpen
   } = useSongStore(
     useShallow((state) => ({
-      audioTracks: state.audioTracks,
-      audioClips: state.audioClips,
-      midiTracks: state.midiTracks,
-      midiClips: state.midiClips,
+      chordBlocks: state.chordBlocks || [],
+      tracks: state.tracks || [],
+      patternChain: state.patternChain || [],
+      audioTracks: state.audioTracks || [],
+      audioClips: state.audioClips || [],
+      channels: state.channels || {},
       bpm: state.bpm,
       timeSignature: state.timeSignature,
+      selectedPlaylistTrack: state.selectedPlaylistTrack,
       selectedTrackId: state.selectedTrackId,
-      selectedMidiTrackId: state.selectedMidiTrackId,
-      selectedPlaylistTrackKind: state.selectedPlaylistTrackKind,
-      selectedClipIds: state.selectedClipIds,
-      selectedMidiClipIds: state.selectedMidiClipIds,
+      selectedChordIds: state.selectedChordIds || [],
+      selectedMelodyRegionRefs: state.selectedMelodyRegionRefs || [],
+      selectedChainIds: state.selectedChainIds || [],
+      selectedClipIds: state.selectedClipIds || [],
       currentBeat: state.currentBeat,
       isRecordingAudio: state.isRecordingAudio,
       armedTrackId: state.armedTrackId,
@@ -85,13 +96,16 @@ export const AudioTracksToolbar: React.FC = () => {
       audioLatencyCalibrationMs: state.audioLatencyCalibrationMs,
       playlistTool: state.playlistTool,
       isPickerOpen: state.isPickerOpen,
+      toggleMute: state.toggleMute,
+      toggleSolo: state.toggleSolo,
+      addPianoRollTrack: state.addPianoRollTrack,
       addAudioTrack: state.addAudioTrack,
       updateAudioTrack: state.updateAudioTrack,
-      addMidiTrack: state.addMidiTrack,
-      updateMidiTrack: state.updateMidiTrack,
       addAudioClip: state.addAudioClip,
+      splitChordBlock: state.splitChordBlock,
+      splitMelodyRegion: state.splitMelodyRegion,
+      splitChainItem: state.splitChainItem,
       splitAudioClip: state.splitAudioClip,
-      splitMidiClip: state.splitMidiClip,
       setAudioSnapGrid: state.setAudioSnapGrid,
       setAudioTimelineViewport: state.setAudioTimelineViewport,
       setIsLatencyModalOpen: state.setIsLatencyModalOpen,
@@ -102,31 +116,65 @@ export const AudioTracksToolbar: React.FC = () => {
     }))
   );
 
-  // Determinar pista activa (MIDI o Audio) para M/S rápidos
-  const activeMidiTrack = midiTracks.find((t) => t.id === selectedMidiTrackId) || midiTracks[0];
-  const activeAudioTrack = audioTracks.find((t) => t.id === selectedTrackId) || audioTracks[0];
-  const isMidiActive = selectedPlaylistTrackKind === 'midi' && Boolean(activeMidiTrack);
-  const activeTrack = isMidiActive ? activeMidiTrack : activeAudioTrack;
-  const isMuted = activeTrack?.muted ?? false;
-  const isSolo = activeTrack?.solo ?? false;
+  const beatsPerMeasure = getBeatsPerMeasure(timeSignature);
+  const currentMeasure = currentBeat / beatsPerMeasure;
 
-  const handleToggleMute = () => {
-    if (!activeTrack) return;
-    if (isMidiActive) {
-      updateMidiTrack(activeTrack.id, { muted: !activeTrack.muted });
-    } else {
-      updateAudioTrack(activeTrack.id, { muted: !activeTrack.muted });
+  // Resolver pista activa (Armonía / Melodía / Batería / Audio) para M/S rápidos
+  const activeTrackInfo = useMemo(() => {
+    if (selectedPlaylistTrack.kind === 'harmony') {
+      const ch = channels.chords;
+      return {
+        label: ch?.name || 'Acordes',
+        muted: Boolean(ch?.muted),
+        solo: Boolean(ch?.solo),
+        toggleM: () => toggleMute('chords'),
+        toggleS: () => toggleSolo('chords')
+      };
     }
-  };
-
-  const handleToggleSolo = () => {
-    if (!activeTrack) return;
-    if (isMidiActive) {
-      updateMidiTrack(activeTrack.id, { solo: !activeTrack.solo });
-    } else {
-      updateAudioTrack(activeTrack.id, { solo: !activeTrack.solo });
+    if (selectedPlaylistTrack.kind === 'melody') {
+      const tr = tracks.find((t) => t.id === selectedPlaylistTrack.trackId) || tracks[0];
+      if (!tr) return null;
+      const ch = channels[tr.channelId];
+      return {
+        label: tr.name,
+        muted: Boolean(ch?.muted),
+        solo: Boolean(ch?.solo),
+        toggleM: () => toggleMute(tr.channelId),
+        toggleS: () => toggleSolo(tr.channelId)
+      };
     }
-  };
+    if (selectedPlaylistTrack.kind === 'drums') {
+      const ch = channels.drums;
+      return {
+        label: ch?.name || 'Batería',
+        muted: Boolean(ch?.muted),
+        solo: Boolean(ch?.solo),
+        toggleM: () => toggleMute('drums'),
+        toggleS: () => toggleSolo('drums')
+      };
+    }
+    const audioTrack =
+      audioTracks.find((t) => t.id === selectedPlaylistTrack.trackId) ||
+      audioTracks.find((t) => t.id === selectedTrackId) ||
+      audioTracks[0];
+    if (!audioTrack) return null;
+    return {
+      label: audioTrack.name,
+      muted: audioTrack.muted,
+      solo: audioTrack.solo,
+      toggleM: () => updateAudioTrack(audioTrack.id, { muted: !audioTrack.muted }),
+      toggleS: () => updateAudioTrack(audioTrack.id, { solo: !audioTrack.solo })
+    };
+  }, [
+    selectedPlaylistTrack,
+    channels,
+    tracks,
+    audioTracks,
+    selectedTrackId,
+    toggleMute,
+    toggleSolo,
+    updateAudioTrack
+  ]);
 
   // Grabación de audio
   const handleToggleRecord = async () => {
@@ -181,46 +229,116 @@ export const AudioTracksToolbar: React.FC = () => {
     }
   };
 
-  // Split unificado (MIDI clips + Audio clips)
-  const audioClipUnderPlayhead = activeAudioTrack
-    ? audioClips.find(
-        (c) =>
-          c.trackId === activeAudioTrack.id &&
-          currentBeat >= c.startBeat &&
-          currentBeat <= c.startBeat + (c.durationSeconds * bpm) / 60
-      )
-    : undefined;
+  // Resolver targets de Split unificado en el cabezal (Armonía + Melodías + Batería + Audio)
+  const splitTargets = useMemo(() => {
+    const linearDrums = normalizePatternChainToLinear(patternChain);
+    const hasExplicitSelection =
+      selectedChordIds.length > 0 ||
+      selectedMelodyRegionRefs.length > 0 ||
+      selectedChainIds.length > 0 ||
+      selectedClipIds.length > 0;
 
-  const midiClipUnderPlayhead = activeMidiTrack
-    ? midiClips.find(
-        (c) =>
-          c.midiTrackId === activeMidiTrack.id &&
+    const chordsToSplit: string[] = [];
+    const melodiesToSplit: Array<{ trackId: string; regionId: string }> = [];
+    const drumsToSplit: string[] = [];
+    const audiosToSplit: string[] = [];
+
+    if (hasExplicitSelection) {
+      for (const id of selectedChordIds) {
+        const b = chordBlocks.find((c) => c.id === id);
+        if (b && currentBeat > b.startBeat + 0.06 && currentBeat < b.startBeat + b.durationBeats - 0.06) {
+          chordsToSplit.push(b.id);
+        }
+      }
+      for (const ref of selectedMelodyRegionRefs) {
+        const tr = tracks.find((t) => t.id === ref.trackId);
+        if (!tr) continue;
+        const reg = reconcileTrackRegions(tr.id, tr.notes, tr.regions, beatsPerMeasure).find(
+          (r) => r.id === ref.regionId
+        );
+        if (reg && currentBeat > reg.startBeat + 0.06 && currentBeat < reg.startBeat + reg.durationBeats - 0.06) {
+          melodiesToSplit.push(ref);
+        }
+      }
+      for (const id of selectedChainIds) {
+        const c = linearDrums.find((d) => d.id === id);
+        if (c && currentMeasure > c.startMeasure + 0.05 && currentMeasure < c.startMeasure + c.durationMeasures - 0.05) {
+          drumsToSplit.push(c.id);
+        }
+      }
+      for (const id of selectedClipIds) {
+        const c = audioClips.find((a) => a.id === id);
+        if (
+          c &&
           currentBeat > c.startBeat + 0.06 &&
-          currentBeat < c.startBeat + c.durationBeats - 0.06
-      )
-    : undefined;
+          currentBeat < c.startBeat + (c.durationSeconds * bpm) / 60 - 0.06
+        ) {
+          audiosToSplit.push(c.id);
+        }
+      }
+    } else if (selectedPlaylistTrack.kind === 'harmony') {
+      const b = chordBlocks.find(
+        (c) => currentBeat > c.startBeat + 0.06 && currentBeat < c.startBeat + c.durationBeats - 0.06
+      );
+      if (b) chordsToSplit.push(b.id);
+    } else if (selectedPlaylistTrack.kind === 'melody') {
+      const tr = tracks.find((t) => t.id === selectedPlaylistTrack.trackId);
+      if (tr) {
+        const reg = reconcileTrackRegions(tr.id, tr.notes, tr.regions, beatsPerMeasure).find(
+          (r) => currentBeat > r.startBeat + 0.06 && currentBeat < r.startBeat + r.durationBeats - 0.06
+        );
+        if (reg) melodiesToSplit.push({ trackId: tr.id, regionId: reg.id });
+      }
+    } else if (selectedPlaylistTrack.kind === 'drums') {
+      const c = linearDrums.find(
+        (d) => currentMeasure > d.startMeasure + 0.05 && currentMeasure < d.startMeasure + d.durationMeasures - 0.05
+      );
+      if (c) drumsToSplit.push(c.id);
+    } else {
+      const audioTrackId = selectedPlaylistTrack.trackId || selectedTrackId;
+      const c = audioClips.find(
+        (a) =>
+          a.trackId === audioTrackId &&
+          currentBeat > a.startBeat + 0.06 &&
+          currentBeat < a.startBeat + (a.durationSeconds * bpm) / 60 - 0.06
+      );
+      if (c) audiosToSplit.push(c.id);
+    }
+
+    return { chordsToSplit, melodiesToSplit, drumsToSplit, audiosToSplit };
+  }, [
+    chordBlocks,
+    tracks,
+    patternChain,
+    audioClips,
+    bpm,
+    beatsPerMeasure,
+    currentBeat,
+    currentMeasure,
+    selectedPlaylistTrack,
+    selectedTrackId,
+    selectedChordIds,
+    selectedMelodyRegionRefs,
+    selectedChainIds,
+    selectedClipIds
+  ]);
 
   const canSplit =
-    selectedMidiClipIds.length > 0 ||
-    selectedClipIds.length > 0 ||
-    Boolean(midiClipUnderPlayhead) ||
-    Boolean(audioClipUnderPlayhead);
+    splitTargets.chordsToSplit.length > 0 ||
+    splitTargets.melodiesToSplit.length > 0 ||
+    splitTargets.drumsToSplit.length > 0 ||
+    splitTargets.audiosToSplit.length > 0;
 
   const handleSplitAtPlayhead = () => {
-    if (selectedMidiClipIds.length > 0) {
-      selectedMidiClipIds.forEach((id) => splitMidiClip(id, currentBeat));
-    } else if (selectedClipIds.length > 0) {
-      selectedClipIds.forEach((id) => splitAudioClip(id, currentBeat));
-    } else if (isMidiActive && midiClipUnderPlayhead) {
-      splitMidiClip(midiClipUnderPlayhead.id, currentBeat);
-    } else if (audioClipUnderPlayhead) {
-      splitAudioClip(audioClipUnderPlayhead.id, currentBeat);
-    } else if (midiClipUnderPlayhead) {
-      splitMidiClip(midiClipUnderPlayhead.id, currentBeat);
-    }
+    if (!canSplit) return;
+    splitTargets.chordsToSplit.forEach((id) => splitChordBlock(id, currentBeat));
+    splitTargets.melodiesToSplit.forEach((ref) =>
+      splitMelodyRegion(ref.trackId, ref.regionId, currentBeat)
+    );
+    splitTargets.drumsToSplit.forEach((id) => splitChainItem(id, currentMeasure));
+    splitTargets.audiosToSplit.forEach((id) => splitAudioClip(id, currentBeat));
   };
 
-  const beatsPerMeasure = getBeatsPerMeasure(timeSignature);
   const measureNum = Math.floor(currentBeat / beatsPerMeasure) + 1;
   const beatInMeasure = Math.floor(currentBeat % beatsPerMeasure) + 1;
 
@@ -228,12 +346,16 @@ export const AudioTracksToolbar: React.FC = () => {
     <UnifiedToolbar
       left={
         <>
-          {/* Toggle Panel de Patrones (Picker FL-Style) */}
+          {/* Toggle Panel Paleta & Patrones */}
           <button
             type="button"
             className={`physical-btn ${isPickerOpen ? 'active' : ''}`}
             onClick={() => setIsPickerOpen(!isPickerOpen)}
-            title={isPickerOpen ? 'Ocultar selector de patrones (Picker)' : 'Mostrar selector de patrones (Picker)'}
+            title={
+              isPickerOpen
+                ? 'Ocultar panel de Acordes, Patrones y Audio'
+                : 'Mostrar panel de Acordes, Patrones y Audio'
+            }
           >
             <PanelLeft size={13} style={{ color: isPickerOpen ? '#ffd875' : 'var(--text-secondary)' }} />
           </button>
@@ -242,10 +364,16 @@ export const AudioTracksToolbar: React.FC = () => {
           <div style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
             <button
               type="button"
-              className={`control-btn mute-toggle ${isMuted ? 'active' : ''}`}
-              onClick={handleToggleMute}
-              disabled={!activeTrack}
-              title={isMuted ? 'Desmutear pista activa' : 'Silenciar pista activa (Mute)'}
+              className={`control-btn mute-toggle ${activeTrackInfo?.muted ? 'active' : ''}`}
+              onClick={() => activeTrackInfo?.toggleM()}
+              disabled={!activeTrackInfo}
+              title={
+                activeTrackInfo
+                  ? activeTrackInfo.muted
+                    ? `Desmutear ${activeTrackInfo.label}`
+                    : `Silenciar ${activeTrackInfo.label} (Mute)`
+                  : 'Silenciar pista activa'
+              }
               style={{
                 width: '26px',
                 height: '26px',
@@ -258,10 +386,16 @@ export const AudioTracksToolbar: React.FC = () => {
             </button>
             <button
               type="button"
-              className={`control-btn solo-toggle ${isSolo ? 'active' : ''}`}
-              onClick={handleToggleSolo}
-              disabled={!activeTrack}
-              title={isSolo ? 'Desactivar Solo de pista activa' : 'Aislar pista activa (Solo)'}
+              className={`control-btn solo-toggle ${activeTrackInfo?.solo ? 'active' : ''}`}
+              onClick={() => activeTrackInfo?.toggleS()}
+              disabled={!activeTrackInfo}
+              title={
+                activeTrackInfo
+                  ? activeTrackInfo.solo
+                    ? `Desactivar Solo de ${activeTrackInfo.label}`
+                    : `Aislar ${activeTrackInfo.label} (Solo)`
+                  : 'Aislar pista activa'
+              }
               style={{
                 width: '26px',
                 height: '26px',
@@ -274,17 +408,17 @@ export const AudioTracksToolbar: React.FC = () => {
             </button>
           </div>
 
-          {/* Botón + MIDI Track */}
+          {/* Botón + Melodía (Piano Roll 1:1) */}
           <button
             type="button"
             className="physical-btn"
-            onClick={() => addMidiTrack()}
-            title="Añadir nueva pista MIDI de patrones (Playlist)"
+            onClick={() => addPianoRollTrack()}
+            title="Añadir nuevo canal de Piano Roll (sincronizado 1:1 con Tracks y Mixer)"
             style={{ gap: '4px', padding: '0 8px' }}
           >
-            <Plus size={12} style={{ color: '#2dd4bf' }} />
-            <MidiKeysMiniIcon color="#2dd4bf" size={11} />
-            <span>MIDI</span>
+            <Plus size={12} style={{ color: '#a78bfa' }} />
+            <MidiKeysMiniIcon color="#a78bfa" size={11} />
+            <span>MELODÍA</span>
           </button>
 
           {/* Botón + Audio Track */}
@@ -303,13 +437,13 @@ export const AudioTracksToolbar: React.FC = () => {
       }
       center={
         <>
-          {/* Herramientas de Playlist estilo FL Studio: Pincel · Navaja · Seleccionar */}
-          <div className="physical-segment-tray" role="group" aria-label="Herramientas de Playlist">
+          {/* Herramientas de Tracks: Pincel · Navaja · Seleccionar */}
+          <div className="physical-segment-tray" role="group" aria-label="Herramientas de Tracks">
             <button
               type="button"
               className={`physical-segment-btn ${playlistTool === 'paint' ? 'active' : ''}`}
               onClick={() => setPlaylistTool('paint')}
-              title="Pincel / Pintar patrones (P · Clic pinta, arrastrar pinta varios compases)"
+              title="Pincel (P · Clic pinta acordes en Armonía o patrones en Batería; arrastrar pinta varios compases)"
               aria-pressed={playlistTool === 'paint'}
             >
               <Pencil size={12} />
@@ -318,7 +452,7 @@ export const AudioTracksToolbar: React.FC = () => {
               type="button"
               className={`physical-segment-btn ${playlistTool === 'slice' ? 'active tool-slice-active' : ''}`}
               onClick={() => setPlaylistTool('slice')}
-              title="Navaja / Cortar clips MIDI o Audio (C · Clic sobre un clip para dividir)"
+              title="Navaja / Cortar bloques de Armonía, regiones de Piano Roll, Batería o Audio (C)"
               aria-pressed={playlistTool === 'slice'}
             >
               <Scissors size={12} />
@@ -327,7 +461,7 @@ export const AudioTracksToolbar: React.FC = () => {
               type="button"
               className={`physical-segment-btn ${playlistTool === 'select' ? 'active' : ''}`}
               onClick={() => setPlaylistTool('select')}
-              title="Seleccionar múltiples clips por área (E · o Ctrl+Arrastrar)"
+              title="Seleccionar múltiples bloques y clips por área (E · o Ctrl+Arrastrar)"
               aria-pressed={playlistTool === 'select'}
             >
               <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round">
@@ -381,7 +515,11 @@ export const AudioTracksToolbar: React.FC = () => {
             className="physical-btn"
             onClick={handleSplitAtPlayhead}
             disabled={!canSplit}
-            title={canSplit ? 'Dividir clip MIDI/Audio en el cabezal (Tecla S)' : 'Selecciona un clip o sitúa el cabezal sobre uno (Tecla S)'}
+            title={
+              canSplit
+                ? 'Dividir bloque/región/clip en el cabezal (Tecla S)'
+                : 'Sitúa el cabezal dentro de un bloque o clip seleccionado (Tecla S)'
+            }
           >
             <Scissors size={13} />
             <span>SPLIT</span>
@@ -401,7 +539,7 @@ export const AudioTracksToolbar: React.FC = () => {
               type="button"
               className={`physical-segment-btn ${audioSnapGrid === 'bar' ? 'active' : ''}`}
               onClick={() => setAudioSnapGrid('bar')}
-              title="Ajuste por Compás (ideal para secuenciar patrones FL-style)"
+              title="Ajuste por Compás"
               style={{ fontSize: '0.64rem', padding: '0 5px' }}
             >
               1C

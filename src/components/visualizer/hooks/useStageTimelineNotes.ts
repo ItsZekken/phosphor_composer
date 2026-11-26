@@ -1,9 +1,8 @@
 import { useMemo } from 'react';
 import { useSongStore } from '../../../store/songStore';
 import { noteToMidi, renderChordPattern, segmentChordBlockByStyleMarkers } from '../../../core/music';
-import type { MidiPatternClip, MidiTrack, StyleMarker, TimeSignature } from '../../../utils/typeDefinitions';
+import type { StyleMarker } from '../../../utils/typeDefinitions';
 import type { PatternDef } from '../../../patterns/patternTypes';
-import { getBeatsPerMeasure, resolveArrangedMelodyTrackNotes } from '../../../core/audio/arrangementResolver';
 
 export interface StageRenderNote {
   id: string;
@@ -44,9 +43,6 @@ export interface ExtractStageTimelineNotesParams {
   pattern?: string;
   styleMarkers?: StyleMarker[];
   customPatterns?: PatternDef[];
-  midiTracks?: MidiTrack[];
-  midiClips?: MidiPatternClip[];
-  timeSignature?: TimeSignature | string;
 }
 
 /**
@@ -62,12 +58,8 @@ export function extractStageTimelineNotes(params: ExtractStageTimelineNotesParam
     channels,
     pattern = 'hold',
     styleMarkers = [],
-    customPatterns = [],
-    midiTracks = [],
-    midiClips = [],
-    timeSignature = '4/4'
+    customPatterns = []
   } = params;
-  const beatsPerMeasure = getBeatsPerMeasure(timeSignature);
   const list: StageRenderNote[] = [];
 
   const chordChannel = channels.chords || {
@@ -113,9 +105,9 @@ export function extractStageTimelineNotes(params: ExtractStageTimelineNotesParam
   (tracks || []).forEach((track, trackIdx) => {
     const channel = channels[track.channelId];
     const trackColor = track.color || channel?.color || PIANO_ROLL_COLOR_PALETTE[trackIdx % PIANO_ROLL_COLOR_PALETTE.length];
-    const { notes: arrangedNotes } = resolveArrangedMelodyTrackNotes(track, midiTracks, midiClips, beatsPerMeasure);
 
-    arrangedNotes.forEach((n: any) => {
+    (track.notes || []).forEach((n: any) => {
+      if (n.muted) return;
       list.push({
         id: `track-${track.id}-${n.id}`,
         midi: n.midi || noteToMidi(n.note),
@@ -147,9 +139,6 @@ export function useStageTimelineNotes() {
   const customPatterns = useSongStore((state) => state.customPatterns);
   const tracks = useSongStore((state) => state.tracks);
   const channels = useSongStore((state) => state.channels);
-  const midiTracks = useSongStore((state) => state.midiTracks);
-  const midiClips = useSongStore((state) => state.midiClips);
-  const timeSignature = useSongStore((state) => state.timeSignature);
 
   const compiledNotes = useMemo<StageRenderNote[]>(() => {
     return extractStageTimelineNotes({
@@ -159,12 +148,9 @@ export function useStageTimelineNotes() {
       channels,
       pattern,
       styleMarkers,
-      customPatterns,
-      midiTracks,
-      midiClips,
-      timeSignature
+      customPatterns
     });
-  }, [chordBlocks, chordOctaveShift, tracks, channels, pattern, styleMarkers, customPatterns, midiTracks, midiClips, timeSignature]);
+  }, [chordBlocks, chordOctaveShift, tracks, channels, pattern, styleMarkers, customPatterns]);
 
   // Calcular longitud máxima de la canción en compases/beats
   const maxBeat = useMemo(() => {
