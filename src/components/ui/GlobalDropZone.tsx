@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Upload, Package, AudioWaveform } from 'lucide-react';
+import { Upload, Package, AudioWaveform, HardDrive } from 'lucide-react';
 import {
   importProjectFile,
   importAudioFilesToTracks,
   importCustomDrumSamplesAsNewChannels,
+  importSoundFontFiles,
   isSupportedAudioFile,
   isSupportedProjectFile,
+  isSupportedSoundFontFile,
   hasExternalFilesPayload,
   isExplicitProjectOnlyDrag
 } from '../../core/session/projectFileImport';
@@ -70,6 +72,16 @@ export const GlobalDropZone: React.FC = () => {
         return;
       }
 
+      const soundfontFiles = files.filter(isSupportedSoundFontFile);
+      if (soundfontFiles.length > 0) {
+        const st = useSongStore.getState();
+        const activeTrack = st.tracks.find((t) => t.id === st.activeTrackId);
+        const targetChannelId =
+          st.activeView === 'chord' ? 'chords' : (activeTrack?.channelId || 'melody');
+        await importSoundFontFiles(soundfontFiles, targetChannelId, { openModal: true });
+        return;
+      }
+
       const audioFiles = files.filter(isSupportedAudioFile);
       if (audioFiles.length > 0) {
         if (useSongStore.getState().activeView === 'sequencer') {
@@ -82,7 +94,7 @@ export const GlobalDropZone: React.FC = () => {
 
       notify.warning(
         `Archivo no reconocido: ${files[0].name}`,
-        'Formatos soportados: .phos, .json, .mid, .wav, .mp3, .ogg, .flac'
+        'Formatos soportados: .phos, .json, .mid, .sf2, .sf3, .wav, .mp3, .ogg, .flac'
       );
     };
 
@@ -122,6 +134,9 @@ export const GlobalDropZone: React.FC = () => {
         <div className="global-drop-badges">
           <span className="global-drop-badge">
             <Package size={12} /> Proyecto (.phos / .json / .mid)
+          </span>
+          <span className="global-drop-badge">
+            <HardDrive size={12} /> SoundFont (.sf2 / .sf3)
           </span>
           <span className="global-drop-badge">
             <AudioWaveform size={12} /> Audio (.wav / .mp3 / .ogg / .flac)

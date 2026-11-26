@@ -56,6 +56,7 @@ export const MelodyTrackHeader: React.FC<MelodyTrackHeaderProps> = ({
     toggleMute,
     toggleSolo,
     openSynthConfigForChannel,
+    openSoundFontConfigForChannel,
     jumpToMelodyEditor
   } = useSongStore(
     useShallow((state) => ({
@@ -67,6 +68,7 @@ export const MelodyTrackHeader: React.FC<MelodyTrackHeaderProps> = ({
       toggleMute: state.toggleMute,
       toggleSolo: state.toggleSolo,
       openSynthConfigForChannel: state.openSynthConfigForChannel,
+      openSoundFontConfigForChannel: state.openSoundFontConfigForChannel,
       jumpToMelodyEditor: state.jumpToMelodyEditor
     }))
   );
@@ -76,7 +78,12 @@ export const MelodyTrackHeader: React.FC<MelodyTrackHeaderProps> = ({
     selectedPlaylistTrack.kind === 'melody' && selectedPlaylistTrack.trackId === track.id;
   const isMuted = Boolean(channel?.muted);
   const isSolo = Boolean(channel?.solo);
-  const instLabel = channel?.instrument === 'piano' ? 'PIANO' : 'SYNTH';
+  const instLabel =
+    channel?.instrument === 'piano'
+      ? 'PIANO'
+      : channel?.instrument === 'soundfont'
+      ? 'SF2'
+      : 'SYNTH';
   const noteCount = track.notes?.length || 0;
   const accent = track.color || '#a78bfa';
 
@@ -118,7 +125,9 @@ export const MelodyTrackHeader: React.FC<MelodyTrackHeaderProps> = ({
           className="midi-track-type-pill clickable-pill"
           style={{ borderColor: `${accent}77`, color: accent }}
           onClick={() => {
-            if (channel?.instrument !== 'piano') {
+            if (channel?.instrument === 'soundfont') {
+              openSoundFontConfigForChannel(track.channelId);
+            } else if (channel?.instrument !== 'piano') {
               openSynthConfigForChannel(track.channelId);
             } else {
               jumpToMelodyEditor(track.id);
@@ -127,6 +136,8 @@ export const MelodyTrackHeader: React.FC<MelodyTrackHeaderProps> = ({
           title={
             channel?.instrument === 'piano'
               ? 'Instrumento: Piano (Clic para abrir Piano Roll)'
+              : channel?.instrument === 'soundfont'
+              ? `Instrumento: SoundFont (${channel.soundfontConfig?.patchName || 'Sin patch'} · Clic para configurar)`
               : 'Instrumento: Sintetizador (Clic para configurar Synth)'
           }
         >

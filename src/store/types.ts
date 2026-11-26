@@ -10,6 +10,8 @@ import type {
   ActiveView,
   ChannelConfig,
   ChannelInstrument,
+  ChannelSoundFontConfig,
+  SoundFontAsset,
   SynthSettings,
   CRTParams,
   DrumChannel,
@@ -270,6 +272,10 @@ export interface UIState {
   editingChannelId: string | null;
   synthSettings: SynthSettings;
   synthClipboard: SynthSettings | null;
+  isSoundFontModalOpen: boolean;
+  soundfontModalChannelId: string | null;
+  soundfonts: SoundFontAsset[];
+  soundfontClipboard: ChannelSoundFontConfig | null;
   isCrtEnabled: boolean;
   isSettingsOpen: boolean;
   crtParams: CRTParams;
@@ -292,6 +298,14 @@ export interface UIActions {
   setSynthSettings: (settings: Partial<SynthSettings>) => void;
   copySynthSettings: (channelId?: string) => void;
   pasteSynthSettings: (channelId?: string) => boolean;
+  setSoundFontModalOpen: (open: boolean) => void;
+  openSoundFontConfigForChannel: (channelId: string) => void;
+  setChannelSoundFontConfig: (channelId: string, config: ChannelSoundFontConfig | undefined) => void;
+  addSoundFontAsset: (asset: SoundFontAsset) => void;
+  removeSoundFontAsset: (soundfontId: string) => void;
+  setSoundFontAssets: (assets: SoundFontAsset[]) => void;
+  copySoundFontConfig: (channelId?: string) => void;
+  pasteSoundFontConfig: (channelId?: string) => boolean;
   setCrtEnabled: (enabled: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   setCrtParams: (params: Partial<CRTParams>) => void;

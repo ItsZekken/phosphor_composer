@@ -11,8 +11,10 @@ import type {
   StyleMarker, 
   TempoMarker,
   ChannelConfig, 
+  ChannelSoundFontConfig,
   DrumChannel,
   CustomDrumSample,
+  SoundFontAsset,
   TimeSignature
 } from '../../utils/typeDefinitions';
 import { buildCustomSampleUrl, isCustomSampleUrl } from '../../constants/drumSamples';
@@ -29,6 +31,91 @@ export const createEmptyPatterns = (numPatterns = 8, length = 16) =>
   Array.from({ length: numPatterns }).map(() => 
     Array.from({ length }).map(() => ({ isActive: false, velocity: 0.8 }))
   );
+
+function normalizeChannelSoundFontConfig(raw: unknown): ChannelSoundFontConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const obj = raw as Partial<ChannelSoundFontConfig>;
+  const soundfontId = typeof obj.soundfontId === 'string' ? obj.soundfontId.trim() : '';
+  if (!soundfontId) return undefined;
+  const bank = typeof obj.bank === 'number' && Number.isFinite(obj.bank) ? Math.max(0, Math.min(128, Math.floor(obj.bank))) : 0;
+  const program = typeof obj.program === 'number' && Number.isFinite(obj.program) ? Math.max(0, Math.min(127, Math.floor(obj.program))) : 0;
+
+  let chorus: ChannelSoundFontConfig['chorus'];
+  if (obj.chorus && typeof obj.chorus === 'object') {
+    const c = obj.chorus;
+    chorus = {
+      enabled: Boolean(c.enabled),
+      rate: typeof c.rate === 'number' && Number.isFinite(c.rate) ? Math.max(0.1, Math.min(8.0, c.rate)) : 1.5,
+      depth: typeof c.depth === 'number' && Number.isFinite(c.depth) ? Math.max(0, Math.min(1, c.depth)) : 0.45,
+      mix: typeof c.mix === 'number' && Number.isFinite(c.mix) ? Math.max(0, Math.min(1, c.mix)) : 0.35
+    };
+  }
+
+  let reverb: ChannelSoundFontConfig['reverb'];
+  if (obj.reverb && typeof obj.reverb === 'object') {
+    const r = obj.reverb;
+    reverb = {
+      enabled: Boolean(r.enabled),
+      decay: typeof r.decay === 'number' && Number.isFinite(r.decay) ? Math.max(0.3, Math.min(6.0, r.decay)) : 2.2,
+      mix: typeof r.mix === 'number' && Number.isFinite(r.mix) ? Math.max(0, Math.min(1, r.mix)) : 0.3
+    };
+  }
+
+  return {
+    soundfontId,
+    bank,
+    program,
+    ...(typeof obj.patchName === 'string' && obj.patchName.trim() ? { patchName: obj.patchName.trim() } : {}),
+    ...(typeof obj.gain === 'number' && Number.isFinite(obj.gain) ? { gain: Math.max(0, Math.min(2.5, obj.gain)) } : {}),
+    ...(typeof obj.releaseMultiplier === 'number' && Number.isFinite(obj.releaseMultiplier)
+      ? { releaseMultiplier: Math.max(0.1, Math.min(4.0, obj.releaseMultiplier)) }
+      : {}),
+    ...(typeof obj.transpose === 'number' && Number.isFinite(obj.transpose)
+      ? { transpose: Math.max(-24, Math.min(24, Math.round(obj.transpose))) }
+      : {}),
+    ...(chorus ? { chorus } : {}),
+    ...(reverb ? { reverb } : {})
+  };
+}
+
+function normalizeSessionSoundFonts(raw: unknown): SoundFontAsset[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const result: SoundFontAsset[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as Partial<SoundFontAsset>;
+    const id = typeof obj.id === 'string' ? obj.id.trim() : '';
+    const name = typeof obj.name === 'string' ? obj.name.trim() : '';
+    if (!id || !name || seen.has(id)) continue;
+    seen.add(id);
+    const format = obj.format === 'sf3' || obj.format === 'webaudiofont' ? obj.format : 'sf2';
+    const fileName =
+      typeof obj.fileName === 'string' && obj.fileName.trim()
+        ? obj.fileName.trim()
+        : `${name}.${format === 'webaudiofont' ? 'js' : format}`;
+    const patches = Array.isArray(obj.patches)
+      ? obj.patches
+          .filter((p) => p && typeof p === 'object' && typeof p.name === 'string')
+          .map((p) => ({
+            bank: typeof p.bank === 'number' && Number.isFinite(p.bank) ? Math.max(0, Math.floor(p.bank)) : 0,
+            program: typeof p.program === 'number' && Number.isFinite(p.program) ? Math.max(0, Math.min(127, Math.floor(p.program))) : 0,
+            name: p.name.trim() || 'Patch',
+            ...(typeof p.zoneCount === 'number' ? { zoneCount: p.zoneCount } : {})
+          }))
+      : [];
+    result.push({
+      id,
+      name,
+      fileName,
+      format,
+      sizeBytes: typeof obj.sizeBytes === 'number' && obj.sizeBytes >= 0 ? obj.sizeBytes : 0,
+      patches,
+      ...(typeof obj.createdAt === 'number' ? { createdAt: obj.createdAt } : {})
+    });
+  }
+  return result;
+}
 
 function normalizeSessionCustomSamples(raw: unknown): CustomDrumSample[] {
   if (!Array.isArray(raw)) return [];
@@ -253,7 +340,8 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
             ? '#4d627d'
             : (ch.color || '#6880ad'),
           instrument: ch.instrument || 'synth',
-          synthSettings: rawSynth ? normalizeSynthSettings(rawSynth) : undefined
+          synthSettings: rawSynth ? normalizeSynthSettings(rawSynth) : undefined,
+          soundfontConfig: normalizeChannelSoundFontConfig(ch.soundfontConfig)
         };
       }
     });
@@ -340,6 +428,10 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
       channels,
       channelOrder
     },
+    soundfonts: (() => {
+      const assets = normalizeSessionSoundFonts((raw as any).soundfonts?.assets || (raw as any).soundfonts);
+      return assets.length > 0 ? { assets } : undefined;
+    })(),
     audio: {
       tracks: (raw as any).audio?.tracks || (raw as any).audioTracks || [],
       clips: (raw as any).audio?.clips || (raw as any).audioClips || [],
@@ -397,14 +489,22 @@ export function deserializeSession(rawInput: unknown): { session: SessionV2; war
       }
       parsedObj.drums.customSamples = normalizeSessionCustomSamples(parsedObj.drums.customSamples);
     }
-    // Normalizar synthSettings en todos los canales existentes para robustez total
+    // Normalizar synthSettings y soundfontConfig en todos los canales existentes para robustez total
     if (parsedObj.mixer?.channels) {
       Object.keys(parsedObj.mixer.channels).forEach((chId) => {
         const ch = parsedObj.mixer.channels[chId];
         if (ch && ch.synthSettings) {
           ch.synthSettings = normalizeSynthSettings(ch.synthSettings);
         }
+        if (ch && ch.soundfontConfig) {
+          ch.soundfontConfig = normalizeChannelSoundFontConfig(ch.soundfontConfig);
+        }
       });
+    }
+    if (parsedObj.soundfonts?.assets) {
+      parsedObj.soundfonts = {
+        assets: normalizeSessionSoundFonts(parsedObj.soundfonts.assets)
+      };
     }
     // Materializar arreglos legados de MIDI Tracks si existieran en la sesión v2
     const materializedV2 = materializeLegacyMidiArrangement({
@@ -506,6 +606,18 @@ export function serializeSession(state: any, metadataUpdates?: Partial<SessionMe
       },
       channelOrder: state.channelOrder || ['master', 'chords', 'melody', 'drums']
     },
+    soundfonts: (() => {
+      const channelsMap: Record<string, ChannelConfig> = state.channels || DEFAULT_CHANNELS;
+      const referencedIds = new Set<string>();
+      for (const ch of Object.values(channelsMap)) {
+        if (ch?.instrument === 'soundfont' && ch.soundfontConfig?.soundfontId) {
+          referencedIds.add(ch.soundfontConfig.soundfontId);
+        }
+      }
+      const allAssets = normalizeSessionSoundFonts(state.soundfonts);
+      const usedAssets = allAssets.filter((a) => referencedIds.has(a.id));
+      return usedAssets.length > 0 ? { assets: usedAssets } : undefined;
+    })(),
     audio: {
       tracks: state.audioTracks || [],
       clips: state.audioClips || [],

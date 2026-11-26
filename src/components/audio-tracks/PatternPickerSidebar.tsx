@@ -540,7 +540,8 @@ export const PatternPickerSidebar: React.FC = () => {
 
                 <div className="picker-melody-quick-list">
                   {tracks.map((track) => {
-                    const inst = channels[track.channelId]?.instrument === 'piano' ? 'PIANO' : 'SYNTH';
+                    const rawInst = channels[track.channelId]?.instrument;
+                    const inst = rawInst === 'piano' ? 'PIANO' : rawInst === 'soundfont' ? 'SF2' : 'SYNTH';
                     const count = track.notes?.length || 0;
                     return (
                       <button

@@ -20,7 +20,12 @@ import {
 } from './slices/drumSlice';
 import { getCustomSampleBufferId } from '../constants/drumSamples';
 import { createMixerSlice, initialMixerState, DEFAULT_CHANNELS } from './slices/mixerSlice';
-import { createUISlice, initialUIState } from './slices/uiSlice';
+import {
+  createUISlice,
+  initialUIState,
+  normalizeSoundFontAssets,
+  savePersistedSoundFonts
+} from './slices/uiSlice';
 import { createAudioTrackSlice, initialAudioTrackState, DEFAULT_AUDIO_TRACKS } from './slices/audioTrackSlice';
 import { createPlaylistSlice, initialPlaylistState } from './slices/playlistSlice';
 import { NOTE_CLASSES, transposeNote, transposeChordName } from '../core/music';
@@ -95,6 +100,7 @@ export const useSongStore = create<SongStore>()(
           commandPaletteMode: 'closed',
           isCrtEnabled: get().isCrtEnabled,
           customDrumSamples: get().customDrumSamples,
+          soundfonts: get().soundfonts,
           bpm: 100,
           isAutoKey: false,
           detectedKey: null,
@@ -146,6 +152,20 @@ export const useSongStore = create<SongStore>()(
           savePersistedCustomDrumSamples(mergedCustomSamples);
         }
 
+        const existingSoundFonts = get().soundfonts || [];
+        const sessionSoundFonts = normalizeSoundFontAssets(session.soundfonts?.assets);
+        const mergedSoundFontMap = new Map<string, typeof existingSoundFonts[number]>();
+        for (const sf of existingSoundFonts) {
+          mergedSoundFontMap.set(sf.id, sf);
+        }
+        for (const sf of sessionSoundFonts) {
+          mergedSoundFontMap.set(sf.id, sf);
+        }
+        const mergedSoundFonts = Array.from(mergedSoundFontMap.values());
+        if (mergedSoundFonts.length !== existingSoundFonts.length || sessionSoundFonts.length > 0) {
+          savePersistedSoundFonts(mergedSoundFonts);
+        }
+
         const rawTitle = session.metadata?.title?.trim();
         const isGenericTitle =
           !rawTitle || /^phosphor (project|composition)/i.test(rawTitle) || rawTitle === 'Sin título';
@@ -184,6 +204,7 @@ export const useSongStore = create<SongStore>()(
           activeDrumKitId: session.drums.activeDrumKitId,
           drumChannels: normalizedDrumChannels,
           customDrumSamples: mergedCustomSamples,
+          soundfonts: mergedSoundFonts,
           patternLengths: session.drums.patternLengths || Array.from({ length: normalizedDrumChannels[0]?.patterns?.length || 8 }).map(() => 16),
           drumPatternNames: session.drums.drumPatternNames || [],
           drumTimelineViewport: session.drums.drumTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 },

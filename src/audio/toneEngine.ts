@@ -18,7 +18,13 @@ import { PreviewManager } from '../core/audio/engine/PreviewManager';
 import { AudioTransport } from '../core/audio/engine/AudioTransport';
 import { AudioTrackEngine } from '../core/audio/engine/AudioTrackEngine';
 import { LookaheadScheduler } from '../core/audio/lookaheadScheduler';
-import { normalizePatternChainToLinear, type ChannelConfig, type SynthSettings, type PianoRollTrack } from '../utils/typeDefinitions';
+import {
+  normalizePatternChainToLinear,
+  type ChannelConfig,
+  type ChannelSoundFontConfig,
+  type SynthSettings,
+  type PianoRollTrack
+} from '../utils/typeDefinitions';
 import type { PatternDef } from '../patterns/patternTypes';
 import { exportStageToMp4 } from '../core/video/stageVideoExporter';
 import { ensurePhosphorWorkletRegistered, getNativeAudioContext } from '../core/audio/worklet/PhosphorWorkletNode';
@@ -149,14 +155,14 @@ class ToneEngine {
         this.audioTrackEngine.onLoopWrap();
       },
       onTriggerChord: (evt, time) => {
-        const isPiano = useSongStore.getState().channels.chords?.instrument === 'piano';
-        this.instrumentManager.triggerAttackRelease('chords', isPiano, evt.note, evt.durationSeconds, time, evt.velocity);
+        const chordInstrument = useSongStore.getState().channels.chords?.instrument || 'synth';
+        this.instrumentManager.triggerAttackRelease('chords', chordInstrument, evt.note, evt.durationSeconds, time, evt.velocity);
         this.scheduleVisualNote(evt.note, false, time, evt.durationSeconds);
       },
       onTriggerTrack: (evt, time) => {
         const channelConfig = useSongStore.getState().channels[evt.channelId];
-        const isPiano = channelConfig?.instrument === 'piano';
-        this.instrumentManager.triggerAttackRelease(evt.channelId, isPiano, evt.note, evt.durationSeconds, time, evt.velocity);
+        const trackInstrument = channelConfig?.instrument || 'synth';
+        this.instrumentManager.triggerAttackRelease(evt.channelId, trackInstrument, evt.note, evt.durationSeconds, time, evt.velocity);
         this.scheduleVisualNote(evt.note, true, time, evt.durationSeconds);
       },
       onTriggerDrum: (evt, time) => {
@@ -657,6 +663,10 @@ class ToneEngine {
     this.instrumentManager.updateSynthSettings(settings, channelId);
   }
 
+  public updateSoundFontConfig(channelId: string, config?: ChannelSoundFontConfig) {
+    this.instrumentManager.updateSoundFontConfig(channelId, config);
+  }
+
   public getChannelWaveformData(channelId: string, target?: Float32Array): Float32Array {
     return this.instrumentManager.getChannelWaveform(channelId, target);
   }
@@ -718,18 +728,21 @@ class ToneEngine {
       return;
     }
 
-    // Si solo cambiaron faders/pan/knobs (o undo/redo de synthSettings), no recargar todos los instrumentos
+    // Si solo cambiaron faders/pan/knobs (o undo/redo de synthSettings / soundfontConfig), no recargar todos los instrumentos
     for (const [id, ch] of Object.entries(channels)) {
-      if (ch.synthSettings && prev[id]?.synthSettings !== ch.synthSettings && ch.instrument !== 'piano') {
+      if (ch.synthSettings && prev[id]?.synthSettings !== ch.synthSettings && ch.instrument === 'synth') {
         this.instrumentManager.updateSynthSettings(ch.synthSettings, id);
+      }
+      if (ch.soundfontConfig !== prev[id]?.soundfontConfig && ch.instrument === 'soundfont') {
+        this.instrumentManager.updateSoundFontConfig(id, ch.soundfontConfig);
       }
     }
   }
 
   public playNotePreview(note: string, channelId: string = 'melody', velocity = 0.8) {
     this.unlockIfSuspended();
-    const isPiano = useSongStore.getState().channels[channelId]?.instrument === 'piano';
-    this.previewManager.playNotePreview(note, channelId, isPiano, velocity);
+    const instrument = useSongStore.getState().channels[channelId]?.instrument || 'synth';
+    this.previewManager.playNotePreview(note, channelId, instrument, velocity);
   }
 
   public playChordPreview(chordName: string, chordOctaveShift = 0) {
@@ -762,13 +775,13 @@ class ToneEngine {
 
   public startNote(note: string, channelId = 'melody', velocity = 0.8) {
     this.unlockIfSuspended();
-    const isPiano = useSongStore.getState().channels[channelId]?.instrument === 'piano';
-    this.previewManager.startNote(note, channelId, isPiano, velocity);
+    const instrument = useSongStore.getState().channels[channelId]?.instrument || 'synth';
+    this.previewManager.startNote(note, channelId, instrument, velocity);
   }
 
   public stopNote(note: string, channelId = 'melody') {
-    const isPiano = useSongStore.getState().channels[channelId]?.instrument === 'piano';
-    this.previewManager.stopNote(note, channelId, isPiano);
+    const instrument = useSongStore.getState().channels[channelId]?.instrument || 'synth';
+    this.previewManager.stopNote(note, channelId, instrument);
   }
 
   public silence() {

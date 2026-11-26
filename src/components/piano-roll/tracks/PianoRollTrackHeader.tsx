@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Settings, Copy, ClipboardPaste, Music } from 'lucide-react';
+import { Plus, Settings, Copy, ClipboardPaste, Music, HardDrive } from 'lucide-react';
 import type { PianoRollTrack } from '../../../utils/typeDefinitions';
 import { ContextMenuContainer } from '../../ui/ContextMenuContainer';
 import { PIANO_ROLL_COLOR_PALETTE } from '../../visualizer/hooks/useStageTimelineNotes';
@@ -35,6 +35,7 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
   const [colorPickerTarget, setColorPickerTarget] = useState<{ trackId: string; x: number; y: number } | null>(null);
 
   const openSynthConfigForChannel = useSongStore((state) => state.openSynthConfigForChannel);
+  const openSoundFontConfigForChannel = useSongStore((state) => state.openSoundFontConfigForChannel);
   const copySynthSettings = useSongStore((state) => state.copySynthSettings);
   const pasteSynthSettings = useSongStore((state) => state.pasteSynthSettings);
   const synthClipboard = useSongStore((state) => state.synthClipboard);
@@ -264,6 +265,20 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
                 >
                   <Settings size={12} />
                   <span>Sintetizador {currentInst === 'synth' ? '✓' : ''}</span>
+                </button>
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={() => {
+                    if (currentTrack) {
+                      setChannelInstrument(currentTrack.channelId, 'soundfont');
+                      openSoundFontConfigForChannel(currentTrack.channelId);
+                    }
+                    setColorPickerTarget(null);
+                  }}
+                >
+                  <HardDrive size={12} />
+                  <span>SoundFont {currentInst === 'soundfont' ? '✓' : ''}</span>
                 </button>
                 <button
                   type="button"

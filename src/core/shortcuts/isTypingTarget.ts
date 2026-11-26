@@ -18,11 +18,13 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 
 export function isModalBlockingShortcuts(state: {
   isSynthModalOpen?: boolean;
+  isSoundFontModalOpen?: boolean;
   isSettingsOpen?: boolean;
   commandPaletteMode?: string;
 }): boolean {
   return Boolean(
     state.isSynthModalOpen ||
+      state.isSoundFontModalOpen ||
       state.isSettingsOpen ||
       (state.commandPaletteMode && state.commandPaletteMode !== 'closed')
   );

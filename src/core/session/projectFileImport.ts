@@ -8,10 +8,11 @@ import * as Tone from 'tone';
 import { useSongStore } from '../../store/songStore';
 import { toneEngine } from '../../audio/toneEngine';
 import { buildCustomSampleUrl } from '../../constants/drumSamples';
-import type { CustomDrumSample } from '../../utils/typeDefinitions';
+import type { CustomDrumSample, SoundFontAsset } from '../../utils/typeDefinitions';
 import { importProjectFromPhosBundle, isPhosBundle } from './phosphorBundle';
 import { importMidiToSession } from '../../utils/midiService';
 import { audioBufferRegistry } from '../audio/audioBufferRegistry';
+import { soundfontRegistry } from '../audio/soundfont/soundfontRegistry';
 import { waveformService } from '../audio/waveformService';
 import { getNativeAudioContext } from '../audio/worklet/PhosphorWorkletNode';
 import { generateId } from '../../utils/idGenerator';
@@ -19,6 +20,8 @@ import { notify } from '../ui/toastBus';
 
 const AUDIO_EXTENSIONS = /\.(wav|mp3|ogg|flac|m4a|aac|webm)$/i;
 const PROJECT_EXTENSIONS = /\.(phos|zip|json|mid|midi)$/i;
+const SOUNDFONT_EXTENSIONS = /\.(sf2|sf3)$/i;
+const SOUNDFONT_UPLOAD_EXTENSIONS = /\.(sf2|sf3|js|json)$/i;
 const PROJECT_MIME_TYPES = new Set([
   'application/json',
   'text/json',
@@ -78,6 +81,96 @@ export function isSupportedAudioFile(file: File): boolean {
 
 export function isSupportedProjectFile(file: File): boolean {
   return PROJECT_EXTENSIONS.test(file.name);
+}
+
+export function isSupportedSoundFontFile(file: File): boolean {
+  return SOUNDFONT_EXTENSIONS.test(file.name);
+}
+
+export function isSupportedSoundFontUploadFile(file: File): boolean {
+  return SOUNDFONT_UPLOAD_EXTENSIONS.test(file.name);
+}
+
+/**
+ * Importa uno o más archivos SoundFont (.sf2, .sf3 o WebAudioFont .js/.json),
+ * los registra en soundfontRegistry + IndexedDB y opcionalmente asigna el primero al canal objetivo.
+ */
+export async function importSoundFontFiles(
+  files: File[],
+  targetChannelId?: string,
+  options?: { silent?: boolean; openModal?: boolean }
+): Promise<SoundFontAsset[]> {
+  if (!files || files.length === 0) return [];
+
+  const validFiles = files.filter(isSupportedSoundFontUploadFile);
+  if (validFiles.length === 0) {
+    if (!options?.silent) {
+      notify.warning(
+        'Formato SoundFont no soportado',
+        'Usa archivos .sf2, .sf3 o presets WebAudioFont (.js / .json)'
+      );
+    }
+    return [];
+  }
+
+  toneEngine.unlockIfSuspended();
+  const imported: SoundFontAsset[] = [];
+
+  for (const file of validFiles) {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+        notify.error(`El archivo "${file.name}" está vacío`);
+        continue;
+      }
+
+      const bytes = new Uint8Array(arrayBuffer);
+      const { asset } = soundfontRegistry.registerFromBytes(bytes, file.name);
+      soundfontRegistry.saveToIndexedDB(asset.id, asset, bytes).catch(() => {});
+
+      useSongStore.getState().addSoundFontAsset(asset);
+      imported.push(asset);
+    } catch (err) {
+      notify.error(`No se pudo cargar SoundFont "${file.name}"`, (err as Error).message);
+    }
+  }
+
+  if (imported.length > 0) {
+    const firstAsset = imported[0];
+    if (targetChannelId && firstAsset.patches.length > 0) {
+      const state = useSongStore.getState();
+      const firstPatch =
+        firstAsset.patches.find((p) => p.bank === 0 && p.program === 0) || firstAsset.patches[0];
+      const nextConfig = {
+        soundfontId: firstAsset.id,
+        bank: firstPatch.bank,
+        program: firstPatch.program,
+        patchName: firstPatch.name,
+        gain: 1.0,
+        releaseMultiplier: 1.0,
+        transpose: 0
+      };
+      state.setChannelInstrument(targetChannelId, 'soundfont');
+      state.setChannelSoundFontConfig(targetChannelId, nextConfig);
+      if (options?.openModal) {
+        state.openSoundFontConfigForChannel(targetChannelId);
+      }
+    }
+
+    if (!options?.silent) {
+      const patchCount = firstAsset.patches.length;
+      notify.success(
+        imported.length === 1
+          ? `SoundFont cargado: ${firstAsset.name}`
+          : `${imported.length} SoundFonts cargados`,
+        imported.length === 1
+          ? `${patchCount} ${patchCount === 1 ? 'patch disponible' : 'patches disponibles'} · Se guardará en .phos`
+          : undefined
+      );
+    }
+  }
+
+  return imported;
 }
 
 export async function importAudioFilesToTracks(
@@ -326,13 +419,20 @@ export async function importProjectFile(file: File): Promise<boolean> {
     }
 
     if (lower.endsWith('.phos') || lower.endsWith('.zip') || isPhosBundle(arrayBuffer)) {
-      const { session, warnings, audioBuffersLoaded } = await importProjectFromPhosBundle(arrayBuffer);
+      const { session, warnings, audioBuffersLoaded, soundfontsLoaded } = await importProjectFromPhosBundle(arrayBuffer);
       store.importSong(session, baseTitle);
       if (warnings && warnings.length > 0) {
         console.warn('[projectFileImport] Advertencias al importar .phos:', warnings);
       }
-      const detail = audioBuffersLoaded > 0
-        ? `${audioBuffersLoaded} pista${audioBuffersLoaded === 1 ? '' : 's'} de audio restaurada${audioBuffersLoaded === 1 ? '' : 's'}`
+      const parts: string[] = [];
+      if (audioBuffersLoaded > 0) {
+        parts.push(`${audioBuffersLoaded} pista${audioBuffersLoaded === 1 ? '' : 's'} de audio`);
+      }
+      if (soundfontsLoaded > 0) {
+        parts.push(`${soundfontsLoaded} SoundFont${soundfontsLoaded === 1 ? '' : 's'}`);
+      }
+      const detail = parts.length > 0
+        ? `Restaurado: ${parts.join(' · ')}`
         : `${session.transport.key} ${session.transport.scale} · ${session.transport.bpm} BPM`;
       notify.success(`Proyecto cargado: ${useSongStore.getState().projectTitle}`, detail);
       return true;
@@ -394,12 +494,20 @@ export async function importProjectFile(file: File): Promise<boolean> {
       }
     }
 
+    if (isSupportedSoundFontFile(file)) {
+      const activeTrack = store.tracks.find((t) => t.id === store.activeTrackId);
+      const targetChannelId =
+        store.activeView === 'chord' ? 'chords' : (activeTrack?.channelId || 'melody');
+      const loaded = await importSoundFontFiles([file], targetChannelId, { openModal: true });
+      return loaded.length > 0;
+    }
+
     if (isSupportedAudioFile(file)) {
       const count = await importAudioFilesToTracks([file], { switchToTracksView: true });
       return count > 0;
     }
 
-    notify.warning(`Formato no soportado: ${file.name}`, 'Usa .phos, .json, .mid o audio (.wav/.mp3/.ogg/.flac)');
+    notify.warning(`Formato no soportado: ${file.name}`, 'Usa .phos, .json, .mid, .sf2/.sf3 o audio (.wav/.mp3/.ogg/.flac)');
     return false;
   } catch (err) {
     notify.error(`Error al importar "${file.name}"`, (err as Error).message);

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useCallback } from 'react';
 
 interface UnifiedToolbarProps {
   left?: React.ReactNode;
@@ -17,8 +17,23 @@ export const UnifiedToolbar: React.FC<UnifiedToolbarProps> = ({
   className = '',
   style
 }) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    const el = scrollRef.current;
+    if (!el || el.scrollWidth <= el.clientWidth) return;
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      el.scrollLeft += e.deltaY;
+    }
+  }, []);
+
   return (
-    <div className={`unified-toolbar-chassis ${className}`} style={style}>
+    <div
+      ref={scrollRef}
+      className={`unified-toolbar-chassis ${className}`}
+      style={style}
+      onWheel={handleWheel}
+    >
       {children ? (
         children
       ) : (

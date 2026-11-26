@@ -416,7 +416,15 @@ export const Header = () => {
       link.click();
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-      notify.success('Paquete .phos exportado', result.filename);
+      const bundleNotes: string[] = [];
+      if (result.audioCount > 0) {
+        bundleNotes.push(`${result.audioCount} audio`);
+      }
+      if (result.soundfontCount > 0) {
+        bundleNotes.push(`${result.soundfontCount} SoundFont${result.soundfontCount === 1 ? '' : 's'}`);
+      }
+      const detail = bundleNotes.length > 0 ? `${result.filename} (${bundleNotes.join(' · ')})` : result.filename;
+      notify.success('Paquete .phos exportado', detail);
     } catch (err) {
       notify.error('Error al exportar paquete .phos', (err as Error).message);
     }
@@ -801,7 +809,7 @@ export const Header = () => {
             ref={fileInputRef}
             type="file"
             id="import-midi"
-            accept=".phos,.zip,.json,.mid,.midi,.wav,.mp3,.ogg,.flac"
+            accept=".phos,.zip,.json,.mid,.midi,.sf2,.sf3,.wav,.mp3,.ogg,.flac"
             style={{ display: 'none' }}
             onChange={handleImportFile}
           />

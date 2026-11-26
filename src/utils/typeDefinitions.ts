@@ -163,7 +163,61 @@ export interface SynthSettings {
   presetName?: string;
 }
 
-export type ChannelInstrument = 'synth' | 'piano' | 'sampler';
+export type ChannelInstrument = 'synth' | 'piano' | 'soundfont' | 'sampler';
+
+export type SoundFontFormat = 'sf2' | 'sf3' | 'webaudiofont';
+
+export interface SoundFontPatchInfo {
+  bank: number;
+  program: number;
+  name: string;
+  zoneCount?: number;
+}
+
+export interface SoundFontAsset {
+  id: string;
+  name: string;
+  fileName: string;
+  format: SoundFontFormat;
+  sizeBytes: number;
+  patches: SoundFontPatchInfo[];
+  createdAt?: number;
+}
+
+export interface SoundFontChorusConfig {
+  enabled: boolean;
+  /** Frecuencia LFO en Hz (0.1 a 8.0, default 1.5) */
+  rate: number;
+  /** Profundidad de modulación (0.0 a 1.0, default 0.45) */
+  depth: number;
+  /** Mezcla wet/dry (0.0 a 1.0, default 0.35) */
+  mix: number;
+}
+
+export interface SoundFontReverbConfig {
+  enabled: boolean;
+  /** Tiempo de decaimiento RT60 en segundos (0.3 a 6.0, default 2.2) */
+  decay: number;
+  /** Mezcla wet/dry (0.0 a 1.0, default 0.30) */
+  mix: number;
+}
+
+export interface ChannelSoundFontConfig {
+  soundfontId: string;
+  bank: number;
+  program: number;
+  patchName?: string;
+  /** Multiplicador de ganancia de ajuste por canal (0.0 a 2.0, default 1.0) */
+  gain?: number;
+  /** Multiplicador de release para la envolvente AHDSR (0.1 a 4.0, default 1.0) */
+  releaseMultiplier?: number;
+  /** Transposición en semitonos (-24 a +24, default 0) */
+  transpose?: number;
+  /** Efecto Chorus estéreo integrado por canal */
+  chorus?: SoundFontChorusConfig;
+  /** Efecto Reverb de convolución estéreo integrado por canal */
+  reverb?: SoundFontReverbConfig;
+}
 
 export interface MelodyPattern {
   id: string;
@@ -232,6 +286,7 @@ export interface ChannelConfig {
   solo: boolean;
   color: string;
   synthSettings?: SynthSettings;
+  soundfontConfig?: ChannelSoundFontConfig;
 }
 
 export interface DrumStep {

@@ -19,7 +19,7 @@ import { audioBufferToWav } from '../../utils/wavEncoder';
 import { audioBufferToMp3BlobAsync, type Mp3EncodeResult } from '../../utils/mp3Encoder';
 import { audioBufferToM4aBlobAsync } from '../../utils/m4aEncoder';
 import type { PatternDef } from '../../patterns/patternTypes';
-import type { SynthSettings } from '../../utils/typeDefinitions';
+import type { ChannelSoundFontConfig, SynthSettings } from '../../utils/typeDefinitions';
 import { PIANO_URLS, preloadPianoBuffers, getSharedPianoBuffers } from './pianoSampler';
 import { normalizeSynthSettings } from './engine/synthPresets';
 import { faderToDb } from './engine/MixerGraph';
@@ -28,6 +28,7 @@ import { audioBufferRegistry } from './audioBufferRegistry';
 import { createTempoMap } from '../music';
 import { renderSynthTrackOffline } from './engine/PhosphorDSPKernel';
 import { renderDrumsOffline } from './engine/DrumOfflineRenderer';
+import { renderSoundFontTrackOffline } from './soundfont/WebAudioFontEngine';
 
 /**
  * Renderiza una sesión completa de forma offline a velocidad máxima de CPU
@@ -49,12 +50,19 @@ export async function renderSessionToAudioBuffer(
   const channels = session.mixer.channels || {};
 
   // Resolver instrumento configurado para un canal o pista
-  const getChannelInstrument = (channelId: string): 'piano' | 'synth' => {
+  const getChannelInstrument = (channelId: string): 'piano' | 'synth' | 'soundfont' => {
     const ch = channels[channelId];
     if (ch?.instrument === 'piano') return 'piano';
+    if (ch?.instrument === 'soundfont') return 'soundfont';
     const track = session.tracks?.find((t) => t.channelId === channelId || t.id === channelId);
     if ((track as any)?.instrument === 'piano') return 'piano';
+    if ((track as any)?.instrument === 'soundfont') return 'soundfont';
     return 'synth';
+  };
+
+  const getSoundFontConfigForChannel = (channelId: string): ChannelSoundFontConfig | undefined => {
+    const ch = channels[channelId];
+    return ch?.soundfontConfig;
   };
 
   // Resolver configuración de sintetizador para un canal o pista
@@ -86,20 +94,26 @@ export async function renderSessionToAudioBuffer(
 
   const sharedBuffers = getSharedPianoBuffers();
 
-  // 2. Pre-renderizado ultra-rápido de pistas de sintetizador analógico en puro DSP Float32 (~0.1s a ~0.4s).
-  // Elimina al 100% el cuello de botella al evitar instanciar cientos de PolySynths/OscillatorNodes en OfflineAudioContext.
+  // 2. Pre-renderizado ultra-rápido de pistas de sintetizador analógico en puro DSP Float32 (~0.1s a ~0.4s)
+  //    y recolección de eventos para pistas SoundFont (renderizadas en OfflineAudioContext estéreo).
   const synthEventsByChannel = new Map<string, Array<{ note: string; timeSeconds: number; durationSeconds: number; velocity: number }>>();
+  const soundfontEventsByChannel = new Map<string, Array<{ note: string; timeSeconds: number; durationSeconds: number; velocity: number }>>();
 
-  if (getChannelInstrument('chords') !== 'piano' && scheduled.chordEvents.length > 0) {
+  const chordsInst = getChannelInstrument('chords');
+  if (chordsInst === 'synth' && scheduled.chordEvents.length > 0) {
     synthEventsByChannel.set('chords', [...scheduled.chordEvents]);
+  } else if (chordsInst === 'soundfont' && scheduled.chordEvents.length > 0) {
+    soundfontEventsByChannel.set('chords', [...scheduled.chordEvents]);
   }
 
   scheduled.trackEvents.forEach((evt) => {
-    if (getChannelInstrument(evt.channelId) === 'piano') return;
-    let list = synthEventsByChannel.get(evt.channelId);
+    const inst = getChannelInstrument(evt.channelId);
+    if (inst === 'piano') return;
+    const targetMap = inst === 'soundfont' ? soundfontEventsByChannel : synthEventsByChannel;
+    let list = targetMap.get(evt.channelId);
     if (!list) {
       list = [];
-      synthEventsByChannel.set(evt.channelId, list);
+      targetMap.set(evt.channelId, list);
     }
     list.push({
       note: evt.note,
@@ -128,6 +142,18 @@ export async function renderSessionToAudioBuffer(
     const buffer = renderSynthTrackOffline(events, synthSettings, totalDurationSeconds, sampleRate, projectBpm, true);
     preRenderedSynthBuffers.set(channelId, buffer);
   });
+
+  // 2.5. Pre-renderizado de canales SoundFont con WebAudioFontEngine (estéreo nativo 1:1 con tiempo real)
+  const preRenderedSoundFontBuffers = new Map<string, AudioBuffer>();
+  for (const [channelId, events] of soundfontEventsByChannel.entries()) {
+    if (!isChannelAudible(channelId)) continue;
+    const sfConfig = getSoundFontConfigForChannel(channelId);
+    if (!sfConfig?.soundfontId) continue;
+    const buffer = await renderSoundFontTrackOffline(events, sfConfig, totalDurationSeconds, sampleRate);
+    if (buffer) {
+      preRenderedSoundFontBuffers.set(channelId, buffer);
+    }
+  }
 
   // 3. Pre-renderizado ultra-rápido de muestras de batería reales (PCM mix en memoria Float32 con resampling).
   // Cero sintetizadores de fallback: las muestras obligatorias del kit deben sonar. Si alguna falla, se lanza error explícito.
@@ -238,6 +264,15 @@ export async function renderSessionToAudioBuffer(
 
       const toneBuffer = new Tone.ToneAudioBuffer(audioBuffer);
       const source = new Tone.ToneBufferSource(toneBuffer).connect(outputCalibrationGain);
+      enforceStereo(source);
+      source.start(0);
+    });
+
+    // 4.3.5. Inyectar Pistas de SoundFont Pre-renderizadas (estéreo nativo directo al canal del mezclador)
+    preRenderedSoundFontBuffers.forEach((audioBuffer, channelId) => {
+      const chNode = getChannelNode(channelId);
+      const toneBuffer = new Tone.ToneAudioBuffer(audioBuffer);
+      const source = new Tone.ToneBufferSource(toneBuffer).connect(chNode.volumeNode);
       enforceStereo(source);
       source.start(0);
     });

@@ -7,6 +7,7 @@
 import * as Tone from 'tone';
 import { getChordNotes, shiftOctave, resolvePatternNoteToChord } from '../../music';
 import type { PatternDef } from '../../../patterns/patternTypes';
+import type { ChannelInstrument } from '../../../utils/typeDefinitions';
 import type { ChannelInstrumentManager } from './ChannelInstrumentManager';
 import { useSongStore } from '../../../store/songStore';
 
@@ -38,7 +39,7 @@ export class PreviewManager {
   }
 
   public playChordPreview(chordName: string, chordOctaveShift = 0) {
-    const isPiano = useSongStore.getState().channels.chords?.instrument === 'piano';
+    const chordInstrument: ChannelInstrument = useSongStore.getState().channels.chords?.instrument || 'synth';
 
     try {
       let notes = getChordNotes(chordName, 4);
@@ -47,7 +48,7 @@ export class PreviewManager {
       }
       if (notes.length > 0) {
         const now = Tone.now();
-        this.ctx.instrumentManager.triggerAttackRelease('chords', isPiano, notes, '2n', now, 0.7);
+        this.ctx.instrumentManager.triggerAttackRelease('chords', chordInstrument, notes, '2n', now, 0.7);
       }
     } catch (e) {
       console.warn('Error tocando acorde preview:', e);
@@ -85,7 +86,7 @@ export class PreviewManager {
 
     this.previewStep = 0;
     const beatDurationMs = (60 / bpm) * 1000;
-    const isPiano = useSongStore.getState().channels.chords?.instrument === 'piano';
+    const chordInstrument: ChannelInstrument = useSongStore.getState().channels.chords?.instrument || 'synth';
 
     const playNoteImmediate = (note: string, durationMs: number, velocity = 0.6) => {
       const now = Tone.now();
@@ -93,7 +94,7 @@ export class PreviewManager {
       if (!this.activePreviewNotes.includes(note)) {
         this.activePreviewNotes.push(note);
       }
-      this.ctx.instrumentManager.triggerAttackRelease('chords', isPiano, note, durSec, now, velocity);
+      this.ctx.instrumentManager.triggerAttackRelease('chords', chordInstrument, note, durSec, now, velocity);
       this.trackNote(note, durSec, undefined, 'harmony');
     };
 
@@ -105,7 +106,7 @@ export class PreviewManager {
           this.activePreviewNotes.push(note);
         }
       });
-      this.ctx.instrumentManager.triggerAttackRelease('chords', isPiano, this.previewNotes, durSec, now, velocity);
+      this.ctx.instrumentManager.triggerAttackRelease('chords', chordInstrument, this.previewNotes, durSec, now, velocity);
       this.previewNotes.forEach((note) => this.trackNote(note, durSec, undefined, 'harmony'));
     };
 
@@ -242,11 +243,11 @@ export class PreviewManager {
     }
 
     const now = Tone.now();
-    const isPiano = useSongStore.getState().channels.chords?.instrument === 'piano';
+    const chordInstrument: ChannelInstrument = useSongStore.getState().channels.chords?.instrument || 'synth';
 
     this.activePreviewNotes.forEach((note) => {
       try {
-        this.ctx.instrumentManager.keyUp('chords', isPiano, note, now);
+        this.ctx.instrumentManager.keyUp('chords', chordInstrument, note, now);
       } catch (_) {}
 
       this.activeNotesSet.delete(note);
@@ -261,32 +262,32 @@ export class PreviewManager {
     this.ctx.onActiveNotesChange(Array.from(this.activeNotesSet));
   }
 
-  public playNotePreview(noteName: string, channelId = 'melody', usePiano = false, velocity = 0.8) {
+  public playNotePreview(noteName: string, channelId = 'melody', instrument: ChannelInstrument = 'synth', velocity = 0.8) {
     try {
       const now = Tone.now();
       const safeVel = Math.max(0.05, Math.min(1, velocity));
-      this.ctx.instrumentManager.triggerAttackRelease(channelId, usePiano, noteName, '8n', now, safeVel);
+      this.ctx.instrumentManager.triggerAttackRelease(channelId, instrument, noteName, '8n', now, safeVel);
       this.trackNote(noteName, 0.3, undefined, channelId);
     } catch (e) {
       console.warn('Error tocando nota preview:', e);
     }
   }
 
-  public startNote(noteName: string, channelId = 'melody', usePiano = false, velocity = 0.8) {
+  public startNote(noteName: string, channelId = 'melody', instrument: ChannelInstrument = 'synth', velocity = 0.8) {
     try {
       this.activePressedNotes.add(noteName);
       this.activePressedNotesList = this.activePressedNotesList.filter((n) => n !== noteName);
       this.activePressedNotesList.push(noteName);
 
       const safeVel = Math.max(0.05, Math.min(1, velocity));
-      this.ctx.instrumentManager.keyDown(channelId, usePiano, noteName, Tone.now(), safeVel);
+      this.ctx.instrumentManager.keyDown(channelId, instrument, noteName, Tone.now(), safeVel);
       this.trackNoteStart(noteName);
     } catch (e) {
       console.warn('Error starting note:', e);
     }
   }
 
-  public stopNote(noteName: string, channelId = 'melody', usePiano = false) {
+  public stopNote(noteName: string, channelId = 'melody', instrument: ChannelInstrument = 'synth') {
     try {
       this.activePressedNotes.delete(noteName);
       this.activePressedNotesList = this.activePressedNotesList.filter((n) => n !== noteName);
@@ -294,9 +295,9 @@ export class PreviewManager {
       if (this.activePressedNotes.size === 0) {
         this.ctx.instrumentManager.releaseAll();
       } else {
-        this.ctx.instrumentManager.keyUp(channelId, usePiano, noteName, Tone.now());
+        this.ctx.instrumentManager.keyUp(channelId, instrument, noteName, Tone.now());
         const nextNote = this.activePressedNotesList[this.activePressedNotesList.length - 1];
-        this.ctx.instrumentManager.keyDown(channelId, usePiano, nextNote, Tone.now(), 0.8);
+        this.ctx.instrumentManager.keyDown(channelId, instrument, nextNote, Tone.now(), 0.8);
       }
       this.trackNoteStop(noteName);
     } catch (e) {

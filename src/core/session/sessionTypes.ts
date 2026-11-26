@@ -12,6 +12,7 @@ import type {
   ChannelConfig, 
   DrumChannel, 
   CustomDrumSample,
+  SoundFontAsset,
   TimeSignature,
   SynthSettings,
   CRTParams,
@@ -88,6 +89,10 @@ export interface MidiPlaylistSessionState {
   clips: import('../../utils/typeDefinitions').MidiPatternClip[];
 }
 
+export interface SoundFontSessionState {
+  assets: SoundFontAsset[];
+}
+
 /**
  * Esquema de Proyecto / Sesión Canónico v2 (Phosphor Composer)
  */
@@ -103,6 +108,7 @@ export interface SessionV2 {
   ui?: UIPreferenceState;
   audio?: AudioSessionState;
   midi?: MidiPlaylistSessionState;
+  soundfonts?: SoundFontSessionState;
   customSynthSettings?: Record<string, SynthSettings>;
 }
 

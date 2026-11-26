@@ -8,8 +8,10 @@
 import { zip, unzip, strToU8, strFromU8, type AsyncZippable } from 'fflate';
 import { serializeSession, deserializeSession } from './sessionSerializer';
 import type { SessionV2, SessionMetadata } from './sessionTypes';
+import type { ChannelConfig, SoundFontAsset } from '../../utils/typeDefinitions';
 import { audioBufferToWav } from '../../utils/wavEncoder';
 import { audioBufferRegistry } from '../audio/audioBufferRegistry';
+import { soundfontRegistry } from '../audio/soundfont/soundfontRegistry';
 import { waveformService } from '../audio/waveformService';
 import { getNativeAudioContext } from '../audio/worklet/PhosphorWorkletNode';
 import { getCustomSampleBufferId } from '../../constants/drumSamples';
@@ -36,11 +38,21 @@ export interface ExportPhosResult {
   blob: Blob;
   filename: string;
   audioCount: number;
+  soundfontCount: number;
+}
+
+function resolveSoundFontBundleExt(asset?: SoundFontAsset): string {
+  if (!asset) return 'sf2';
+  const lower = (asset.fileName || '').toLowerCase();
+  if (lower.endsWith('.sf3') || asset.format === 'sf3') return 'sf3';
+  if (lower.endsWith('.json')) return 'json';
+  if (lower.endsWith('.js') || asset.format === 'webaudiofont') return 'js';
+  return 'sf2';
 }
 
 /**
  * Exporta el estado completo de la canción como un paquete de proyecto .phos.
- * Empaqueta project.json y todas las pistas de audio activas en la subcarpeta virtual audio/*.wav.
+ * Empaqueta project.json, pistas de audio (audio/*.wav) y SoundFonts activos (soundfonts/*).
  */
 export async function exportProjectToPhosBundle(
   state: any,
@@ -50,12 +62,72 @@ export async function exportProjectToPhosBundle(
   onProgress?.('Serializando estructura musical...', 15);
 
   const session = serializeSession(state, metadataUpdates);
+  const soundfontIdSet = new Set<string>();
+  const channelsMap: Record<string, ChannelConfig> = session.mixer?.channels || {};
+  for (const ch of Object.values(channelsMap)) {
+    if (ch?.instrument === 'soundfont' && ch.soundfontConfig?.soundfontId) {
+      soundfontIdSet.add(ch.soundfontConfig.soundfontId);
+    }
+  }
+  const existingSessionAssets = session.soundfonts?.assets || [];
+  const assetById = new Map<string, SoundFontAsset>(existingSessionAssets.map((a) => [a.id, a]));
+  for (const a of existingSessionAssets) {
+    if (a?.id) soundfontIdSet.add(a.id);
+  }
+  const stateSoundFonts: SoundFontAsset[] = Array.isArray(state.soundfonts) ? state.soundfonts : [];
+  for (const a of stateSoundFonts) {
+    if (a?.id && soundfontIdSet.has(a.id) && !assetById.has(a.id)) {
+      assetById.set(a.id, a);
+    }
+  }
+
+  // Asegurar que todos los SoundFonts referenciados estén presentes en session.soundfonts.assets
+  const uniqueSoundFontIds = Array.from(soundfontIdSet);
+  const soundfontDir: AsyncZippable = {};
+  let soundfontCount = 0;
+
+  if (uniqueSoundFontIds.length > 0) {
+    for (let i = 0; i < uniqueSoundFontIds.length; i++) {
+      const sfId = uniqueSoundFontIds[i];
+      onProgress?.(`Empaquetando SoundFont ${i + 1}/${uniqueSoundFontIds.length}...`, 18);
+
+      let rawBytes = soundfontRegistry.getRawBytes(sfId);
+      if (!rawBytes) {
+        await soundfontRegistry.ensureLoaded(sfId);
+        rawBytes = soundfontRegistry.getRawBytes(sfId);
+      }
+
+      const meta = assetById.get(sfId) || soundfontRegistry.getAssetMeta(sfId);
+      if (meta && !assetById.has(sfId)) {
+        assetById.set(sfId, meta);
+      }
+
+      if (rawBytes && rawBytes.byteLength > 0) {
+        const ext = resolveSoundFontBundleExt(meta);
+        // SF3 ya viene comprimido en Ogg Vorbis (level 0 evita recompresión lenta); SF2 PCM se beneficia de level 3
+        const level = ext === 'sf3' ? 0 : 3;
+        soundfontDir[`${sfId}.${ext}`] = [rawBytes, { level }];
+        soundfontCount++;
+      } else {
+        console.warn(`[phosphorBundle] No se encontraron los bytes del SoundFont "${sfId}" para empaquetar.`);
+      }
+    }
+  }
+
+  if (assetById.size > 0) {
+    session.soundfonts = { assets: Array.from(assetById.values()) };
+  }
+
   const jsonString = JSON.stringify(session, null, 2);
   const projectJsonBytes = strToU8(jsonString);
 
   const zipFiles: AsyncZippable = {
     'project.json': [projectJsonBytes, { level: 6 }]
   };
+
+  if (Object.keys(soundfontDir).length > 0) {
+    zipFiles['soundfonts'] = soundfontDir;
+  }
 
   const audioClips = state.audioClips || [];
   const drumChannels = state.drumChannels || [];
@@ -133,13 +205,14 @@ export async function exportProjectToPhosBundle(
   const blob = new Blob([zipData.buffer as ArrayBuffer], { type: 'application/octet-stream' });
   onProgress?.('Completado', 100);
 
-  return { blob, filename, audioCount };
+  return { blob, filename, audioCount, soundfontCount };
 }
 
 export interface ImportPhosResult {
   session: SessionV2;
   warnings: string[];
   audioBuffersLoaded: number;
+  soundfontsLoaded: number;
 }
 
 /**
@@ -239,6 +312,50 @@ export async function importProjectFromPhosBundle(
     }
   }
 
+  // 3. Extraer y registrar SoundFonts embebidos (carpeta soundfonts/*)
+  const soundfontEntries = Object.entries(unzipped).filter(([filename, bytes]) => {
+    const lower = filename.toLowerCase();
+    return (
+      bytes.length > 12 &&
+      (lower.startsWith('soundfonts/') || lower.includes('/soundfonts/')) &&
+      (lower.endsWith('.sf2') || lower.endsWith('.sf3') || lower.endsWith('.js') || lower.endsWith('.json'))
+    );
+  });
+
+  let soundfontsLoaded = 0;
+  if (soundfontEntries.length > 0) {
+    const metaById = new Map<string, SoundFontAsset>(
+      (session.soundfonts?.assets || []).map((a) => [a.id, a])
+    );
+
+    for (let i = 0; i < soundfontEntries.length; i++) {
+      const [filePath, fileBytes] = soundfontEntries[i];
+      const progressPercent = 82 + Math.round(((i + 1) / soundfontEntries.length) * 16);
+      onProgress?.(`Cargando SoundFont ${i + 1}/${soundfontEntries.length}...`, progressPercent);
+
+      const baseName = filePath.split('/').pop() || filePath;
+      const sfId = baseName.replace(/\.[^/.]+$/, '');
+      const existingMeta = metaById.get(sfId);
+      const originalFileName = existingMeta?.fileName || baseName;
+
+      try {
+        const bytesCopy = fileBytes.slice();
+        const { asset } = soundfontRegistry.registerFromBytes(bytesCopy, originalFileName, sfId);
+        const mergedAsset: SoundFontAsset = {
+          ...asset,
+          name: existingMeta?.name || asset.name
+        };
+        metaById.set(sfId, mergedAsset);
+        soundfontRegistry.saveToIndexedDB(sfId, mergedAsset, bytesCopy).catch(() => {});
+        soundfontsLoaded++;
+      } catch (sfErr) {
+        warnings.push(`No se pudo cargar el SoundFont "${originalFileName}": ${(sfErr as Error).message}`);
+      }
+    }
+
+    session.soundfonts = { assets: Array.from(metaById.values()) };
+  }
+
   onProgress?.('Proyecto importado con éxito', 100);
-  return { session, warnings, audioBuffersLoaded };
+  return { session, warnings, audioBuffersLoaded, soundfontsLoaded };
 }

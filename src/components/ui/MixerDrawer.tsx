@@ -27,8 +27,15 @@ import {
 const INSTRUMENT_LABELS: Record<ChannelInstrument, string> = {
   piano: 'Piano de Cola',
   synth: 'Sintetizador Virtual',
+  soundfont: 'SoundFont (SF2)',
   sampler: 'Sampler Batería'
 };
+
+const MELODIC_INSTRUMENT_OPTIONS: Array<{ value: ChannelInstrument; label: string }> = [
+  { value: 'piano', label: INSTRUMENT_LABELS.piano },
+  { value: 'synth', label: INSTRUMENT_LABELS.synth },
+  { value: 'soundfont', label: INSTRUMENT_LABELS.soundfont }
+];
 
 const SYNTH_DB_SCALE_MARKS = [
   { label: '+6', pct: 100 },
@@ -179,6 +186,7 @@ export const MixerDrawer: React.FC = () => {
     setChannelPan,
     setChannelInstrument,
     openSynthConfigForChannel,
+    openSoundFontConfigForChannel,
     audioTracks,
     updateAudioTrack,
     isPlaying
@@ -196,6 +204,7 @@ export const MixerDrawer: React.FC = () => {
       setChannelPan: state.setChannelPan,
       setChannelInstrument: state.setChannelInstrument,
       openSynthConfigForChannel: state.openSynthConfigForChannel,
+      openSoundFontConfigForChannel: state.openSoundFontConfigForChannel,
       audioTracks: state.audioTracks || [],
       updateAudioTrack: state.updateAudioTrack,
       isPlaying: state.isPlaying
@@ -636,6 +645,7 @@ export const MixerDrawer: React.FC = () => {
                     onRename={handleRename}
                     setChannelInstrument={setChannelInstrument}
                     openSynthConfigForChannel={openSynthConfigForChannel}
+                    openSoundFontConfigForChannel={openSoundFontConfigForChannel}
                   />
                 );
               })
@@ -672,6 +682,7 @@ export const MixerDrawer: React.FC = () => {
                     onRename={handleRename}
                     setChannelInstrument={setChannelInstrument}
                     openSynthConfigForChannel={openSynthConfigForChannel}
+                    openSoundFontConfigForChannel={openSoundFontConfigForChannel}
                   />
                 );
               })()}
@@ -715,11 +726,12 @@ const ChannelStrip: React.FC<{
   onRename: (strip: UnifiedStripDescriptor, newName: string) => void;
   setChannelInstrument: (id: string, inst: ChannelInstrument) => void;
   openSynthConfigForChannel: (id: string) => void;
+  openSoundFontConfigForChannel: (id: string) => void;
 }> = React.memo(({
   strip, density, isSilenced, isClipping, vuPct, peakDisplay, peakDb,
   clearClipAndPeak, moveChannel, validChannelIds,
   onFaderChange, onFaderReset, onPanChange, onToggleMute, onToggleSolo,
-  onRename, setChannelInstrument, openSynthConfigForChannel
+  onRename, setChannelInstrument, openSynthConfigForChannel, openSoundFontConfigForChannel
 }) => {
   const panDrag = usePanDrag(strip.id, strip.pan, onPanChange);
   const faderDrag = useFaderDrag(strip.id, strip.faderPct, onFaderChange);
@@ -819,13 +831,17 @@ const ChannelStrip: React.FC<{
         isCompact ? (
           <div className="strip-instrument-select">
             <span className="strip-select-static" style={{ flex: 1 }}>
-              {ch.instrument === 'piano' ? 'PIANO' : 'SYNTH'}
+              {ch.instrument === 'piano' ? 'PIANO' : ch.instrument === 'soundfont' ? 'SF2' : 'SYNTH'}
             </span>
-            {ch.instrument === 'synth' && (
+            {(ch.instrument === 'synth' || ch.instrument === 'soundfont') && (
               <button
                 className="strip-synth-btn"
-                onClick={() => openSynthConfigForChannel(ch.id)}
-                title="Configurar Sintetizador"
+                onClick={() =>
+                  ch.instrument === 'soundfont'
+                    ? openSoundFontConfigForChannel(ch.id)
+                    : openSynthConfigForChannel(ch.id)
+                }
+                title={ch.instrument === 'soundfont' ? 'Configurar SoundFont y Patch' : 'Configurar Sintetizador'}
               >
                 <Settings size={11} />
               </button>
@@ -836,16 +852,26 @@ const ChannelStrip: React.FC<{
             <Music size={12} className="strip-inst-icon" />
             <CustomSelect
               value={ch.instrument}
-              onChange={(val) => setChannelInstrument(ch.id, val as ChannelInstrument)}
-              options={Object.entries(INSTRUMENT_LABELS).map(([k, label]) => ({ value: k, label }))}
+              onChange={(val) => {
+                const nextInst = val as ChannelInstrument;
+                setChannelInstrument(ch.id, nextInst);
+                if (nextInst === 'soundfont' && !useSongStore.getState().channels[ch.id]?.soundfontConfig?.soundfontId) {
+                  openSoundFontConfigForChannel(ch.id);
+                }
+              }}
+              options={MELODIC_INSTRUMENT_OPTIONS}
               className="strip-select"
               style={{ flex: 1 }}
             />
-            {ch.instrument === 'synth' && (
+            {(ch.instrument === 'synth' || ch.instrument === 'soundfont') && (
               <button
                 className="strip-synth-btn"
-                onClick={() => openSynthConfigForChannel(ch.id)}
-                title="Configurar Sintetizador"
+                onClick={() =>
+                  ch.instrument === 'soundfont'
+                    ? openSoundFontConfigForChannel(ch.id)
+                    : openSynthConfigForChannel(ch.id)
+                }
+                title={ch.instrument === 'soundfont' ? 'Configurar SoundFont y Patch' : 'Configurar Sintetizador'}
               >
                 <Settings size={12} />
               </button>
