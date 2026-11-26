@@ -14,6 +14,8 @@ interface PianoRollTrackHeaderProps {
   renamePianoRollTrack: (id: string, name: string) => void;
   setTrackColor: (id: string, color: string) => void;
   onRequestDeleteTrack: (trackId: string, trackName: string) => void;
+  selectedNoteCount?: number;
+  onClearSelection?: () => void;
 }
 
 export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.memo(({
@@ -24,7 +26,9 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
   removePianoRollTrack,
   renamePianoRollTrack,
   setTrackColor,
-  onRequestDeleteTrack
+  onRequestDeleteTrack,
+  selectedNoteCount = 0,
+  onClearSelection
 }) => {
   const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
   const [editingTrackName, setEditingTrackName] = useState<string>('');
@@ -154,6 +158,24 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
           <Plus size={13} />
         </button>
       </div>
+
+      {selectedNoteCount > 0 && (
+        <div className="piano-selection-pill" title="Notas seleccionadas actualmente (Esc para limpiar)">
+          <span className="piano-selection-dot" />
+          <span>{selectedNoteCount === 1 ? '1 nota seleccionada' : `${selectedNoteCount} notas seleccionadas`}</span>
+          {onClearSelection && (
+            <button
+              type="button"
+              className="piano-selection-clear"
+              onClick={onClearSelection}
+              title="Limpiar selección (Esc)"
+              aria-label="Limpiar selección"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      )}
 
       {colorPickerTarget && (
         <ContextMenuContainer

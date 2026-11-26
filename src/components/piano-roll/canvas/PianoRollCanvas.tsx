@@ -3,6 +3,7 @@ import { useSongStore } from '../../../store/songStore';
 import type { PianoRollGridSnap } from '../../../store/types';
 import { toneEngine } from '../../../audio/toneEngine';
 import type { ChordBlock, MelodyNote } from '../../../utils/typeDefinitions';
+import { generateId } from '../../../utils/idGenerator';
 import {
   MAX_MIDI,
   NOTE_COUNT,
@@ -12,7 +13,8 @@ import {
   computeChordTonesMap,
   type EphemeralDragState,
   type LassoRect,
-  type TempNote
+  type TempNote,
+  type PianoRollTool
 } from '../utils/pianoRollUtils';
 
 const PR_BLACK_KEY_MASK = new Uint8Array([0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0]);
@@ -68,6 +70,8 @@ interface PianoRollCanvasProps {
   beatsPerMeasure: number;
   chordBlocks: ChordBlock[];
   selectedNoteIds: string[];
+  setSelectedNoteIds: React.Dispatch<React.SetStateAction<string[]>>;
+  activeTool: PianoRollTool;
   lassoRect: LassoRect | null;
   tempNote: TempNote | null;
   scalePitchClasses: Set<number>;
@@ -167,6 +171,8 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
   beatsPerMeasure,
   chordBlocks,
   selectedNoteIds = [],
+  setSelectedNoteIds,
+  activeTool,
   lassoRect,
   tempNote,
   scalePitchClasses,
@@ -702,20 +708,55 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
       ctx.restore();
     }
 
-    // G. Lasso Rect (Selección con clic derecho)
+    // G. Marquee / Lasso Rect (Herramienta Seleccionar, Ctrl+Arrastre o Clic Derecho)
     if (lasso) {
       const lx = Math.min(lasso.x1, lasso.x2);
       const ly = Math.min(lasso.y1, lasso.y2);
       const lw = Math.abs(lasso.x2 - lasso.x1);
       const lh = Math.abs(lasso.y2 - lasso.y1);
 
-      ctx.fillStyle = 'rgba(255, 216, 117, 0.12)';
-      ctx.strokeStyle = 'rgba(255, 216, 117, 0.85)';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
-      ctx.fillRect(lx, ly, lw, lh);
-      ctx.strokeRect(lx, ly, lw, lh);
-      ctx.setLineDash([]);
+      if (lw > 1 || lh > 1) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(255, 216, 117, 0.13)';
+        ctx.strokeStyle = '#ffd875';
+        ctx.lineWidth = 1.75;
+
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(lx, ly, lw, lh, 4);
+        } else {
+          ctx.rect(lx, ly, lw, lh);
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        // Etiqueta flotante con contador de notas seleccionadas durante el arrastre
+        if (selIds.length > 0 && (lw > 24 || lh > 18)) {
+          const badgeText = selIds.length === 1 ? '1 NOTA' : `${selIds.length} NOTAS`;
+          ctx.font = 'bold 10px monospace';
+          const textW = ctx.measureText(badgeText).width;
+          const pillW = textW + 10;
+          const pillH = 16;
+          const px = Math.max(offsetX + 4, Math.min(offsetX + drawWidth - pillW - 4, lx + lw - pillW));
+          const py = Math.max(offsetY + 4, Math.min(offsetY + drawHeight - pillH - 4, ly + lh + 4));
+
+          ctx.fillStyle = 'rgba(20, 18, 28, 0.94)';
+          ctx.strokeStyle = 'rgba(255, 216, 117, 0.85)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          if (typeof ctx.roundRect === 'function') {
+            ctx.roundRect(px, py, pillW, pillH, 3);
+          } else {
+            ctx.rect(px, py, pillW, pillH);
+          }
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = '#ffd875';
+          ctx.fillText(badgeText, px + 5, py + 11.5);
+        }
+        ctx.restore();
+      }
     }
   }, [canvasRef, ephemeralDragRef, getViewportMetrics]);
 
@@ -821,6 +862,47 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
       return clickedRow === row && touchX >= x1 && touchX <= x2;
     });
 
+    if (activeTool === 'select') {
+      if (existingNote) {
+        setSelectedNoteIds(prev =>
+          prev.includes(existingNote.id)
+            ? prev.filter(id => id !== existingNote.id)
+            : [...prev, existingNote.id]
+        );
+      } else {
+        setSelectedNoteIds([]);
+      }
+      return;
+    }
+
+    if (activeTool === 'slice') {
+      if (existingNote) {
+        const rawBeat = touchX / beatWidth;
+        const cutBeat = snapStep > 0.015 ? Math.round(rawBeat / snapStep) * snapStep : Math.round(rawBeat * 1000) / 1000;
+        if (cutBeat > existingNote.startBeat + 0.02 && cutBeat < existingNote.startBeat + existingNote.durationBeats - 0.02) {
+          const firstDur = Math.round((cutBeat - existingNote.startBeat) * 10000) / 10000;
+          const secondDur = Math.round((existingNote.startBeat + existingNote.durationBeats - cutBeat) * 10000) / 10000;
+          const nextNotes = (store.melodyNotes || []).flatMap(n =>
+            n.id === existingNote.id
+              ? [
+                  { ...n, durationBeats: firstDur },
+                  {
+                    id: generateId('slice'),
+                    note: n.note,
+                    midi: n.midi,
+                    startBeat: cutBeat,
+                    durationBeats: secondDur,
+                    velocity: n.velocity ?? 0.8
+                  }
+                ]
+              : [n]
+          );
+          store.setMelodyNotes(nextNotes);
+        }
+      }
+      return;
+    }
+
     if (existingNote) {
       store.removeMelodyNote(existingNote.id);
     } else {
@@ -848,7 +930,7 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
         width: `${canvasWidth}px`,
         height: `${canvasHeight}px`,
         flexShrink: 0,
-        cursor: 'crosshair',
+        cursor: activeTool === 'select' ? 'default' : 'crosshair',
         userSelect: 'none'
       }}
     >

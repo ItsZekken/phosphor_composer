@@ -84,7 +84,10 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     title: 'Piano Roll',
     accent: '#a855f7',
     items: [
-      { keys: ['C'], desc: 'Herramienta Corte (Slice)' },
+      { keys: ['P'], desc: 'Herramienta Lápiz (dibujar / editar notas)' },
+      { keys: ['C'], desc: 'Herramienta Navaja / Corte (Shift+Arrastrar vertical)' },
+      { keys: ['E'], desc: 'Herramienta Seleccionar (caja de selección múltiple)' },
+      { keys: ['Ctrl', 'Arrastrar'], desc: 'Selección rápida por área desde modo Lápiz' },
       { keys: ['V'], desc: 'Mostrar / ocultar panel de Velocidad' },
       { keys: ['Alt', 'Arrastrar'], desc: 'Mover / estirar notas sin snap a la grilla' },
       { keys: ['Shift', 'Arrastrar'], desc: 'Clonar notas seleccionadas' },

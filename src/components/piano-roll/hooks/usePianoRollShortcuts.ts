@@ -8,7 +8,8 @@ import {
   MIN_MIDI,
   MAX_MIDI,
   getSnapStepBeats,
-  midiToNoteName
+  midiToNoteName,
+  type PianoRollTool
 } from '../utils/pianoRollUtils';
 import type { TransformTab } from '../tools/PianoRollTransformsPopover';
 
@@ -27,7 +28,7 @@ interface UsePianoRollShortcutsProps {
   gridSnap: PianoRollGridSnap;
   onToggleVelocityLane?: () => void;
   onToggleGhostNotes?: () => void;
-  onToggleSliceTool?: () => void;
+  onSelectTool?: (tool: PianoRollTool) => void;
   onOpenTransforms?: (tab: TransformTab) => void;
   onZoomToFit?: () => void;
   onEscape?: () => void;
@@ -46,7 +47,7 @@ export function usePianoRollShortcuts({
   gridSnap,
   onToggleVelocityLane,
   onToggleGhostNotes,
-  onToggleSliceTool,
+  onSelectTool,
   onOpenTransforms,
   onZoomToFit,
   onEscape
@@ -119,9 +120,19 @@ export function usePianoRollShortcuts({
           onToggleGhostNotes?.();
           return;
         }
+        if (keyLower === 'p') {
+          e.preventDefault();
+          onSelectTool?.('pencil');
+          return;
+        }
         if (keyLower === 'c') {
           e.preventDefault();
-          onToggleSliceTool?.();
+          onSelectTool?.('slice');
+          return;
+        }
+        if (keyLower === 'e') {
+          e.preventDefault();
+          onSelectTool?.('select');
           return;
         }
       }
@@ -352,7 +363,7 @@ export function usePianoRollShortcuts({
     gridSnap,
     onToggleVelocityLane,
     onToggleGhostNotes,
-    onToggleSliceTool,
+    onSelectTool,
     onOpenTransforms,
     onZoomToFit,
     onEscape
