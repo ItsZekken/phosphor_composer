@@ -42,6 +42,8 @@ import {
   toggleMuteMelodyRegions
 } from '../../core/audio/melodyRegionUtils';
 import {
+  MAX_DRUM_LANES,
+  getEffectiveDrumLaneCount,
   normalizePatternChainItems,
   normalizePatternChainToLinear,
   type AudioClip,
@@ -63,6 +65,7 @@ export const AudioTracksView: React.FC = () => {
     chordBlocks,
     tracks,
     patternChain,
+    drumLaneCount,
     audioTracks,
     audioClips,
     bpm,
@@ -72,6 +75,8 @@ export const AudioTracksView: React.FC = () => {
     playlistTool,
     addPianoRollTrack,
     removePianoRollTrack,
+    addDrumLane,
+    removeDrumLane,
     addAudioTrack,
     splitChordBlock,
     splitMelodyRegion,
@@ -86,6 +91,7 @@ export const AudioTracksView: React.FC = () => {
       chordBlocks: state.chordBlocks || [],
       tracks: state.tracks || [],
       patternChain: state.patternChain || [],
+      drumLaneCount: state.drumLaneCount || 1,
       audioTracks: state.audioTracks || [],
       audioClips: state.audioClips || [],
       bpm: state.bpm,
@@ -95,6 +101,8 @@ export const AudioTracksView: React.FC = () => {
       playlistTool: state.playlistTool,
       addPianoRollTrack: state.addPianoRollTrack,
       removePianoRollTrack: state.removePianoRollTrack,
+      addDrumLane: state.addDrumLane,
+      removeDrumLane: state.removeDrumLane,
       addAudioTrack: state.addAudioTrack,
       splitChordBlock: state.splitChordBlock,
       splitMelodyRegion: state.splitMelodyRegion,
@@ -105,6 +113,11 @@ export const AudioTracksView: React.FC = () => {
       startAudioRecording: state.startAudioRecording,
       setPlaylistTool: state.setPlaylistTool
     }))
+  );
+
+  const effectiveDrumLaneCount = useMemo(
+    () => getEffectiveDrumLaneCount(patternChain, drumLaneCount),
+    [patternChain, drumLaneCount]
   );
 
   const headersListRef = useRef<HTMLDivElement | null>(null);
@@ -118,6 +131,10 @@ export const AudioTracksView: React.FC = () => {
   const [trackPendingDelete, setTrackPendingDelete] = useState<{ id: string; name: string } | null>(
     null
   );
+  const [drumLanePendingDelete, setDrumLanePendingDelete] = useState<{
+    laneIndex: number;
+    clipCount: number;
+  } | null>(null);
 
   const beatsPerMeasure = getBeatsPerMeasure(timeSignature);
 
@@ -282,8 +299,12 @@ export const AudioTracksView: React.FC = () => {
             if (reg) splitMelodyRegion(tr.id, reg.id, curBeat);
           }
         } else if (state.selectedPlaylistTrack.kind === 'drums') {
+          const laneIdx = state.selectedPlaylistTrack.laneIndex ?? 0;
           const d = linearDrums.find(
-            (c) => curMeasure > c.startMeasure + 0.05 && curMeasure < c.startMeasure + c.durationMeasures - 0.05
+            (c) =>
+              c.laneIndex === laneIdx &&
+              curMeasure > c.startMeasure + 0.05 &&
+              curMeasure < c.startMeasure + c.durationMeasures - 0.05
           );
           if (d) splitChainItem(d.id, curMeasure);
         } else {
@@ -496,7 +517,8 @@ export const AudioTracksView: React.FC = () => {
                 startMeasure: nextStartMeasure,
                 durationMeasures: d.durationMeasures,
                 repeatCount: Math.max(1, Math.round(d.durationMeasures)),
-                isMuted: d.isMuted
+                ...(d.laneIndex > 0 ? { laneIndex: d.laneIndex } : {}),
+                ...(d.isMuted ? { isMuted: true } : {})
               };
             });
             nextPatternChain = [...baseChain, ...addedDrums].sort(
@@ -633,7 +655,8 @@ export const AudioTracksView: React.FC = () => {
               startMeasure: Math.round((d.startMeasure + spanMeasures) * 16) / 16,
               durationMeasures: d.durationMeasures,
               repeatCount: Math.max(1, Math.round(d.durationMeasures)),
-              isMuted: d.isMuted
+              ...(d.laneIndex > 0 ? { laneIndex: d.laneIndex } : {}),
+              ...(d.isMuted ? { isMuted: true } : {})
             };
           });
           nextPatternChain = [...baseChain, ...clones].sort(
@@ -1005,11 +1028,14 @@ export const AudioTracksView: React.FC = () => {
         }
 
         if (laneEl.dataset.drumLane) {
-          normalizePatternChainToLinear(state.patternChain).forEach((d) => {
-            const cx1 = d.startMeasure * barBeats * zoomLevel;
-            const cx2 = cx1 + d.durationMeasures * barBeats * zoomLevel;
-            if (cx2 >= minX && cx1 <= maxX) hitDrumSet.add(d.id);
-          });
+          const laneIdx = Number(laneEl.dataset.drumLaneIndex ?? 0);
+          normalizePatternChainToLinear(state.patternChain)
+            .filter((d) => d.laneIndex === laneIdx)
+            .forEach((d) => {
+              const cx1 = d.startMeasure * barBeats * zoomLevel;
+              const cx2 = cx1 + d.durationMeasures * barBeats * zoomLevel;
+              if (cx2 >= minX && cx1 <= maxX) hitDrumSet.add(d.id);
+            });
         }
 
         const audioTrackId = laneEl.dataset.trackId;
@@ -1159,11 +1185,36 @@ export const AudioTracksView: React.FC = () => {
               />
             ))}
 
-            {/* 3. BATERÍA (Drum Sequencer 1:1) */}
+            {/* 3. BATERÍA (Drum Sequencer 1:1 — multi-capa) */}
             <div className="tracks-section-bar drum-section-bar">
-              <span>BATERÍA · DRUM SEQUENCER</span>
+              <span>
+                BATERÍA · DRUM SEQUENCER
+                {effectiveDrumLaneCount > 1 ? ` (${effectiveDrumLaneCount})` : ''}
+              </span>
+              <button
+                type="button"
+                className="tracks-section-add-btn"
+                onClick={() => addDrumLane()}
+                disabled={effectiveDrumLaneCount >= MAX_DRUM_LANES}
+                title={
+                  effectiveDrumLaneCount >= MAX_DRUM_LANES
+                    ? `Máximo ${MAX_DRUM_LANES} capas de batería`
+                    : 'Añadir capa de batería en paralelo (1:1 con Drum Sequencer)'
+                }
+              >
+                <Plus size={11} />
+              </button>
             </div>
-            <DrumTrackHeader />
+            {Array.from({ length: effectiveDrumLaneCount }).map((_, laneIdx) => (
+              <DrumTrackHeader
+                key={`drum_hdr_${laneIdx}`}
+                laneIndex={laneIdx}
+                laneCount={effectiveDrumLaneCount}
+                onRequestDeleteLane={(idx, clipCount) =>
+                  setDrumLanePendingDelete({ laneIndex: idx, clipCount })
+                }
+              />
+            ))}
 
             {/* 4. AUDIO MULTITRACK */}
             <div className="tracks-section-bar audio-section-bar">
@@ -1232,12 +1283,19 @@ export const AudioTracksView: React.FC = () => {
                 />
               ))}
 
-              {/* 3. Separador + Carril BATERÍA */}
+              {/* 3. Separador + Carriles BATERÍA (multi-capa 1:1) */}
               <div
                 className="tracks-lane-section-spacer drum-spacer"
                 style={{ width: totalTimelineWidth }}
               />
-              <DrumTrackLane zoomLevel={zoomLevel} totalWidth={totalTimelineWidth} />
+              {Array.from({ length: effectiveDrumLaneCount }).map((_, laneIdx) => (
+                <DrumTrackLane
+                  key={`drum_lane_${laneIdx}`}
+                  laneIndex={laneIdx}
+                  zoomLevel={zoomLevel}
+                  totalWidth={totalTimelineWidth}
+                />
+              ))}
 
               {/* 4. Separador + Carriles AUDIO MULTITRACK */}
               <div
@@ -1338,6 +1396,27 @@ export const AudioTracksView: React.FC = () => {
           setTrackPendingDelete(null);
         }}
         onCancel={() => setTrackPendingDelete(null)}
+      />
+
+      {/* Modal de confirmación para eliminar capa de batería con clips */}
+      <ConfirmModal
+        isOpen={Boolean(drumLanePendingDelete)}
+        title="Eliminar Capa de Batería"
+        message={
+          drumLanePendingDelete
+            ? `¿Seguro que deseas eliminar la Capa C${drumLanePendingDelete.laneIndex + 1} de batería y sus ${drumLanePendingDelete.clipCount} clips? (Puedes deshacer con Ctrl+Z)`
+            : ''
+        }
+        confirmText="Eliminar Capa"
+        cancelText="Cancelar"
+        isDanger={true}
+        onConfirm={() => {
+          if (drumLanePendingDelete) {
+            removeDrumLane(drumLanePendingDelete.laneIndex);
+          }
+          setDrumLanePendingDelete(null);
+        }}
+        onCancel={() => setDrumLanePendingDelete(null)}
       />
 
       {/* Modal de Calibración de Latencia */}

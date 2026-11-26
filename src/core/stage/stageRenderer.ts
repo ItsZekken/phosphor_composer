@@ -8,8 +8,8 @@
  */
 
 import type { StageRenderNote } from '../../components/visualizer/hooks/useStageTimelineNotes';
-import type { DrumChannel, PatternChainItem, ChordBlock } from '../../utils/typeDefinitions';
-import { flattenPatternChain } from '../../utils/typeDefinitions';
+import type { DrumChannel, PatternChainItem, ChordBlock, LinearDrumClip } from '../../utils/typeDefinitions';
+import { normalizePatternChainToLinear } from '../../utils/typeDefinitions';
 
 export interface StageParticle {
   x: number;
@@ -37,6 +37,7 @@ export interface StageRenderFrameParams {
   notes: StageRenderNote[];
   drumChannels: DrumChannel[];
   patternChain: PatternChainItem[];
+  drumLaneMuted?: boolean[];
   isPatternRepeatOn: boolean;
   currentDrumPatternEdit: number;
   patternLengths?: number[];
@@ -68,7 +69,7 @@ const MAX_STAGE_PARTICLES = 80;
 
 // Caches de alto rendimiento para 60 FPS sin asignación por frame
 const hexRgbCache = new Map<string, [number, number, number]>();
-const patternChainCache = new WeakMap<PatternChainItem[], ReturnType<typeof flattenPatternChain>>();
+const patternChainCache = new WeakMap<PatternChainItem[], { clips: LinearDrumClip[]; totalMeasures: number }>();
 const sortedNotesCache = new WeakMap<StageRenderNote[], { sorted: StageRenderNote[]; maxDur: number }>();
 const sortedChordsCache = new WeakMap<ChordBlock[], { sorted: ChordBlock[]; maxDur: number; firstStart: number; maxEnd: number }>();
 
@@ -85,10 +86,14 @@ let crtCacheH = 0;
 const activeStrikesPool: Array<{ x: number; color: string; width: number }> = [];
 const activeFrameMidiPool = new Set<number>();
 
-function getFlattenedPatternChainCached(patternChain: PatternChainItem[]): ReturnType<typeof flattenPatternChain> {
+const activeDrumPatternsPool: number[] = [];
+
+function getLinearPatternChainCached(patternChain: PatternChainItem[]): { clips: LinearDrumClip[]; totalMeasures: number } {
   let cached = patternChainCache.get(patternChain);
   if (!cached) {
-    cached = flattenPatternChain(patternChain);
+    const clips = normalizePatternChainToLinear(patternChain);
+    const maxEnd = clips.reduce((m, c) => Math.max(m, c.startMeasure + c.durationMeasures), 0);
+    cached = { clips, totalMeasures: Math.max(1, Math.ceil(maxEnd)) };
     patternChainCache.set(patternChain, cached);
   }
   return cached;
@@ -187,7 +192,8 @@ export function renderStageFrame(
     currentDrumPatternEdit,
     beat,
     isPlaying,
-    params.patternLengths
+    params.patternLengths,
+    params.drumLaneMuted
   );
 
   // 4. CAPA 3: Cinta de Progresión Armónica Flotante (en la parte superior del Stage)
@@ -392,30 +398,42 @@ function renderDrumSwitchesDeck(
   currentDrumPatternEdit: number,
   beat: number,
   isPlaying: boolean,
-  patternLengths?: number[]
+  patternLengths?: number[],
+  drumLaneMuted?: boolean[]
 ) {
   if (!drumChannels || drumChannels.length === 0) return;
 
-  let activePatternIdx = currentDrumPatternEdit;
+  activeDrumPatternsPool.length = 0;
   let beatInMeasure = ((beat % 4) + 4) % 4;
 
   if (!isPatternRepeatOn && patternChain && patternChain.length > 0) {
-    const flatChain = getFlattenedPatternChainCached(patternChain);
-    const totalChainBeats = flatChain.length * 4;
+    const { clips, totalMeasures } = getLinearPatternChainCached(patternChain);
+    const totalChainBeats = totalMeasures * 4;
     if (totalChainBeats > 0) {
       const chainPos = ((beat % totalChainBeats) + totalChainBeats) % totalChainBeats;
-      const flatIdx = Math.floor(chainPos / 4);
-      const step = flatChain[flatIdx];
-      if (step) {
-        activePatternIdx = step.patternIndex;
-        beatInMeasure = chainPos % 4;
+      const currentMeasure = chainPos / 4;
+      beatInMeasure = chainPos % 4;
+      for (let i = 0; i < clips.length; i++) {
+        const c = clips[i];
+        if (
+          !c.isMuted &&
+          !drumLaneMuted?.[c.laneIndex] &&
+          currentMeasure >= c.startMeasure - 1e-6 &&
+          currentMeasure < c.startMeasure + c.durationMeasures - 1e-6
+        ) {
+          if (!activeDrumPatternsPool.includes(c.patternIndex)) {
+            activeDrumPatternsPool.push(c.patternIndex);
+          }
+        }
       }
     }
+  } else {
+    activeDrumPatternsPool.push(currentDrumPatternEdit);
   }
 
-  const isSilencedPattern = activePatternIdx === -1;
+  const isSilencedPattern = activeDrumPatternsPool.length === 0;
   const activeChannels = drumChannels.slice(0, 6);
-  const patternLen = !isSilencedPattern ? (patternLengths?.[activePatternIdx] || 16) : 16;
+  const patternLen = !isSilencedPattern ? (patternLengths?.[activeDrumPatternsPool[0]] || 16) : 16;
   const wrappedStep = (beatInMeasure / 4) * patternLen;
 
   const deckMaxWidth = Math.min(1050, width * 0.78);
@@ -438,8 +456,6 @@ function renderDrumSwitchesDeck(
     const rowY = startY + r * (rowHeight + gapY);
 
     const patterns = channel.patterns || [];
-    const patternSteps = !isSilencedPattern && patterns[activePatternIdx] ? patterns[activePatternIdx] : [];
-
     let currentX = startX;
 
     for (let s = 0; s < patternLen; s++) {
@@ -450,8 +466,21 @@ function renderDrumSwitchesDeck(
         }
       }
 
-      const step = patternSteps[s];
-      const isActive = Boolean(step?.isActive);
+      let isActive = false;
+      if (!isSilencedPattern) {
+        const frac = s / patternLen;
+        for (let p = 0; p < activeDrumPatternsPool.length; p++) {
+          const pIdx = activeDrumPatternsPool[p];
+          const pSteps = patterns[pIdx];
+          if (!pSteps || pSteps.length === 0) continue;
+          const pLen = patternLengths?.[pIdx] || pSteps.length || 16;
+          const mappedIdx = pLen === patternLen ? s : Math.floor(frac * pLen);
+          if (pSteps[mappedIdx]?.isActive) {
+            isActive = true;
+            break;
+          }
+        }
+      }
 
       // Distancia de reproducción desde que se disparó el paso s
       let stepDist = wrappedStep - s;

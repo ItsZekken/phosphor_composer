@@ -38,10 +38,21 @@ export const DRUM_PATTERN_DRAG_MIME = 'application/x-phosphor-drum-pattern';
 
 const DRUM_ACCENT = '#2dd4bf';
 
-export const DrumTrackHeader: React.FC = () => {
+interface DrumTrackHeaderProps {
+  laneIndex: number;
+  laneCount: number;
+  onRequestDeleteLane?: (laneIndex: number, clipCount: number) => void;
+}
+
+export const DrumTrackHeader: React.FC<DrumTrackHeaderProps> = ({
+  laneIndex,
+  laneCount,
+  onRequestDeleteLane
+}) => {
   const {
     patternChain,
     drumChannel,
+    drumLaneMuted,
     isPatternRepeatOn,
     currentDrumPatternEdit,
     selectedPlaylistTrack,
@@ -49,11 +60,14 @@ export const DrumTrackHeader: React.FC = () => {
     setPatternRepeatOn,
     toggleMute,
     toggleSolo,
+    toggleMuteDrumLane,
+    removeDrumLane,
     jumpToDrumEditor
   } = useSongStore(
     useShallow((state) => ({
       patternChain: state.patternChain || [],
       drumChannel: state.channels?.drums,
+      drumLaneMuted: state.drumLaneMuted || [],
       isPatternRepeatOn: state.isPatternRepeatOn,
       currentDrumPatternEdit: state.currentDrumPatternEdit || 0,
       selectedPlaylistTrack: state.selectedPlaylistTrack,
@@ -61,33 +75,63 @@ export const DrumTrackHeader: React.FC = () => {
       setPatternRepeatOn: state.setPatternRepeatOn,
       toggleMute: state.toggleMute,
       toggleSolo: state.toggleSolo,
+      toggleMuteDrumLane: state.toggleMuteDrumLane,
+      removeDrumLane: state.removeDrumLane,
       jumpToDrumEditor: state.jumpToDrumEditor
     }))
   );
 
-  const linearCount = useMemo(() => normalizePatternChainToLinear(patternChain).length, [patternChain]);
-  const isSelected = selectedPlaylistTrack.kind === 'drums';
-  const isMuted = Boolean(drumChannel?.muted);
+  const laneClipCount = useMemo(
+    () =>
+      normalizePatternChainToLinear(patternChain).filter((c) => c.laneIndex === laneIndex).length,
+    [patternChain, laneIndex]
+  );
+  const isSelected =
+    selectedPlaylistTrack.kind === 'drums' && (selectedPlaylistTrack.laneIndex ?? 0) === laneIndex;
+  const isBusMuted = Boolean(drumChannel?.muted);
+  const isLaneMuted = Boolean(drumLaneMuted[laneIndex]);
+  const isMultiLane = laneCount > 1;
+  const isEffectivelyMuted = isBusMuted || isLaneMuted;
   const isSolo = Boolean(drumChannel?.solo);
+  const baseName = drumChannel?.name || 'Batería';
+  const displayName = isMultiLane ? `${baseName} · C${laneIndex + 1}` : baseName;
+
+  const handleMuteToggle = () => {
+    if (isMultiLane) {
+      toggleMuteDrumLane(laneIndex);
+    } else {
+      toggleMute('drums');
+    }
+  };
 
   return (
     <div
-      className={`audio-track-header midi-track-header drum-track-header ${isSelected ? 'selected' : ''} ${isMuted ? 'is-muted' : ''}`}
-      onClick={() => setSelectedPlaylistTrack({ kind: 'drums' })}
+      className={`audio-track-header midi-track-header drum-track-header ${isSelected ? 'selected' : ''} ${isEffectivelyMuted ? 'is-muted' : ''}`}
+      onClick={() => setSelectedPlaylistTrack({ kind: 'drums', laneIndex })}
       onDoubleClick={() => jumpToDrumEditor(currentDrumPatternEdit)}
       style={{ '--channel-color': DRUM_ACCENT } as React.CSSProperties}
-      title="Pista 1:1 con Drum Sequencer · Doble clic para abrir Drum Sequencer"
+      title={`${displayName} · 1:1 con Drum Sequencer · Doble clic para abrir Drum Sequencer`}
     >
       <div className="audio-track-color-strip" style={{ backgroundColor: DRUM_ACCENT }} />
 
       <div className="audio-track-title-strip midi-title-strip" onClick={(e) => e.stopPropagation()}>
         <span className="midi-track-type-pill" style={{ borderColor: `${DRUM_ACCENT}77`, color: DRUM_ACCENT }}>
-          DRUMS
+          {laneIndex === 0 ? 'DRUMS' : `C${laneIndex + 1}`}
         </span>
         <span className="tracks-fixed-name" onDoubleClick={() => jumpToDrumEditor(currentDrumPatternEdit)}>
-          {drumChannel?.name || 'Batería'}
+          {displayName}
         </span>
-        {isPatternRepeatOn && (
+        {isMultiLane && isBusMuted && laneIndex === 0 && (
+          <button
+            type="button"
+            className="drum-loop-mode-pill"
+            onClick={() => toggleMute('drums')}
+            title="Canal global de Batería silenciado en el Mixer · Clic para reactivar"
+          >
+            BUS M
+          </button>
+        )}
+        {isPatternRepeatOn && laneIndex === 0 && (
           <button
             type="button"
             className="drum-loop-mode-pill"
@@ -109,20 +153,48 @@ export const DrumTrackHeader: React.FC = () => {
         >
           <ExternalLink size={11} />
         </button>
+        {isMultiLane && (
+          <button
+            type="button"
+            className="audio-track-delete-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (laneClipCount > 0 && onRequestDeleteLane) {
+                onRequestDeleteLane(laneIndex, laneClipCount);
+              } else {
+                removeDrumLane(laneIndex);
+              }
+            }}
+            title={`Eliminar capa de batería C${laneIndex + 1}`}
+          >
+            <Trash2 size={11} />
+          </button>
+        )}
       </div>
 
       <div className="midi-track-right-controls" onClick={(e) => e.stopPropagation()}>
-        {linearCount > 0 && (
-          <span className="midi-track-clip-count" title={`${linearCount} clips en la cadena de batería`}>
-            {linearCount}
+        {laneClipCount > 0 && (
+          <span
+            className="midi-track-clip-count"
+            title={`${laneClipCount} clips en ${displayName}`}
+          >
+            {laneClipCount}
           </span>
         )}
 
         <button
           type="button"
-          className={`fl-enable-led-btn ${!isMuted ? 'enabled' : ''}`}
-          onClick={() => toggleMute('drums')}
-          title={isMuted ? 'Activar canal de Batería' : 'Silenciar canal de Batería'}
+          className={`fl-enable-led-btn ${!isEffectivelyMuted ? 'enabled' : ''}`}
+          onClick={handleMuteToggle}
+          title={
+            isMultiLane
+              ? isLaneMuted
+                ? `Activar capa C${laneIndex + 1}`
+                : `Silenciar capa C${laneIndex + 1}`
+              : isBusMuted
+              ? 'Activar canal de Batería'
+              : 'Silenciar canal de Batería'
+          }
         >
           <span className="fl-enable-led-dot" />
         </button>
@@ -130,9 +202,17 @@ export const DrumTrackHeader: React.FC = () => {
         <div className="drum-mute-solo">
           <button
             type="button"
-            className={`ms-btn ${isMuted ? 'active-mute' : ''}`}
-            onClick={() => toggleMute('drums')}
-            title={isMuted ? 'Desmutear Batería' : 'Silenciar Batería (Mute)'}
+            className={`ms-btn ${(isMultiLane ? isLaneMuted : isBusMuted) ? 'active-mute' : ''}`}
+            onClick={handleMuteToggle}
+            title={
+              isMultiLane
+                ? isLaneMuted
+                  ? `Desmutear capa C${laneIndex + 1}`
+                  : `Silenciar capa C${laneIndex + 1}`
+                : isBusMuted
+                ? 'Desmutear Batería'
+                : 'Silenciar Batería (Mute)'
+            }
           >
             M
           </button>
@@ -140,7 +220,7 @@ export const DrumTrackHeader: React.FC = () => {
             type="button"
             className={`ms-btn ${isSolo ? 'active-solo' : ''}`}
             onClick={() => toggleSolo('drums')}
-            title={isSolo ? 'Desactivar Solo' : 'Aislar Batería (Solo)'}
+            title={isSolo ? 'Desactivar Solo de Batería' : 'Aislar Batería (Solo)'}
           >
             S
           </button>
@@ -554,13 +634,19 @@ const DrumClipComponent: React.FC<DrumClipComponentProps> = React.memo(({
 });
 
 interface DrumTrackLaneProps {
+  laneIndex: number;
   zoomLevel: number;
   totalWidth: number;
 }
 
-export const DrumTrackLane: React.FC<DrumTrackLaneProps> = ({ zoomLevel, totalWidth }) => {
+export const DrumTrackLane: React.FC<DrumTrackLaneProps> = ({
+  laneIndex,
+  zoomLevel,
+  totalWidth
+}) => {
   const {
     patternChain,
+    drumLaneMuted,
     selectedChainIds,
     drumChannel,
     drumPatternNames,
@@ -579,6 +665,7 @@ export const DrumTrackLane: React.FC<DrumTrackLaneProps> = ({ zoomLevel, totalWi
   } = useSongStore(
     useShallow((state) => ({
       patternChain: state.patternChain || [],
+      drumLaneMuted: state.drumLaneMuted || [],
       selectedChainIds: state.selectedChainIds || [],
       drumChannel: state.channels?.drums,
       drumPatternNames: state.drumPatternNames || [],
@@ -598,20 +685,28 @@ export const DrumTrackLane: React.FC<DrumTrackLaneProps> = ({ zoomLevel, totalWi
   );
 
   const beatsPerMeasure = getBeatsPerMeasure(timeSignature);
-  const linearClips = useMemo(() => normalizePatternChainToLinear(patternChain), [patternChain]);
-  const isMuted = Boolean(drumChannel?.muted);
+  const linearClips = useMemo(
+    () => normalizePatternChainToLinear(patternChain).filter((c) => c.laneIndex === laneIndex),
+    [patternChain, laneIndex]
+  );
+  const isMuted = Boolean(drumChannel?.muted) || Boolean(drumLaneMuted[laneIndex]);
 
   const [paintGhosts, setPaintGhosts] = useState<Array<{ startBeat: number; durationBeats: number }>>([]);
   const [dropGhost, setDropGhost] = useState<{ startBeat: number; durationBeats: number; label: string; color: string } | null>(null);
-  const [activePlayingClipId, setActivePlayingClipId] = useState<string | null>(null);
+  const [activePlayingIds, setActivePlayingIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!isPlaying || isPatternRepeatOn) {
-      setActivePlayingClipId(null);
+      setActivePlayingIds([]);
       return;
     }
-    return liveTelemetryBus.subscribeDrumStep(({ chainItemId }) => {
-      setActivePlayingClipId((prev) => (prev === chainItemId ? prev : chainItemId));
+    return liveTelemetryBus.subscribeDrumStep(({ activeChainItemIds }) => {
+      setActivePlayingIds((prev) => {
+        if (prev.length === activeChainItemIds.length && prev.every((id, i) => id === activeChainItemIds[i])) {
+          return prev;
+        }
+        return activeChainItemIds;
+      });
     });
   }, [isPlaying, isPatternRepeatOn]);
 
@@ -634,7 +729,7 @@ export const DrumTrackLane: React.FC<DrumTrackLaneProps> = ({ zoomLevel, totalWi
     if (e.target !== e.currentTarget) return;
     if (e.button !== 0) return;
 
-    setSelectedPlaylistTrack({ kind: 'drums' });
+    setSelectedPlaylistTrack({ kind: 'drums', laneIndex });
 
     if (playlistTool === 'select' || e.ctrlKey || e.metaKey) {
       return;
@@ -689,7 +784,8 @@ export const DrumTrackLane: React.FC<DrumTrackLaneProps> = ({ zoomLevel, totalWi
           slots.map((sl) => ({
             patternIndex: brushPatternIdx,
             startMeasure: roundBeat(sl.startBeat / beatsPerMeasure),
-            durationMeasures: roundBeat(sl.durationBeats / beatsPerMeasure)
+            durationMeasures: roundBeat(sl.durationBeats / beatsPerMeasure),
+            laneIndex
           }))
         );
         if (isPatternRepeatOn) {
@@ -739,9 +835,9 @@ export const DrumTrackLane: React.FC<DrumTrackLaneProps> = ({ zoomLevel, totalWi
     const rawBeat = (e.clientX - rect.left) / zoomLevel;
     const snapped = getFloorSnappedBeat(rawBeat, e.altKey);
     setCurrentDrumPatternEdit(parsedIdx);
-    addChainItem(parsedIdx, 1, roundBeat(snapped / beatsPerMeasure));
+    addChainItem(parsedIdx, 1, roundBeat(snapped / beatsPerMeasure), laneIndex);
     if (isPatternRepeatOn) setPatternRepeatOn(false);
-    setSelectedPlaylistTrack({ kind: 'drums' });
+    setSelectedPlaylistTrack({ kind: 'drums', laneIndex });
   };
 
   const brushColor = getDrumPatternColor(currentDrumPatternEdit);
@@ -754,6 +850,7 @@ export const DrumTrackLane: React.FC<DrumTrackLaneProps> = ({ zoomLevel, totalWi
         isPatternRepeatOn ? 'lane-bypassed' : ''
       } ${playlistTool === 'paint' ? 'paint-cursor' : playlistTool === 'slice' ? 'slice-cursor' : ''}`}
       data-drum-lane="true"
+      data-drum-lane-index={String(laneIndex)}
       style={{
         width: totalWidth,
         minWidth: totalWidth,
@@ -773,7 +870,9 @@ export const DrumTrackLane: React.FC<DrumTrackLaneProps> = ({ zoomLevel, totalWi
     >
       {linearClips.length === 0 && paintGhosts.length === 0 && !dropGhost && (
         <div className="tracks-empty-lane-hint">
-          Clic o arrastra patrones P1..PN para secuenciar la batería (1:1 con Drum Sequencer)
+          {laneIndex === 0
+            ? 'Clic o arrastra patrones P1..PN para secuenciar la batería (1:1 con Drum Sequencer)'
+            : `Capa C${laneIndex + 1} · Superpone patrones/fills en paralelo (1:1 con Drum Sequencer)`}
         </div>
       )}
 
@@ -784,7 +883,7 @@ export const DrumTrackLane: React.FC<DrumTrackLaneProps> = ({ zoomLevel, totalWi
           zoomLevel={zoomLevel}
           beatsPerMeasure={beatsPerMeasure}
           isSelected={selectedChainIds.includes(clip.id)}
-          isPlayingClip={activePlayingClipId === clip.id}
+          isPlayingClip={!isPatternRepeatOn && activePlayingIds.includes(clip.id)}
         />
       ))}
 

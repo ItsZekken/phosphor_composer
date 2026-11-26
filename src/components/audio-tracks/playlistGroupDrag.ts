@@ -13,6 +13,7 @@
 import type React from 'react';
 import { useSongStore } from '../../store/songStore';
 import {
+  getEffectiveDrumLaneCount,
   normalizePatternChainItems,
   type AudioClip,
   type AudioSnapGrid,
@@ -182,10 +183,21 @@ export function startPlaylistGroupDrag({
     }
   }
 
+  const drumLaneCount = getEffectiveDrumLaneCount(initialPatternChain, state.drumLaneCount);
+  let minDrumLaneIdx = Infinity;
+  let maxDrumLaneIdx = -Infinity;
+  let anchorDrumLaneIdx = 0;
+
   for (const d of selectedDrums) {
     const dStartBeat = (d.startMeasure ?? 0) * beatsPerMeasure;
+    const dLane = d.laneIndex ?? 0;
     if (dStartBeat < minStartBeat) minStartBeat = dStartBeat;
-    if (anchorKind === 'drum' && d.id === anchorClipId) anchorStartBeat = dStartBeat;
+    if (dLane < minDrumLaneIdx) minDrumLaneIdx = dLane;
+    if (dLane > maxDrumLaneIdx) maxDrumLaneIdx = dLane;
+    if (anchorKind === 'drum' && d.id === anchorClipId) {
+      anchorStartBeat = dStartBeat;
+      anchorDrumLaneIdx = dLane;
+    }
   }
 
   const audioTracks = state.audioTracks || [];
@@ -224,11 +236,13 @@ export function startPlaylistGroupDrag({
   let clonedAudioIds: string[] = [];
   let lastDeltaBeat = 0;
   let lastMelodyTrackDelta = 0;
+  let lastDrumLaneDelta = 0;
   let lastAudioTrackDelta = 0;
 
   const computeNextState = (
     safeDeltaBeat: number,
     safeMelodyTrackDelta: number,
+    safeDrumLaneDelta: number,
     safeAudioTrackDelta: number,
     isFinalCommit: boolean
   ) => {
@@ -278,16 +292,24 @@ export function startPlaylistGroupDrag({
       nextSelMelodyRefs = moved.nextSelectedRefs;
     }
 
-    // 3. Batería (PatternChainItem)
+    // 3. Batería (PatternChainItem con soporte multi-capa 1:1)
     let nextPatternChain = initialPatternChain;
     let nextSelDrumIds = initialSelDrumIds;
     if (selectedDrums.length > 0) {
       if (isCloneDrag) {
-        const clones: PatternChainItem[] = selectedDrums.map((d, idx) => ({
-          ...d,
-          id: clonedDrumIds[idx],
-          startMeasure: Math.max(0, roundBeat((d.startMeasure ?? 0) + deltaMeasures))
-        }));
+        const clones: PatternChainItem[] = selectedDrums.map((d, idx) => {
+          const nextLane = Math.max(
+            0,
+            Math.min(drumLaneCount - 1, (d.laneIndex ?? 0) + safeDrumLaneDelta)
+          );
+          const { laneIndex: _oldLane, ...rest } = d;
+          return {
+            ...rest,
+            id: clonedDrumIds[idx],
+            startMeasure: Math.max(0, roundBeat((d.startMeasure ?? 0) + deltaMeasures)),
+            ...(nextLane > 0 ? { laneIndex: nextLane } : {})
+          };
+        });
         nextPatternChain = [...initialPatternChain, ...clones].sort(
           (a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0)
         );
@@ -297,9 +319,15 @@ export function startPlaylistGroupDrag({
           .map((d) => {
             const snap = drumSnapMap.get(d.id);
             if (!snap) return d;
+            const nextLane = Math.max(
+              0,
+              Math.min(drumLaneCount - 1, (snap.laneIndex ?? 0) + safeDrumLaneDelta)
+            );
+            const { laneIndex: _oldLane, ...rest } = d;
             return {
-              ...d,
-              startMeasure: Math.max(0, roundBeat((snap.startMeasure ?? 0) + deltaMeasures))
+              ...rest,
+              startMeasure: Math.max(0, roundBeat((snap.startMeasure ?? 0) + deltaMeasures)),
+              ...(nextLane > 0 ? { laneIndex: nextLane } : {})
             };
           })
           .sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0));
@@ -379,7 +407,7 @@ export function startPlaylistGroupDrag({
     const rawDeltaBeat = roundBeat(snappedTargetStart - anchorStartBeat!);
     const safeDeltaBeat = roundBeat(Math.max(-minStartBeat, rawDeltaBeat));
 
-    // 2. Delta vertical (solo dentro del mismo tipo: melodía -> melodía, audio -> audio)
+    // 2. Delta vertical (dentro del mismo tipo: melodía -> melodía, batería -> capa batería, audio -> audio)
     let rawTrackDelta = Math.round(dy / TRACK_ROW_HEIGHT_PX);
     const elements = document.elementsFromPoint(moveEvent.clientX, moveEvent.clientY);
 
@@ -387,6 +415,16 @@ export function startPlaylistGroupDrag({
       const laneEl = elements.find((node) => (node as HTMLElement).dataset?.melodyTrackId) as HTMLElement | undefined;
       if (laneEl?.dataset?.melodyTrackId && melodyTrackIndexMap.has(laneEl.dataset.melodyTrackId)) {
         rawTrackDelta = (melodyTrackIndexMap.get(laneEl.dataset.melodyTrackId) ?? anchorMelodyTrackIdx) - anchorMelodyTrackIdx;
+      }
+    } else if (anchorKind === 'drum') {
+      const laneEl = elements.find(
+        (node) => (node as HTMLElement).dataset?.drumLaneIndex !== undefined
+      ) as HTMLElement | undefined;
+      if (laneEl?.dataset?.drumLaneIndex !== undefined) {
+        const targetLaneIdx = Number(laneEl.dataset.drumLaneIndex);
+        if (!Number.isNaN(targetLaneIdx)) {
+          rawTrackDelta = targetLaneIdx - anchorDrumLaneIdx;
+        }
       }
     } else if (anchorKind === 'audio') {
       const laneEl = elements.find((node) => (node as HTMLElement).dataset?.trackId) as HTMLElement | undefined;
@@ -400,6 +438,11 @@ export function startPlaylistGroupDrag({
         ? Math.max(-minMelodyTrackIdx, Math.min(initialTracks.length - 1 - maxMelodyTrackIdx, rawTrackDelta))
         : 0;
 
+    const safeDrumLaneDelta =
+      anchorKind === 'drum' && selectedDrums.length > 0 && drumLaneCount > 1
+        ? Math.max(-minDrumLaneIdx, Math.min(drumLaneCount - 1 - maxDrumLaneIdx, rawTrackDelta))
+        : 0;
+
     const safeAudioTrackDelta =
       anchorKind === 'audio' && selectedAudios.length > 0 && audioTracks.length > 0
         ? Math.max(-minAudioTrackIdx, Math.min(audioTracks.length - 1 - maxAudioTrackIdx, rawTrackDelta))
@@ -407,11 +450,13 @@ export function startPlaylistGroupDrag({
 
     lastDeltaBeat = safeDeltaBeat;
     lastMelodyTrackDelta = safeMelodyTrackDelta;
+    lastDrumLaneDelta = safeDrumLaneDelta;
     lastAudioTrackDelta = safeAudioTrackDelta;
 
     const previewPatch = computeNextState(
       safeDeltaBeat,
       safeMelodyTrackDelta,
+      safeDrumLaneDelta,
       safeAudioTrackDelta,
       false
     );
@@ -436,6 +481,7 @@ export function startPlaylistGroupDrag({
       const finalPatch = computeNextState(
         lastDeltaBeat,
         lastMelodyTrackDelta,
+        lastDrumLaneDelta,
         lastAudioTrackDelta,
         true
       );

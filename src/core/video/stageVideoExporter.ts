@@ -214,6 +214,7 @@ export async function exportStageToMp4(
       waveform: waveformSlice,
       drumChannels: session.drums.drumChannels,
       patternChain: session.drums.patternChain,
+      drumLaneMuted: session.drums.drumLaneMuted,
       isPatternRepeatOn: session.drums.isPatternRepeatOn,
       currentDrumPatternEdit: session.drums.currentDrumPatternEdit ?? 0,
       patternLengths: session.drums.patternLengths,

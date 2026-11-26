@@ -1260,8 +1260,13 @@
   cursor: pointer;
 }
 
-.tracks-section-add-btn:hover {
+.tracks-section-add-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.12);
+}
+
+.tracks-section-add-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .tracks-lane-section-spacer {

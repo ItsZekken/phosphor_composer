@@ -257,6 +257,8 @@ export interface CustomDrumSample {
   createdAt?: number;
 }
 
+export const MAX_DRUM_LANES = 6;
+
 export interface PatternChainItem {
   id: string;
   type: 'pattern' | 'group' | 'rest';
@@ -264,6 +266,7 @@ export interface PatternChainItem {
   patternIndex?: number;      // 0 a N, o -1 para silencio legado
   startMeasure?: number;      // Posición lineal absoluta en compases (base 0, soporta decimales ej: 3.5)
   durationMeasures?: number;  // Duración lineal exacta en compases (ej: 1, 2, 4, 0.5)
+  laneIndex?: number;         // Capa/carril de batería (0..5, default 0) sincronizado 1:1 entre Drum Sequencer y Tracks
   isMuted?: boolean;          // Silencio individual sincronizado entre Drum Sequencer y Tracks
   items?: PatternChainItem[]; // Legado (se aplana automáticamente a clips lineales)
 }
@@ -273,6 +276,7 @@ export interface LinearDrumClip {
   patternIndex: number;
   startMeasure: number;
   durationMeasures: number;
+  laneIndex: number;
   isMuted?: boolean;
 }
 
@@ -280,6 +284,11 @@ export interface FlatChainStep {
   patternIndex: number;
   originalItemId: string; // ID for UI highlighting
 }
+
+const sanitizeDrumLaneIndex = (raw: unknown): number => {
+  if (typeof raw !== 'number' || Number.isNaN(raw)) return 0;
+  return Math.max(0, Math.min(MAX_DRUM_LANES - 1, Math.floor(raw)));
+};
 
 /**
  * Convierte cualquier cadena de patrones (legada secuencial/grupos o lineal moderna)
@@ -293,6 +302,7 @@ export const normalizePatternChainToLinear = (chain: PatternChainItem[]): Linear
   for (const item of chain) {
     if (!item) continue;
     const isLinear = typeof item.startMeasure === 'number' && !Number.isNaN(item.startMeasure);
+    const laneIndex = sanitizeDrumLaneIndex(item.laneIndex);
 
     if (item.type === 'group' && item.items && item.items.length > 0 && !isLinear) {
       const repeats = Math.max(1, item.repeatCount || 1);
@@ -305,7 +315,8 @@ export const normalizePatternChainToLinear = (chain: PatternChainItem[]): Linear
               id: r === 0 ? sub.id : `${sub.id}_r${r}`,
               patternIndex: Math.max(0, sub.patternIndex ?? 0),
               startMeasure: sequentialCursor,
-              durationMeasures: subDur
+              durationMeasures: subDur,
+              laneIndex: sanitizeDrumLaneIndex(sub.laneIndex ?? laneIndex)
             });
           }
           sequentialCursor += subDur;
@@ -325,6 +336,7 @@ export const normalizePatternChainToLinear = (chain: PatternChainItem[]): Linear
           patternIndex: Math.max(0, item.patternIndex ?? 0),
           startMeasure: start,
           durationMeasures: dur,
+          laneIndex,
           ...(item.isMuted ? { isMuted: true } : {})
         });
       }
@@ -336,6 +348,7 @@ export const normalizePatternChainToLinear = (chain: PatternChainItem[]): Linear
           patternIndex: Math.max(0, item.patternIndex ?? 0),
           startMeasure: sequentialCursor,
           durationMeasures: dur,
+          laneIndex,
           ...(item.isMuted ? { isMuted: true } : {})
         });
       }
@@ -343,7 +356,7 @@ export const normalizePatternChainToLinear = (chain: PatternChainItem[]): Linear
     }
   }
 
-  return clips.sort((a, b) => a.startMeasure - b.startMeasure);
+  return clips.sort((a, b) => a.startMeasure - b.startMeasure || a.laneIndex - b.laneIndex);
 };
 
 /**
@@ -357,8 +370,30 @@ export const normalizePatternChainItems = (chain: PatternChainItem[]): PatternCh
     startMeasure: clip.startMeasure,
     durationMeasures: clip.durationMeasures,
     repeatCount: Math.max(1, Math.round(clip.durationMeasures)),
+    ...(clip.laneIndex > 0 ? { laneIndex: clip.laneIndex } : {}),
     ...(clip.isMuted ? { isMuted: true } : {})
   }));
+};
+
+/**
+ * Calcula la cantidad efectiva de carriles (capas) de batería, garantizando que
+ * todo clip existente tenga su carril visible en Drum Sequencer y en Tracks.
+ */
+export const getEffectiveDrumLaneCount = (
+  chain: PatternChainItem[] | undefined,
+  declaredCount?: number
+): number => {
+  let maxLane = 0;
+  if (Array.isArray(chain)) {
+    for (let i = 0; i < chain.length; i++) {
+      const idx = sanitizeDrumLaneIndex(chain[i]?.laneIndex);
+      if (idx > maxLane) maxLane = idx;
+    }
+  }
+  const base = typeof declaredCount === 'number' && !Number.isNaN(declaredCount)
+    ? Math.floor(declaredCount)
+    : 1;
+  return Math.max(1, Math.min(MAX_DRUM_LANES, Math.max(base, maxLane + 1)));
 };
 
 export const flattenPatternChain = (chain: PatternChainItem[]): FlatChainStep[] => {
@@ -425,7 +460,7 @@ export type PlaylistTool = 'paint' | 'slice' | 'select';
 export type PlaylistTrackSelection =
   | { kind: 'harmony' }
   | { kind: 'melody'; trackId: string }
-  | { kind: 'drums' }
+  | { kind: 'drums'; laneIndex?: number }
   | { kind: 'audio'; trackId: string };
 
 export interface SelectedMelodyRegionRef {

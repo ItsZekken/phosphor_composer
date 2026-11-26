@@ -1,6 +1,10 @@
 import type { SliceCreator, DrumState, DrumActions } from '../types';
 import type { CustomDrumSample, DrumChannel, PatternChainItem } from '../../utils/typeDefinitions';
-import { normalizePatternChainItems } from '../../utils/typeDefinitions';
+import {
+  MAX_DRUM_LANES,
+  getEffectiveDrumLaneCount,
+  normalizePatternChainItems
+} from '../../utils/typeDefinitions';
 import { PRESET_DRUM_KITS, findMatchingKitId, inferCategoryFromChannel } from '../../constants/drumKits';
 import { buildCustomSampleUrl, isCustomSampleUrl } from '../../constants/drumSamples';
 import { generateId } from '../../utils/idGenerator';
@@ -78,6 +82,8 @@ export const initialDrumState: DrumState = {
   clipboardPattern: null,
   clipboardPatternLength: null,
   patternChain: [],
+  drumLaneCount: 1,
+  drumLaneMuted: [],
   selectedChainIds: [],
   chainClipboard: [],
   drumTimelineViewport: { scrollLeft: 0, zoomLevel: 1.0 },
@@ -505,6 +511,7 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set, get)
     const nextChain = [...linearExisting, ...pasted].sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0));
     return {
       patternChain: nextChain,
+      drumLaneCount: getEffectiveDrumLaneCount(nextChain, state.drumLaneCount),
       selectedChainIds: pasted.map(i => i.id)
     };
   }),
@@ -562,10 +569,88 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set, get)
     drumTimelineViewport: { ...state.drumTimelineViewport, scrollLeft: 0 }
   })),
 
-  addChainItem: (patternIndex, durationMeasures = 1, startMeasure) => set((state) => {
+  addDrumLane: () => {
+    let createdLaneIndex = 0;
+    set((state) => {
+      const currentCount = getEffectiveDrumLaneCount(state.patternChain, state.drumLaneCount);
+      if (currentCount >= MAX_DRUM_LANES) {
+        createdLaneIndex = currentCount - 1;
+        return state;
+      }
+      createdLaneIndex = currentCount;
+      const nextCount = currentCount + 1;
+      const nextMuted = [...(state.drumLaneMuted || [])];
+      while (nextMuted.length < nextCount) nextMuted.push(false);
+      return {
+        drumLaneCount: nextCount,
+        drumLaneMuted: nextMuted,
+        selectedPlaylistTrack: { kind: 'drums', laneIndex: createdLaneIndex }
+      };
+    });
+    return createdLaneIndex;
+  },
+
+  removeDrumLane: (laneIndex) => set((state) => {
+    const currentCount = getEffectiveDrumLaneCount(state.patternChain, state.drumLaneCount);
+    if (currentCount <= 1 || laneIndex < 0 || laneIndex >= currentCount) return state;
+
+    const linear = normalizePatternChainItems(state.patternChain);
+    const removedIds = new Set<string>();
+    const nextChain: PatternChainItem[] = [];
+
+    for (const item of linear) {
+      const itemLane = item.laneIndex ?? 0;
+      if (itemLane === laneIndex) {
+        removedIds.add(item.id);
+        continue;
+      }
+      const shiftedLane = itemLane > laneIndex ? itemLane - 1 : itemLane;
+      if (shiftedLane > 0) {
+        nextChain.push({ ...item, laneIndex: shiftedLane });
+      } else {
+        const { laneIndex: _old, ...rest } = item;
+        nextChain.push(rest);
+      }
+    }
+
+    const nextCount = Math.max(1, currentCount - 1);
+    const nextMuted = [...(state.drumLaneMuted || [])];
+    while (nextMuted.length < currentCount) nextMuted.push(false);
+    nextMuted.splice(laneIndex, 1);
+
+    let nextPlaylistTrack = state.selectedPlaylistTrack;
+    if (nextPlaylistTrack.kind === 'drums') {
+      const selLane = nextPlaylistTrack.laneIndex ?? 0;
+      nextPlaylistTrack = {
+        kind: 'drums',
+        laneIndex: Math.min(nextCount - 1, selLane > laneIndex ? selLane - 1 : selLane)
+      };
+    }
+
+    return {
+      patternChain: nextChain,
+      drumLaneCount: nextCount,
+      drumLaneMuted: nextMuted.slice(0, nextCount),
+      selectedChainIds: state.selectedChainIds.filter((id) => !removedIds.has(id)),
+      selectedPlaylistTrack: nextPlaylistTrack
+    };
+  }),
+
+  toggleMuteDrumLane: (laneIndex) => set((state) => {
+    const currentCount = getEffectiveDrumLaneCount(state.patternChain, state.drumLaneCount);
+    if (laneIndex < 0 || laneIndex >= currentCount) return state;
+    const nextMuted = [...(state.drumLaneMuted || [])];
+    while (nextMuted.length < currentCount) nextMuted.push(false);
+    nextMuted[laneIndex] = !nextMuted[laneIndex];
+    return { drumLaneMuted: nextMuted };
+  }),
+
+  addChainItem: (patternIndex, durationMeasures = 1, startMeasure, laneIndex = 0) => set((state) => {
     if (patternIndex < 0) return state;
     const linear = normalizePatternChainItems(state.patternChain);
-    const maxEnd = linear.reduce((m, i) => Math.max(m, (i.startMeasure ?? 0) + (i.durationMeasures ?? 1)), 0);
+    const safeLane = Math.max(0, Math.min(MAX_DRUM_LANES - 1, Math.floor(laneIndex || 0)));
+    const laneClips = linear.filter((i) => (i.laneIndex ?? 0) === safeLane);
+    const maxEnd = laneClips.reduce((m, i) => Math.max(m, (i.startMeasure ?? 0) + (i.durationMeasures ?? 1)), 0);
     const resolvedStart = typeof startMeasure === 'number' ? Math.max(0, startMeasure) : maxEnd;
     const dur = Math.max(0.25, durationMeasures);
 
@@ -575,32 +660,40 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set, get)
       patternIndex,
       startMeasure: resolvedStart,
       durationMeasures: dur,
-      repeatCount: Math.max(1, Math.round(dur))
+      repeatCount: Math.max(1, Math.round(dur)),
+      ...(safeLane > 0 ? { laneIndex: safeLane } : {})
     };
 
+    const nextChain = [...linear, newItem].sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0));
     return {
-      patternChain: [...linear, newItem].sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0)),
+      patternChain: nextChain,
+      drumLaneCount: getEffectiveDrumLaneCount(nextChain, state.drumLaneCount),
       selectedChainIds: [newItem.id]
     };
   }),
 
   addChainItemsBatch: (clips) => {
     if (!clips || clips.length === 0) return [];
-    const linear = normalizePatternChainItems(get().patternChain);
+    const state = get();
+    const linear = normalizePatternChainItems(state.patternChain);
     const created: PatternChainItem[] = clips.map(c => {
       const dur = Math.max(0.25, c.durationMeasures);
+      const safeLane = Math.max(0, Math.min(MAX_DRUM_LANES - 1, Math.floor(c.laneIndex ?? 0)));
       return {
         id: generateId('chain'),
         type: 'pattern' as const,
         patternIndex: Math.max(0, c.patternIndex),
         startMeasure: Math.max(0, c.startMeasure),
         durationMeasures: dur,
-        repeatCount: Math.max(1, Math.round(dur))
+        repeatCount: Math.max(1, Math.round(dur)),
+        ...(safeLane > 0 ? { laneIndex: safeLane } : {})
       };
     });
     const newIds = created.map(c => c.id);
+    const nextChain = [...linear, ...created].sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0));
     set({
-      patternChain: [...linear, ...created].sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0)),
+      patternChain: nextChain,
+      drumLaneCount: getEffectiveDrumLaneCount(nextChain, state.drumLaneCount),
       selectedChainIds: newIds
     });
     return newIds;
@@ -616,9 +709,17 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set, get)
       } else if (updates.repeatCount !== undefined) {
         merged.durationMeasures = Math.max(0.25, updates.repeatCount);
       }
+      if (updates.laneIndex !== undefined) {
+        const safeLane = Math.max(0, Math.min(MAX_DRUM_LANES - 1, Math.floor(updates.laneIndex)));
+        if (safeLane > 0) merged.laneIndex = safeLane;
+        else delete merged.laneIndex;
+      }
       return merged;
     }).sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0));
-    return { patternChain: nextChain };
+    return {
+      patternChain: nextChain,
+      drumLaneCount: getEffectiveDrumLaneCount(nextChain, state.drumLaneCount)
+    };
   }),
 
   updateChainItemsBatch: (updates) => set((state) => {
@@ -634,9 +735,17 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set, get)
       } else if (chg.repeatCount !== undefined) {
         merged.durationMeasures = Math.max(0.25, chg.repeatCount);
       }
+      if (chg.laneIndex !== undefined) {
+        const safeLane = Math.max(0, Math.min(MAX_DRUM_LANES - 1, Math.floor(chg.laneIndex)));
+        if (safeLane > 0) merged.laneIndex = safeLane;
+        else delete merged.laneIndex;
+      }
       return merged;
     }).sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0));
-    return { patternChain: nextChain };
+    return {
+      patternChain: nextChain,
+      drumLaneCount: getEffectiveDrumLaneCount(nextChain, state.drumLaneCount)
+    };
   }),
 
   splitChainItem: (id, splitMeasure) => set((state) => {
@@ -656,7 +765,9 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set, get)
       patternIndex: target.patternIndex ?? 0,
       startMeasure: splitMeasure,
       durationMeasures: secondDur,
-      repeatCount: Math.max(1, Math.round(secondDur))
+      repeatCount: Math.max(1, Math.round(secondDur)),
+      ...(target.laneIndex && target.laneIndex > 0 ? { laneIndex: target.laneIndex } : {}),
+      ...(target.isMuted ? { isMuted: true } : {})
     };
 
     const nextChain = [
@@ -706,7 +817,8 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set, get)
     return newPatternIndex;
   },
 
-  fillChainToSong: (patternIndex, targetMeasures) => set(() => {
+  fillChainToSong: (patternIndex, targetMeasures, laneIndex = 0) => set((state) => {
+    const safeLane = Math.max(0, Math.min(MAX_DRUM_LANES - 1, Math.floor(laneIndex || 0)));
     const dur = Math.max(1, Math.ceil(targetMeasures));
     const item: PatternChainItem = {
       id: generateId('chain'),
@@ -714,10 +826,16 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set, get)
       patternIndex: Math.max(0, patternIndex),
       startMeasure: 0,
       durationMeasures: dur,
-      repeatCount: dur
+      repeatCount: dur,
+      ...(safeLane > 0 ? { laneIndex: safeLane } : {})
     };
+    const otherLanes = normalizePatternChainItems(state.patternChain).filter(
+      (c) => (c.laneIndex ?? 0) !== safeLane
+    );
+    const nextChain = [...otherLanes, item].sort((a, b) => (a.startMeasure ?? 0) - (b.startMeasure ?? 0));
     return {
-      patternChain: [item],
+      patternChain: nextChain,
+      drumLaneCount: getEffectiveDrumLaneCount(nextChain, state.drumLaneCount),
       isPatternRepeatOn: false,
       selectedChainIds: [item.id]
     };

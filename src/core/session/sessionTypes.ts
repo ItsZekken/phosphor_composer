@@ -49,6 +49,8 @@ export interface HarmonyState {
 
 export interface DrumSessionState {
   patternChain: PatternChainItem[];
+  drumLaneCount?: number;
+  drumLaneMuted?: boolean[];
   isPatternRepeatOn: boolean;
   activeDrumKitId: string;
   drumChannels: DrumChannel[];

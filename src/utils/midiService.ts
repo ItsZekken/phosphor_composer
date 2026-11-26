@@ -238,6 +238,7 @@ export interface ExportSessionMidiParams {
   melodyNotes?: MelodyNote[];
   drumChannels?: DrumChannel[];
   patternChain?: PatternChainItem[];
+  drumLaneMuted?: boolean[];
   isPatternRepeatOn?: boolean;
   currentDrumPatternEdit?: number;
   patternLengths?: number[];
@@ -419,10 +420,12 @@ export function exportSessionToMidi(session: ExportSessionMidiParams, type: 'nor
 
     if (!isPatternRepeatOn && patternChain.length > 0) {
       const linearClips = normalizePatternChainToLinear(patternChain);
+      const laneMuted = session.drumLaneMuted || [];
+      const dedupHits = new Map<string, { midi: number; time: number; duration: number; velocity: number }>();
 
       linearClips.forEach((clip) => {
         const patternIdx = clip.patternIndex;
-        if (patternIdx < 0 || clip.isMuted) return;
+        if (patternIdx < 0 || clip.isMuted || laneMuted[clip.laneIndex]) return;
 
         const clipStartBeat = clip.startMeasure * beatsPerMeasure;
         const clipEndBeat = (clip.startMeasure + clip.durationMeasures) * beatsPerMeasure;
@@ -439,6 +442,7 @@ export function exportSessionToMidi(session: ExportSessionMidiParams, type: 'nor
             const stepBeat = measureStartBeat + (stepIdx * stepDuration);
             if (stepBeat < clipStartBeat - 1e-6 || stepBeat >= clipEndBeat - 1e-6) continue;
             const time = tempoMap.beatToSeconds(stepBeat);
+            const timeKey = Math.round(time * 1000);
             const duration = Math.max(0.05, Math.min(0.2, tempoMap.getDurationSeconds(stepBeat, stepDuration)));
 
             drumChannels.forEach(ch => {
@@ -448,16 +452,20 @@ export function exportSessionToMidi(session: ExportSessionMidiParams, type: 'nor
                 const gmNote = getDrumGMNote(ch.id, ch.name);
                 const vel = typeof dStep.velocity === 'number' ? dStep.velocity : 0.8;
                 const volFactor = typeof ch.volume === 'number' ? ch.volume / 100 : 0.8;
-                drumsTrack.addNote({
-                  midi: gmNote,
-                  time,
-                  duration,
-                  velocity: Math.max(0.1, Math.min(1.0, vel * volFactor))
-                });
+                const velocity = Math.max(0.1, Math.min(1.0, vel * volFactor));
+                const key = `${gmNote}@${timeKey}`;
+                const prev = dedupHits.get(key);
+                if (!prev || velocity > prev.velocity) {
+                  dedupHits.set(key, { midi: gmNote, time, duration, velocity });
+                }
               }
             });
           }
         }
+      });
+
+      dedupHits.forEach((hit) => {
+        drumsTrack.addNote(hit);
       });
     } else {
       // Repetición del patrón actual a lo largo de maxBeat

@@ -186,6 +186,7 @@ class ToneEngine {
         let patternIndex = state.currentDrumPatternEdit;
         let localStepIndex = 0;
         let currentChainItemId: string | null = null;
+        const activeChainItemIds: string[] = [];
 
         if (!state.isPatternRepeatOn && state.patternChain && state.patternChain.length > 0) {
           if (state.patternChain !== this.cachedPatternChainRef) {
@@ -193,20 +194,33 @@ class ToneEngine {
             this.cachedLinearPatternChain = normalizePatternChainToLinear(state.patternChain);
           }
           const linearClips = this.cachedLinearPatternChain;
+          const laneMuted = state.drumLaneMuted || [];
           const loopBeats = Math.max(beatsPerMeasure, this.cachedMaxBeat || beatsPerMeasure);
           const wrappedBeat = ((beat % loopBeats) + loopBeats) % loopBeats;
           const currentMeasure = wrappedBeat / beatsPerMeasure;
-          let activeClip: typeof linearClips[number] | undefined;
+          let primaryActiveClip: typeof linearClips[number] | undefined;
+          let matchingEditClip: typeof linearClips[number] | undefined;
+
           for (let i = 0; i < linearClips.length; i++) {
             const c = linearClips[i];
-            if (!c.isMuted && currentMeasure >= c.startMeasure - 1e-6 && currentMeasure < c.startMeasure + c.durationMeasures - 1e-6) {
-              activeClip = c;
-              break;
+            if (
+              !c.isMuted &&
+              !laneMuted[c.laneIndex] &&
+              currentMeasure >= c.startMeasure - 1e-6 &&
+              currentMeasure < c.startMeasure + c.durationMeasures - 1e-6
+            ) {
+              activeChainItemIds.push(c.id);
+              if (!primaryActiveClip) primaryActiveClip = c;
+              if (!matchingEditClip && c.patternIndex === state.currentDrumPatternEdit) {
+                matchingEditClip = c;
+              }
             }
           }
-          if (activeClip) {
-            patternIndex = activeClip.patternIndex;
-            currentChainItemId = activeClip.id;
+
+          const stepClip = matchingEditClip || primaryActiveClip;
+          if (stepClip) {
+            patternIndex = stepClip.patternIndex;
+            currentChainItemId = primaryActiveClip ? primaryActiveClip.id : stepClip.id;
             const beatInMeasure = wrappedBeat - Math.floor(currentMeasure) * beatsPerMeasure;
             const patternLen = state.patternLengths?.[patternIndex] || 16;
             localStepIndex = Math.min(patternLen - 1, Math.max(0, Math.floor((beatInMeasure / beatsPerMeasure) * patternLen)));
@@ -230,7 +244,11 @@ class ToneEngine {
         const emittedStep = (state.currentDrumPatternEdit === patternIndex || state.activeView === 'visualizer')
           ? localStepIndex
           : -1;
-        liveTelemetryBus.emitDrumStep(emittedStep, state.isPatternRepeatOn ? null : currentChainItemId);
+        liveTelemetryBus.emitDrumStep(
+          emittedStep,
+          state.isPatternRepeatOn ? null : currentChainItemId,
+          state.isPatternRepeatOn ? [] : activeChainItemIds
+        );
       },
       onSongEnd: () => {
         const state = useSongStore.getState();
@@ -376,6 +394,7 @@ class ToneEngine {
     let prevChannels = initialState.channels;
     let prevDrumChannels = initialState.drumChannels;
     let prevPatternChain = initialState.patternChain;
+    let prevDrumLaneMuted = initialState.drumLaneMuted;
     let prevIsPatternRepeatOn = initialState.isPatternRepeatOn;
     let prevCurrentDrumPatternEdit = initialState.currentDrumPatternEdit;
     let prevChordBlocks = initialState.chordBlocks;
@@ -440,6 +459,10 @@ class ToneEngine {
       }
       if (state.patternChain !== prevPatternChain) {
         prevPatternChain = state.patternChain;
+        musicalContentChanged = true;
+      }
+      if (state.drumLaneMuted !== prevDrumLaneMuted) {
+        prevDrumLaneMuted = state.drumLaneMuted;
         musicalContentChanged = true;
       }
       if (state.isPatternRepeatOn !== prevIsPatternRepeatOn) {

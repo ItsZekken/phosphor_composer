@@ -27,7 +27,10 @@ import { getNativeAudioContext } from '../../core/audio/worklet/PhosphorWorkletN
 import { generateId } from '../../utils/idGenerator';
 import { getBeatsPerMeasure } from '../../core/audio/arrangementResolver';
 import { reconcileTrackRegions } from '../../core/audio/melodyRegionUtils';
-import { normalizePatternChainToLinear } from '../../utils/typeDefinitions';
+import {
+  getEffectiveDrumLaneCount,
+  normalizePatternChainToLinear
+} from '../../utils/typeDefinitions';
 
 export const AudioTracksToolbar: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -36,6 +39,8 @@ export const AudioTracksToolbar: React.FC = () => {
     chordBlocks,
     tracks,
     patternChain,
+    drumLaneCount,
+    drumLaneMuted,
     audioTracks,
     audioClips,
     channels,
@@ -57,6 +62,7 @@ export const AudioTracksToolbar: React.FC = () => {
     isPickerOpen,
     toggleMute,
     toggleSolo,
+    toggleMuteDrumLane,
     addPianoRollTrack,
     addAudioTrack,
     updateAudioTrack,
@@ -77,6 +83,8 @@ export const AudioTracksToolbar: React.FC = () => {
       chordBlocks: state.chordBlocks || [],
       tracks: state.tracks || [],
       patternChain: state.patternChain || [],
+      drumLaneCount: state.drumLaneCount || 1,
+      drumLaneMuted: state.drumLaneMuted || [],
       audioTracks: state.audioTracks || [],
       audioClips: state.audioClips || [],
       channels: state.channels || {},
@@ -98,6 +106,7 @@ export const AudioTracksToolbar: React.FC = () => {
       isPickerOpen: state.isPickerOpen,
       toggleMute: state.toggleMute,
       toggleSolo: state.toggleSolo,
+      toggleMuteDrumLane: state.toggleMuteDrumLane,
       addPianoRollTrack: state.addPianoRollTrack,
       addAudioTrack: state.addAudioTrack,
       updateAudioTrack: state.updateAudioTrack,
@@ -145,11 +154,15 @@ export const AudioTracksToolbar: React.FC = () => {
     }
     if (selectedPlaylistTrack.kind === 'drums') {
       const ch = channels.drums;
+      const effectiveDrumLanes = getEffectiveDrumLaneCount(patternChain, drumLaneCount);
+      const laneIdx = Math.min(effectiveDrumLanes - 1, selectedPlaylistTrack.laneIndex ?? 0);
+      const isMulti = effectiveDrumLanes > 1;
+      const baseLabel = ch?.name || 'Batería';
       return {
-        label: ch?.name || 'Batería',
-        muted: Boolean(ch?.muted),
+        label: isMulti ? `${baseLabel} · C${laneIdx + 1}` : baseLabel,
+        muted: isMulti ? Boolean(drumLaneMuted[laneIdx]) : Boolean(ch?.muted),
         solo: Boolean(ch?.solo),
-        toggleM: () => toggleMute('drums'),
+        toggleM: () => (isMulti ? toggleMuteDrumLane(laneIdx) : toggleMute('drums')),
         toggleS: () => toggleSolo('drums')
       };
     }
@@ -169,10 +182,14 @@ export const AudioTracksToolbar: React.FC = () => {
     selectedPlaylistTrack,
     channels,
     tracks,
+    patternChain,
+    drumLaneCount,
+    drumLaneMuted,
     audioTracks,
     selectedTrackId,
     toggleMute,
     toggleSolo,
+    toggleMuteDrumLane,
     updateAudioTrack
   ]);
 
@@ -290,8 +307,12 @@ export const AudioTracksToolbar: React.FC = () => {
         if (reg) melodiesToSplit.push({ trackId: tr.id, regionId: reg.id });
       }
     } else if (selectedPlaylistTrack.kind === 'drums') {
+      const laneIdx = selectedPlaylistTrack.laneIndex ?? 0;
       const c = linearDrums.find(
-        (d) => currentMeasure > d.startMeasure + 0.05 && currentMeasure < d.startMeasure + d.durationMeasures - 0.05
+        (d) =>
+          d.laneIndex === laneIdx &&
+          currentMeasure > d.startMeasure + 0.05 &&
+          currentMeasure < d.startMeasure + d.durationMeasures - 0.05
       );
       if (c) drumsToSplit.push(c.id);
     } else {

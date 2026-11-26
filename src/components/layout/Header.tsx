@@ -378,6 +378,7 @@ export const Header = () => {
         melodyNotes: state.melodyNotes,
         drumChannels: state.drumChannels,
         patternChain: state.patternChain,
+        drumLaneMuted: state.drumLaneMuted,
         isPatternRepeatOn: state.isPatternRepeatOn,
         patternLengths: state.patternLengths,
         currentDrumPatternEdit: state.currentDrumPatternEdit,

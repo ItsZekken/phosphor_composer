@@ -8,7 +8,12 @@ import { useTimelineNavigation } from '../../hooks/useTimelineNavigation';
 import { isTypingTarget, isModalBlockingShortcuts } from '../../core/shortcuts/isTypingTarget';
 import { toneEngine } from '../../audio/toneEngine';
 import { liveTelemetryBus } from '../../core/audio/liveTelemetryBus';
-import { normalizePatternChainToLinear, type LinearDrumClip } from '../../utils/typeDefinitions';
+import {
+  MAX_DRUM_LANES,
+  getEffectiveDrumLaneCount,
+  normalizePatternChainToLinear,
+  type LinearDrumClip
+} from '../../utils/typeDefinitions';
 import {
   Copy,
   Scissors,
@@ -22,7 +27,9 @@ import {
   Sparkles,
   Play,
   VolumeX,
-  Volume2
+  Volume2,
+  Plus,
+  X
 } from 'lucide-react';
 
 const PATTERN_PALETTE = [
@@ -48,8 +55,10 @@ interface DragClipState {
   isCloneDrag: boolean;
   initialStartMeasure: number;
   initialDurationMeasures: number;
+  initialLaneIndex: number;
   currentStartMeasure: number;
   currentDurationMeasures: number;
+  currentLaneDelta: number;
   snapshots: Map<string, LinearDrumClip>;
 }
 
@@ -109,6 +118,8 @@ const formatMeasureRange = (startM: number, durM: number): string => {
 export const PatternChainArranger: React.FC = () => {
   const {
     patternChain,
+    drumLaneCount,
+    drumLaneMuted,
     drumChannels,
     patternLengths,
     chordBlocks,
@@ -128,6 +139,9 @@ export const PatternChainArranger: React.FC = () => {
     pasteChainItems,
     duplicateSelectedChainItems,
     deleteSelectedChainItems,
+    addDrumLane,
+    removeDrumLane,
+    toggleMuteDrumLane,
     addChainItem,
     addChainItemsBatch,
     updateChainItem,
@@ -143,6 +157,8 @@ export const PatternChainArranger: React.FC = () => {
     setDrumTimelineViewport
   } = useSongStore(useShallow(state => ({
     patternChain: state.patternChain || [],
+    drumLaneCount: state.drumLaneCount || 1,
+    drumLaneMuted: state.drumLaneMuted || [],
     drumChannels: state.drumChannels || [],
     patternLengths: state.patternLengths || [],
     chordBlocks: state.chordBlocks || [],
@@ -162,6 +178,9 @@ export const PatternChainArranger: React.FC = () => {
     pasteChainItems: state.pasteChainItems,
     duplicateSelectedChainItems: state.duplicateSelectedChainItems,
     deleteSelectedChainItems: state.deleteSelectedChainItems,
+    addDrumLane: state.addDrumLane,
+    removeDrumLane: state.removeDrumLane,
+    toggleMuteDrumLane: state.toggleMuteDrumLane,
     addChainItem: state.addChainItem,
     addChainItemsBatch: state.addChainItemsBatch,
     updateChainItem: state.updateChainItem,
@@ -180,22 +199,30 @@ export const PatternChainArranger: React.FC = () => {
   const beatsPerMeasure = timeSignature === '3/4' ? 3 : timeSignature === '6/8' ? 6 : 4;
   const totalPatterns = drumChannels[0]?.patterns?.length || 8;
   const linearClips = useMemo(() => normalizePatternChainToLinear(patternChain), [patternChain]);
+  const effectiveLaneCount = useMemo(
+    () => getEffectiveDrumLaneCount(patternChain, drumLaneCount),
+    [patternChain, drumLaneCount]
+  );
+  const isMultiLane = effectiveLaneCount > 1;
+  const laneHeightPx = isMultiLane ? 60 : 76;
 
   const [zoomLevel, setZoomLevel] = useState<number>(drumTimelineViewport?.zoomLevel || 1.0);
   const [snapGrid, setSnapGrid] = useState<DrumSnapGrid>('1');
   const [isSliceToolActive, setIsSliceToolActive] = useState(false);
   const [slicePreviewMeasure, setSlicePreviewMeasure] = useState<number | null>(null);
   const [draggingBrushIdx, setDraggingBrushIdx] = useState<number | null>(null);
-  const [hoverDropMeasure, setHoverDropMeasure] = useState<number | null>(null);
+  const [hoverDrop, setHoverDrop] = useState<{ measure: number; laneIndex: number } | null>(null);
   const [activeDrag, setActiveDrag] = useState<DragClipState | null>(null);
   const [lasso, setLasso] = useState<LassoState>({ isActive: false, startX: 0, startY: 0, currentX: 0, currentY: 0 });
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
+  const [lanePendingDelete, setLanePendingDelete] = useState<{ laneIndex: number; clipCount: number } | null>(null);
 
   const [clipContextMenu, setClipContextMenu] = useState<{ x: number; y: number; clip: LinearDrumClip; measure: number } | null>(null);
-  const [trackContextMenu, setTrackContextMenu] = useState<{ x: number; y: number; measure: number } | null>(null);
+  const [trackContextMenu, setTrackContextMenu] = useState<{ x: number; y: number; measure: number; laneIndex: number } | null>(null);
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const lanesStackRef = useRef<HTMLDivElement | null>(null);
   const playheadRef = useRef<HTMLDivElement | null>(null);
 
   const BASE_MEASURE_WIDTH = 96;
@@ -235,7 +262,7 @@ export const PatternChainArranger: React.FC = () => {
   }, [drumTimelineViewport?.scrollLeft]);
 
   const clipRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const activePlayingClipIdRef = useRef<string | null>(null);
+  const activePlayingClipIdsRef = useRef<Set<string>>(new Set());
   const scrollPersistTimerRef = useRef<number | null>(null);
 
   const persistScrollLeft = useCallback((nextLeft: number) => {
@@ -257,39 +284,44 @@ export const PatternChainArranger: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!isPlaying || isPatternRepeatOn) {
-      if (activePlayingClipIdRef.current) {
-        const prevEl = clipRefs.current.get(activePlayingClipIdRef.current);
-        if (prevEl) {
-          prevEl.classList.remove('playing');
-          const prevIcon = prevEl.querySelector('.drum-clip-play-icon') as HTMLElement | null;
-          if (prevIcon) prevIcon.style.display = 'none';
+    const clearAllPlaying = () => {
+      activePlayingClipIdsRef.current.forEach((id) => {
+        const el = clipRefs.current.get(id);
+        if (el) {
+          el.classList.remove('playing');
+          const icon = el.querySelector('.drum-clip-play-icon') as HTMLElement | null;
+          if (icon) icon.style.display = 'none';
         }
-        activePlayingClipIdRef.current = null;
-      }
+      });
+      activePlayingClipIdsRef.current.clear();
+    };
+
+    if (!isPlaying || isPatternRepeatOn) {
+      clearAllPlaying();
       return;
     }
 
-    return liveTelemetryBus.subscribeDrumStep(({ chainItemId }) => {
-      if (activePlayingClipIdRef.current && activePlayingClipIdRef.current !== chainItemId) {
-        const prevEl = clipRefs.current.get(activePlayingClipIdRef.current);
-        if (prevEl) {
-          prevEl.classList.remove('playing');
-          const prevIcon = prevEl.querySelector('.drum-clip-play-icon') as HTMLElement | null;
-          if (prevIcon) prevIcon.style.display = 'none';
+    return liveTelemetryBus.subscribeDrumStep(({ activeChainItemIds }) => {
+      const nextSet = new Set(activeChainItemIds);
+      activePlayingClipIdsRef.current.forEach((prevId) => {
+        if (!nextSet.has(prevId)) {
+          const prevEl = clipRefs.current.get(prevId);
+          if (prevEl) {
+            prevEl.classList.remove('playing');
+            const prevIcon = prevEl.querySelector('.drum-clip-play-icon') as HTMLElement | null;
+            if (prevIcon) prevIcon.style.display = 'none';
+          }
         }
-      }
-      if (chainItemId) {
-        const nextEl = clipRefs.current.get(chainItemId);
+      });
+      nextSet.forEach((id) => {
+        const nextEl = clipRefs.current.get(id);
         if (nextEl) {
           nextEl.classList.add('playing');
           const nextIcon = nextEl.querySelector('.drum-clip-play-icon') as HTMLElement | null;
           if (nextIcon) nextIcon.style.display = 'inline-block';
         }
-        activePlayingClipIdRef.current = chainItemId;
-      } else {
-        activePlayingClipIdRef.current = null;
-      }
+      });
+      activePlayingClipIdsRef.current = nextSet;
     });
   }, [isPlaying, isPatternRepeatOn, linearClips, selectedChainIds]);
 
@@ -603,14 +635,27 @@ export const PatternChainArranger: React.FC = () => {
 
     const effectiveSelectedIds = selectedChainIds.includes(clip.id) ? selectedChainIds : [clip.id];
     const snapshots = new Map<string, LinearDrumClip>();
+    let minSnapLane = Infinity;
+    let maxSnapLane = -Infinity;
     linearClips.forEach(c => {
-      if (effectiveSelectedIds.includes(c.id)) snapshots.set(c.id, { ...c });
+      if (effectiveSelectedIds.includes(c.id)) {
+        snapshots.set(c.id, { ...c });
+        if (c.laneIndex < minSnapLane) minSnapLane = c.laneIndex;
+        if (c.laneIndex > maxSnapLane) maxSnapLane = c.laneIndex;
+      }
     });
+    if (!Number.isFinite(minSnapLane)) {
+      minSnapLane = clip.laneIndex;
+      maxSnapLane = clip.laneIndex;
+    }
 
     const startClientX = e.clientX;
+    const startClientY = e.clientY;
     let latestClientX = e.clientX;
+    let latestClientY = e.clientY;
     let latestAlt = e.altKey;
     let lastDeltaMeasures = 0;
+    let lastLaneDelta = 0;
     const initialScrollLeft = viewportRef.current?.scrollLeft || 0;
 
     setActiveDrag({
@@ -619,23 +664,38 @@ export const PatternChainArranger: React.FC = () => {
       isCloneDrag,
       initialStartMeasure: clip.startMeasure,
       initialDurationMeasures: clip.durationMeasures,
+      initialLaneIndex: clip.laneIndex,
       currentStartMeasure: clip.startMeasure,
       currentDurationMeasures: clip.durationMeasures,
+      currentLaneDelta: 0,
       snapshots
     });
 
-    const computeUpdate = (clientX: number, altKey: boolean) => {
+    const computeUpdate = (clientX: number, clientY: number, altKey: boolean) => {
       const currentScroll = viewportRef.current?.scrollLeft || 0;
       const totalDx = (clientX - startClientX) + (currentScroll - initialScrollLeft);
+      const totalDy = clientY - startClientY;
       const step = altKey ? 0.25 : snapMeasures;
       const minDur = Math.max(0.25, step);
       const deltaM = Math.round((totalDx / MEASURE_WIDTH) / step) * step;
+      const rawLaneDelta = mode === 'move' && effectiveLaneCount > 1
+        ? Math.round(totalDy / laneHeightPx)
+        : 0;
+      const clampedLaneDelta = Math.max(
+        -minSnapLane,
+        Math.min(effectiveLaneCount - 1 - maxSnapLane, rawLaneDelta)
+      );
       lastDeltaMeasures = deltaM;
+      lastLaneDelta = clampedLaneDelta;
 
       setActiveDrag(prev => {
         if (!prev) return null;
         if (prev.mode === 'move') {
-          return { ...prev, currentStartMeasure: Math.max(0, prev.initialStartMeasure + deltaM) };
+          return {
+            ...prev,
+            currentStartMeasure: Math.max(0, prev.initialStartMeasure + deltaM),
+            currentLaneDelta: clampedLaneDelta
+          };
         }
         if (prev.mode === 'resize_right') {
           return { ...prev, currentDurationMeasures: Math.max(minDur, prev.initialDurationMeasures + deltaM) };
@@ -651,14 +711,15 @@ export const PatternChainArranger: React.FC = () => {
     const stopAutoScroll = startDrumEdgeAutoScroll(
       viewportRef,
       () => latestClientX,
-      () => computeUpdate(latestClientX, latestAlt)
+      () => computeUpdate(latestClientX, latestClientY, latestAlt)
     );
 
     const onMove = (me: MouseEvent) => {
       window.getSelection()?.removeAllRanges();
       latestClientX = me.clientX;
+      latestClientY = me.clientY;
       latestAlt = me.altKey;
-      computeUpdate(me.clientX, me.altKey);
+      computeUpdate(me.clientX, me.clientY, me.altKey);
     };
 
     const onUp = (ue: MouseEvent) => {
@@ -667,15 +728,18 @@ export const PatternChainArranger: React.FC = () => {
       window.removeEventListener('mouseup', onUp);
 
       latestClientX = ue.clientX;
+      latestClientY = ue.clientY;
       latestAlt = ue.altKey;
-      computeUpdate(ue.clientX, ue.altKey);
+      computeUpdate(ue.clientX, ue.clientY, ue.altKey);
 
       const finalScroll = viewportRef.current?.scrollLeft || 0;
       const movedPx = Math.abs((ue.clientX - startClientX) + (finalScroll - initialScrollLeft));
+      const movedY = Math.abs(ue.clientY - startClientY);
       const minDur = Math.max(0.25, ue.altKey ? 0.25 : snapMeasures);
       const deltaM = lastDeltaMeasures;
+      const laneDelta = lastLaneDelta;
 
-      if (movedPx >= 4) {
+      if (movedPx >= 4 || (mode === 'move' && movedY >= 8)) {
         if (mode === 'resize_right') {
           const finalDur = Math.max(minDur, clip.durationMeasures + deltaM);
           updateChainItem(clip.id, { durationMeasures: finalDur });
@@ -685,22 +749,26 @@ export const PatternChainArranger: React.FC = () => {
           const finalStart = Math.min(maxStart, Math.max(0, clip.startMeasure + deltaM));
           const finalDur = Math.max(minDur, initialEnd - finalStart);
           updateChainItem(clip.id, { startMeasure: finalStart, durationMeasures: finalDur });
-        } else if (mode === 'move' && deltaM !== 0) {
+        } else if (mode === 'move' && (deltaM !== 0 || laneDelta !== 0)) {
           const minStart = Array.from(snapshots.values()).reduce((m, s) => Math.min(m, s.startMeasure), Infinity);
           const safeDelta = Math.max(-minStart, deltaM);
-          if (safeDelta !== 0) {
+          if (safeDelta !== 0 || laneDelta !== 0) {
             if (isCloneDrag) {
               const clones = Array.from(snapshots.values()).map(s => ({
                 patternIndex: s.patternIndex,
                 startMeasure: Math.max(0, s.startMeasure + safeDelta),
-                durationMeasures: s.durationMeasures
+                durationMeasures: s.durationMeasures,
+                laneIndex: Math.max(0, Math.min(effectiveLaneCount - 1, s.laneIndex + laneDelta))
               }));
               addChainItemsBatch(clones);
             } else {
               updateChainItemsBatch(
                 Array.from(snapshots.values()).map(s => ({
                   id: s.id,
-                  changes: { startMeasure: Math.max(0, s.startMeasure + safeDelta) }
+                  changes: {
+                    startMeasure: Math.max(0, s.startMeasure + safeDelta),
+                    laneIndex: Math.max(0, Math.min(effectiveLaneCount - 1, s.laneIndex + laneDelta))
+                  }
                 }))
               );
             }
@@ -715,17 +783,19 @@ export const PatternChainArranger: React.FC = () => {
     window.addEventListener('mouseup', onUp);
   };
 
-  // Click / Lasso en carril vacío del timeline de batería
+  // Click / Lasso en carriles vacíos del timeline de batería (multi-capa 1:1)
   const handleLaneMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
     if (target.closest('.drum-linear-clip')) return;
     if (e.button !== 0) return;
     e.preventDefault();
 
-    const laneRect = e.currentTarget.getBoundingClientRect();
+    const stackEl = lanesStackRef.current || e.currentTarget;
+    const laneRect = stackEl.getBoundingClientRect();
     const startX = e.clientX - laneRect.left;
     const startY = e.clientY - laneRect.top;
     const startMeasure = Math.max(0, Math.floor((startX / MEASURE_WIDTH) / snapMeasures) * snapMeasures);
+    const clickedLane = Math.max(0, Math.min(effectiveLaneCount - 1, Math.floor(startY / laneHeightPx)));
     const initialSelected = [...selectedChainIds];
 
     // Con Ctrl/Meta inicia selección Lasso sin pintar; click simple sin arrastre pinta patrón activo
@@ -739,11 +809,11 @@ export const PatternChainArranger: React.FC = () => {
     let latestClientY = e.clientY;
 
     const updateLasso = (clientX: number, clientY: number) => {
-      const rectNow = canvasRef.current?.getBoundingClientRect();
+      const rectNow = (lanesStackRef.current || stackEl).getBoundingClientRect();
       if (!rectNow) return;
       const curX = clientX - rectNow.left;
       const curY = clientY - rectNow.top;
-      if (!didDrag && (Math.abs(curX - startX) > 6 || Math.abs(clientY - e.clientY) > 6)) {
+      if (!didDrag && (Math.abs(curX - startX) > 6 || Math.abs(curY - startY) > 6)) {
         didDrag = true;
       }
       if (!didDrag) return;
@@ -751,12 +821,18 @@ export const PatternChainArranger: React.FC = () => {
       setLasso({ isActive: true, startX, startY, currentX: curX, currentY: curY });
       const minX = Math.min(startX, curX);
       const maxX = Math.max(startX, curX);
+      const minY = Math.min(startY, curY);
+      const maxY = Math.max(startY, curY);
 
       const hits: string[] = [];
       linearClips.forEach(c => {
         const cLeft = c.startMeasure * MEASURE_WIDTH;
         const cRight = cLeft + c.durationMeasures * MEASURE_WIDTH;
-        if (cLeft < maxX && cRight > minX) hits.push(c.id);
+        const cTop = c.laneIndex * laneHeightPx;
+        const cBottom = cTop + laneHeightPx;
+        if (cLeft < maxX && cRight > minX && cTop < maxY && cBottom > minY) {
+          hits.push(c.id);
+        }
       });
       setSelectedChainIds(isLassoOnly ? Array.from(new Set([...initialSelected, ...hits])) : hits);
     };
@@ -781,9 +857,9 @@ export const PatternChainArranger: React.FC = () => {
       setLasso({ isActive: false, startX: 0, startY: 0, currentX: 0, currentY: 0 });
 
       if (!didDrag && !isLassoOnly) {
-        // Click limpio en hueco vacío: pintar clip del patrón en edición y habilitar Timeline Lineal
+        // Click limpio en hueco vacío: pintar clip del patrón en edición sobre la capa pulsada
         const clipDur = Math.max(1, snapMeasures);
-        addChainItem(currentDrumPatternEdit, clipDur, startMeasure);
+        addChainItem(currentDrumPatternEdit, clipDur, startMeasure, clickedLane);
         if (isPatternRepeatOn) {
           setPatternRepeatOn(false);
         }
@@ -801,11 +877,12 @@ export const PatternChainArranger: React.FC = () => {
     const delta = activeDrag.currentStartMeasure - activeDrag.initialStartMeasure;
     const minStart = Array.from(activeDrag.snapshots.values()).reduce((m, s) => Math.min(m, s.startMeasure), Infinity);
     const safeDelta = Math.max(-minStart, delta);
-    if (safeDelta !== 0) {
+    if (safeDelta !== 0 || activeDrag.currentLaneDelta !== 0) {
       activeDrag.snapshots.forEach((snap) => {
         cloneGhostClips.push({
           ...snap,
-          startMeasure: Math.max(0, snap.startMeasure + safeDelta)
+          startMeasure: Math.max(0, snap.startMeasure + safeDelta),
+          laneIndex: Math.max(0, Math.min(effectiveLaneCount - 1, snap.laneIndex + activeDrag.currentLaneDelta))
         });
       });
     }
@@ -840,6 +917,7 @@ export const PatternChainArranger: React.FC = () => {
 
           <span className="chain-meta-summary">
             {linearClips.length} {linearClips.length === 1 ? 'clip' : 'clips'} · {Math.ceil(maxClipEndMeasure)} c.
+            {isMultiLane ? ` · ${effectiveLaneCount} capas` : ''}
           </span>
         </div>
 
@@ -861,7 +939,7 @@ export const PatternChainArranger: React.FC = () => {
                 }}
                 onDragEnd={() => {
                   setDraggingBrushIdx(null);
-                  setHoverDropMeasure(null);
+                  setHoverDrop(null);
                 }}
                 onClick={() => setCurrentDrumPatternEdit(idx)}
                 className={`drum-brush-pill ${isActiveBrush ? 'active' : ''}`}
@@ -920,9 +998,25 @@ export const PatternChainArranger: React.FC = () => {
           <button
             type="button"
             className="physical-btn"
+            disabled={effectiveLaneCount >= MAX_DRUM_LANES}
+            onClick={() => addDrumLane()}
+            title={
+              effectiveLaneCount >= MAX_DRUM_LANES
+                ? `Máximo ${MAX_DRUM_LANES} capas de batería`
+                : 'Añadir capa de batería en paralelo (superponer patrones/fills · 1:1 con Tracks)'
+            }
+            style={{ gap: '4px', padding: '0 8px', fontSize: '0.68rem' }}
+          >
+            <Plus size={12} style={{ color: '#2dd4bf' }} />
+            <span>Capa</span>
+          </button>
+
+          <button
+            type="button"
+            className="physical-btn"
             onClick={() => {
               const targetMeasures = Math.max(4, songSpanMeasures || 8);
-              fillChainToSong(currentDrumPatternEdit, targetMeasures);
+              fillChainToSong(currentDrumPatternEdit, targetMeasures, 0);
             }}
             title={`Extender Patrón P${currentDrumPatternEdit + 1} por toda la canción (${Math.max(4, songSpanMeasures || 8)} compases)`}
             style={{ gap: '4px', padding: '0 8px', fontSize: '0.68rem' }}
@@ -960,328 +1054,430 @@ export const PatternChainArranger: React.FC = () => {
         </div>
       </div>
 
-      {/* Viewport Lineal Sincronizado */}
-      <div
-        ref={viewportRef}
-        className="drum-linear-viewport"
-        onScroll={(e) => {
-          persistScrollLeft(e.currentTarget.scrollLeft);
-        }}
-      >
+      {/* Contenedor sincronizado: Gutter de capas (cuando hay >1 capa) + Viewport Lineal */}
+      <div className={`drum-linear-shell ${isMultiLane ? 'is-multi-lane' : ''}`}>
+        {isMultiLane && (
+          <div className="drum-lanes-gutter" aria-label="Capas de batería">
+            <div className="drum-lanes-gutter-top">CAPAS</div>
+            {Array.from({ length: effectiveLaneCount }).map((_, laneIdx) => {
+              const isLaneMuted = Boolean(drumLaneMuted[laneIdx]);
+              const laneClipCount = linearClips.filter((c) => c.laneIndex === laneIdx).length;
+              return (
+                <div
+                  key={`gutter_${laneIdx}`}
+                  className={`drum-lanes-gutter-row ${isLaneMuted ? 'is-muted' : ''}`}
+                  style={{ height: `${laneHeightPx}px` }}
+                >
+                  <span className="drum-gutter-label" title={`Capa de batería C${laneIdx + 1}`}>
+                    C{laneIdx + 1}
+                  </span>
+                  <div className="drum-gutter-actions">
+                    <button
+                      type="button"
+                      className={`drum-gutter-btn ${isLaneMuted ? 'active-mute' : ''}`}
+                      onClick={() => toggleMuteDrumLane(laneIdx)}
+                      title={isLaneMuted ? `Activar capa C${laneIdx + 1}` : `Silenciar capa C${laneIdx + 1}`}
+                    >
+                      M
+                    </button>
+                    <button
+                      type="button"
+                      className="drum-gutter-btn danger"
+                      onClick={() => {
+                        if (laneClipCount > 0) {
+                          setLanePendingDelete({ laneIndex: laneIdx, clipCount: laneClipCount });
+                        } else {
+                          removeDrumLane(laneIdx);
+                        }
+                      }}
+                      title={`Eliminar capa C${laneIdx + 1}`}
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Viewport Lineal Sincronizado */}
         <div
-          ref={canvasRef}
-          className="drum-linear-canvas"
-          style={{ width: `${canvasWidth}px` }}
+          ref={viewportRef}
+          className="drum-linear-viewport"
+          onScroll={(e) => {
+            persistScrollLeft(e.currentTarget.scrollLeft);
+          }}
         >
-          {/* Fila 1: Regla de Compases */}
           <div
-            className="drum-linear-ruler"
-            onMouseDown={handleRulerMouseDown}
-            title="Click o arrastra para mover el cabezal de reproducción"
+            ref={canvasRef}
+            className="drum-linear-canvas"
+            style={{ width: `${canvasWidth}px` }}
           >
-            {Array.from({ length: totalMeasures }).map((_, m) => (
-              <div
-                key={m}
-                className="drum-ruler-measure"
-                style={{ left: `${m * MEASURE_WIDTH}px`, width: `${MEASURE_WIDTH}px` }}
-              >
-                <span className="drum-ruler-num">c.{m + 1}</span>
-              </div>
-            ))}
-          </div>
-
-          {/* Fila 2: Referencia Armónica Sincronizada (Acordes del proyecto bar-for-bar) */}
-          <div className="drum-chord-reference-strip" title="Acordes de referencia del proyecto (acoplados por compás)">
-            <span className="drum-ref-watermark">ACORDES REF</span>
-            {Array.from({ length: totalMeasures }).map((_, m) => (
-              <div
-                key={m}
-                className="drum-ref-gridline"
-                style={{ left: `${m * MEASURE_WIDTH}px` }}
-              />
-            ))}
-            {chordBlocks.map(cb => {
-              const leftPx = (cb.startBeat / beatsPerMeasure) * MEASURE_WIDTH;
-              const widthPx = Math.max(20, (cb.durationBeats / beatsPerMeasure) * MEASURE_WIDTH - 2);
-              return (
+            {/* Fila 1: Regla de Compases */}
+            <div
+              className="drum-linear-ruler"
+              onMouseDown={handleRulerMouseDown}
+              title="Click o arrastra para mover el cabezal de reproducción"
+            >
+              {Array.from({ length: totalMeasures }).map((_, m) => (
                 <div
-                  key={cb.id}
-                  className="drum-ref-chord-pill"
-                  style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+                  key={m}
+                  className="drum-ruler-measure"
+                  style={{ left: `${m * MEASURE_WIDTH}px`, width: `${MEASURE_WIDTH}px` }}
                 >
-                  {cb.chord}
+                  <span className="drum-ruler-num">c.{m + 1}</span>
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
 
-          {/* Fila 3: Carril Principal Lineal de Clips de Batería */}
-          <div
-            className={`drum-linear-lane ${isPatternRepeatOn ? 'is-bypassed' : ''}`}
-            onMouseDown={handleLaneMouseDown}
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.dataTransfer.dropEffect = 'copy';
-              const rect = canvasRef.current?.getBoundingClientRect();
-              if (rect) {
-                const rawM = (e.clientX - rect.left) / MEASURE_WIDTH;
-                const snapped = Math.max(0, Math.round(rawM / snapMeasures) * snapMeasures);
-                setHoverDropMeasure(snapped);
-              }
-            }}
-            onDragLeave={() => setHoverDropMeasure(null)}
-            onDrop={(e) => {
-              e.preventDefault();
-              const patStr = e.dataTransfer.getData('text/drum-pattern');
-              const patIdx = patStr !== '' ? Number(patStr) : draggingBrushIdx;
-              const rect = canvasRef.current?.getBoundingClientRect();
-              if (rect && patIdx !== null && !Number.isNaN(patIdx)) {
-                const rawM = (e.clientX - rect.left) / MEASURE_WIDTH;
-                const snapped = Math.max(0, Math.round(rawM / snapMeasures) * snapMeasures);
-                addChainItem(patIdx, Math.max(1, snapMeasures), snapped);
-                setCurrentDrumPatternEdit(patIdx);
-                if (isPatternRepeatOn) setPatternRepeatOn(false);
-              }
-              setDraggingBrushIdx(null);
-              setHoverDropMeasure(null);
-            }}
-            onContextMenu={(e) => {
-              const target = e.target as HTMLElement;
-              if (!target.closest('.drum-linear-clip')) {
+            {/* Fila 2: Referencia Armónica Sincronizada (Acordes del proyecto bar-for-bar) */}
+            <div className="drum-chord-reference-strip" title="Acordes de referencia del proyecto (acoplados por compás)">
+              <span className="drum-ref-watermark">ACORDES REF</span>
+              {Array.from({ length: totalMeasures }).map((_, m) => (
+                <div
+                  key={m}
+                  className="drum-ref-gridline"
+                  style={{ left: `${m * MEASURE_WIDTH}px` }}
+                />
+              ))}
+              {chordBlocks.map(cb => {
+                const leftPx = (cb.startBeat / beatsPerMeasure) * MEASURE_WIDTH;
+                const widthPx = Math.max(20, (cb.durationBeats / beatsPerMeasure) * MEASURE_WIDTH - 2);
+                return (
+                  <div
+                    key={cb.id}
+                    className="drum-ref-chord-pill"
+                    style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+                  >
+                    {cb.chord}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Fila 3: Pila de Carriles (1..N capas en paralelo, 1:1 con Tracks) */}
+            <div
+              ref={lanesStackRef}
+              className={`drum-linear-lane ${isPatternRepeatOn ? 'is-bypassed' : ''} ${isMultiLane ? 'multi-lane' : ''}`}
+              style={{ height: `${effectiveLaneCount * laneHeightPx}px` }}
+              onMouseDown={handleLaneMouseDown}
+              onDragOver={(e) => {
                 e.preventDefault();
-                e.stopPropagation();
-                const rect = canvasRef.current?.getBoundingClientRect();
-                const clickX = rect ? e.clientX - rect.left : 0;
-                const m = Math.max(0, Math.floor((clickX / MEASURE_WIDTH) / snapMeasures) * snapMeasures);
-                setTrackContextMenu({ x: e.clientX, y: e.clientY, measure: m });
-              }
-            }}
-          >
-            {/* Líneas de cuadrícula de compás y sub-compás */}
-            {Array.from({ length: totalMeasures }).map((_, m) => (
-              <div
-                key={m}
-                className="drum-lane-measure-cell"
-                style={{ left: `${m * MEASURE_WIDTH}px`, width: `${MEASURE_WIDTH}px` }}
-              />
-            ))}
-
-            {/* Hint sutil cuando la pista está vacía */}
-            {linearClips.length === 0 && (
-              <div className="drum-linear-empty-hint">
-                Haz click en cualquier compás para colocar P{currentDrumPatternEdit + 1}, o usa <strong>Auto-Fill</strong>
-              </div>
-            )}
-
-            {/* Drop ghost al arrastrar P# desde la brocha */}
-            {hoverDropMeasure !== null && draggingBrushIdx !== null && (
-              <div
-                className="drum-clip-ghost"
-                style={{
-                  left: `${hoverDropMeasure * MEASURE_WIDTH}px`,
-                  width: `${Math.max(24, Math.max(1, snapMeasures) * MEASURE_WIDTH - 2)}px`,
-                  borderColor: PATTERN_PALETTE[draggingBrushIdx % PATTERN_PALETTE.length]
-                }}
-              >
-                P{draggingBrushIdx + 1}
-              </div>
-            )}
-
-            {/* Clips Lineales de Batería */}
-            {linearClips.map(clip => {
-              const color = PATTERN_PALETTE[clip.patternIndex % PATTERN_PALETTE.length];
-              const isSelected = selectedChainIds.includes(clip.id);
-              const isPlayingClip = isPlaying && !isPatternRepeatOn && activePlayingClipIdRef.current === clip.id;
-
-              let renderStart = clip.startMeasure;
-              let renderDur = clip.durationMeasures;
-
-              if (activeDrag && !activeDrag.isCloneDrag) {
-                if (activeDrag.id === clip.id) {
-                  if (activeDrag.mode === 'move' || activeDrag.mode === 'resize_left') {
-                    renderStart = activeDrag.currentStartMeasure;
-                  }
-                  if (activeDrag.mode === 'resize_left' || activeDrag.mode === 'resize_right') {
-                    renderDur = activeDrag.currentDurationMeasures;
-                  }
-                } else if (activeDrag.mode === 'move' && activeDrag.snapshots.has(clip.id)) {
-                  const snap = activeDrag.snapshots.get(clip.id)!;
-                  const delta = activeDrag.currentStartMeasure - activeDrag.initialStartMeasure;
-                  renderStart = Math.max(0, snap.startMeasure + delta);
+                e.dataTransfer.dropEffect = 'copy';
+                const rect = lanesStackRef.current?.getBoundingClientRect();
+                if (rect) {
+                  const rawM = (e.clientX - rect.left) / MEASURE_WIDTH;
+                  const snapped = Math.max(0, Math.round(rawM / snapMeasures) * snapMeasures);
+                  const laneIdx = Math.max(
+                    0,
+                    Math.min(effectiveLaneCount - 1, Math.floor((e.clientY - rect.top) / laneHeightPx))
+                  );
+                  setHoverDrop({ measure: snapped, laneIndex: laneIdx });
                 }
-              }
+              }}
+              onDragLeave={() => setHoverDrop(null)}
+              onDrop={(e) => {
+                e.preventDefault();
+                const patStr = e.dataTransfer.getData('text/drum-pattern');
+                const patIdx = patStr !== '' ? Number(patStr) : draggingBrushIdx;
+                const rect = lanesStackRef.current?.getBoundingClientRect();
+                if (rect && patIdx !== null && !Number.isNaN(patIdx)) {
+                  const rawM = (e.clientX - rect.left) / MEASURE_WIDTH;
+                  const snapped = Math.max(0, Math.round(rawM / snapMeasures) * snapMeasures);
+                  const laneIdx = Math.max(
+                    0,
+                    Math.min(effectiveLaneCount - 1, Math.floor((e.clientY - rect.top) / laneHeightPx))
+                  );
+                  addChainItem(patIdx, Math.max(1, snapMeasures), snapped, laneIdx);
+                  setCurrentDrumPatternEdit(patIdx);
+                  if (isPatternRepeatOn) setPatternRepeatOn(false);
+                }
+                setDraggingBrushIdx(null);
+                setHoverDrop(null);
+              }}
+              onContextMenu={(e) => {
+                const target = e.target as HTMLElement;
+                if (!target.closest('.drum-linear-clip')) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const rect = lanesStackRef.current?.getBoundingClientRect();
+                  const clickX = rect ? e.clientX - rect.left : 0;
+                  const clickY = rect ? e.clientY - rect.top : 0;
+                  const m = Math.max(0, Math.floor((clickX / MEASURE_WIDTH) / snapMeasures) * snapMeasures);
+                  const laneIdx = Math.max(
+                    0,
+                    Math.min(effectiveLaneCount - 1, Math.floor(clickY / laneHeightPx))
+                  );
+                  setTrackContextMenu({ x: e.clientX, y: e.clientY, measure: m, laneIndex: laneIdx });
+                }
+              }}
+            >
+              {/* Filas visuales de fondo por capa (divisores horizontales + estado mute por capa) */}
+              {Array.from({ length: effectiveLaneCount }).map((_, laneIdx) => {
+                const isLaneMuted = Boolean(drumLaneMuted[laneIdx]);
+                return (
+                  <div
+                    key={`lane_bg_${laneIdx}`}
+                    className={`drum-linear-lane-row ${isLaneMuted ? 'lane-muted' : ''}`}
+                    style={{
+                      top: `${laneIdx * laneHeightPx}px`,
+                      height: `${laneHeightPx}px`
+                    }}
+                  />
+                );
+              })}
 
-              const leftPx = renderStart * MEASURE_WIDTH;
-              const widthPx = Math.max(22, renderDur * MEASURE_WIDTH - 2);
-              const previewRows = patternPreviewHits.get(clip.patternIndex) || [];
-              const wholeRepeats = Math.max(1, Math.ceil(renderDur));
-
-              return (
+              {/* Líneas de cuadrícula de compás */}
+              {Array.from({ length: totalMeasures }).map((_, m) => (
                 <div
-                  key={clip.id}
-                  ref={(el) => {
-                    if (el) clipRefs.current.set(clip.id, el);
-                    else clipRefs.current.delete(clip.id);
-                  }}
-                  className={`drum-linear-clip ${isSelected ? 'selected' : ''} ${isPlayingClip ? 'playing' : ''}`}
-                  style={{
-                    left: `${leftPx}px`,
-                    width: `${widthPx}px`,
-                    borderColor: isSelected ? '#ffd875' : color,
-                    backgroundColor: `${color}24`,
-                    opacity: clip.isMuted ? 0.42 : 1,
-                    filter: clip.isMuted ? 'saturate(0.3)' : undefined,
-                    cursor: isSliceToolActive ? 'crosshair' : 'grab',
-                    '--clip-color': color
-                  } as React.CSSProperties}
-                  onMouseDown={(e) => handleClipMouseDown(e, clip)}
-                  onMouseMove={(e) => {
-                    if (!isSliceToolActive) {
-                      if (slicePreviewMeasure !== null) setSlicePreviewMeasure(null);
-                      return;
-                    }
-                    const rect = canvasRef.current?.getBoundingClientRect();
-                    if (!rect) return;
-                    const rawM = (e.clientX - rect.left) / MEASURE_WIDTH;
-                    const cutStep = snapGrid === 'off' ? 0.25 : snapMeasures;
-                    const cutM = Math.round(rawM / cutStep) * cutStep;
-                    if (cutM > clip.startMeasure + 0.125 && cutM < clip.startMeasure + clip.durationMeasures - 0.125) {
-                      setSlicePreviewMeasure(cutM);
-                    } else {
-                      setSlicePreviewMeasure(null);
-                    }
-                  }}
-                  onMouseLeave={() => { if (slicePreviewMeasure !== null) setSlicePreviewMeasure(null); }}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    setCurrentDrumPatternEdit(clip.patternIndex);
-                    setSelectedChainIds([clip.id]);
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (e.shiftKey) return;
-                    const rect = canvasRef.current?.getBoundingClientRect();
-                    const rawM = rect ? (e.clientX - rect.left) / MEASURE_WIDTH : clip.startMeasure + clip.durationMeasures / 2;
-                    const snappedM = Math.round(rawM / snapMeasures) * snapMeasures;
-                    if (!selectedChainIds.includes(clip.id)) {
-                      setSelectedChainIds([clip.id]);
-                    }
-                    setClipContextMenu({ x: e.clientX, y: e.clientY, clip, measure: snappedM });
-                  }}
-                  title={`P${clip.patternIndex + 1} · ${formatMeasureRange(renderStart, renderDur)} · Doble click para editar · Shift+Arrastrar para clonar`}
-                >
-                  {/* Cabecera del clip con franja de color */}
-                  <div className="drum-clip-header" style={{ backgroundColor: `${color}45` }}>
-                    <span className="drum-clip-title">
-                      <Play
-                        size={9}
-                        fill="currentColor"
-                        className="drum-clip-play-icon"
-                        style={{ marginRight: '3px', display: isPlayingClip ? 'inline-block' : 'none' }}
-                      />
-                      P{clip.patternIndex + 1}
-                    </span>
-                    {widthPx > 62 && (
-                      <span className="drum-clip-span">
-                        {clip.isMuted ? 'MUTE' : formatMeasureRange(renderStart, renderDur)}
-                      </span>
-                    )}
-                  </div>
+                  key={m}
+                  className="drum-lane-measure-cell"
+                  style={{ left: `${m * MEASURE_WIDTH}px`, width: `${MEASURE_WIDTH}px` }}
+                />
+              ))}
 
-                  {/* Divisiones internas cuando un clip dura varios compases + puntos de actividad */}
-                  <div className="drum-clip-body">
-                    {Array.from({ length: wholeRepeats }).map((_, repIdx) => {
-                      const tileLeftPct = (repIdx / renderDur) * 100;
-                      const tileWidthPct = (Math.min(1, renderDur - repIdx) / renderDur) * 100;
-                      if (tileWidthPct <= 0) return null;
-                      return (
-                        <div
-                          key={repIdx}
-                          className="drum-clip-tile"
-                          style={{
-                            left: `${tileLeftPct}%`,
-                            width: `${tileWidthPct}%`,
-                            borderLeft: repIdx > 0 ? '1px dashed rgba(255,255,255,0.22)' : 'none'
-                          }}
-                        >
-                          {previewRows.map((rowHits, rI) => (
-                            <div
-                              key={rI}
-                              className="drum-mini-row"
-                              style={{ top: `${15 + rI * 13}%` }}
-                            >
-                              {rowHits.map(hit => {
-                                const frac = hit.stepIdx / hit.totalSteps;
-                                const visibleLimit = Math.min(1, renderDur - repIdx);
-                                if (frac >= visibleLimit) return null;
-                                return (
-                                  <span
-                                    key={hit.stepIdx}
-                                    className="drum-mini-dot"
-                                    style={{
-                                      left: `${(frac / visibleLimit) * 100}%`,
-                                      backgroundColor: color
-                                    }}
-                                  />
-                                );
-                              })}
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Tiradores laterales de redimensionado */}
-                  <div className="drum-clip-handle left" title="Ajustar inicio" />
-                  <div className="drum-clip-handle right" title="Extender/acortar compases" />
+              {/* Hint sutil cuando la pista está vacía */}
+              {linearClips.length === 0 && (
+                <div className="drum-linear-empty-hint">
+                  Haz click en cualquier compás para colocar P{currentDrumPatternEdit + 1}, o usa <strong>Auto-Fill</strong>
                 </div>
-              );
-            })}
+              )}
 
-            {/* Fantasmas de clonación en vivo (Shift+Drag) */}
-            {cloneGhostClips.map((g) => (
-              <div
-                key={`ghost-${g.id}`}
-                className="drum-clip-ghost"
-                style={{
-                  left: `${g.startMeasure * MEASURE_WIDTH}px`,
-                  width: `${Math.max(22, g.durationMeasures * MEASURE_WIDTH - 2)}px`
-                }}
-              >
-                P{g.patternIndex + 1}
-              </div>
-            ))}
+              {/* Drop ghost al arrastrar P# desde la brocha */}
+              {hoverDrop !== null && draggingBrushIdx !== null && (
+                <div
+                  className="drum-clip-ghost"
+                  style={{
+                    left: `${hoverDrop.measure * MEASURE_WIDTH}px`,
+                    top: `${hoverDrop.laneIndex * laneHeightPx + 5}px`,
+                    height: `${laneHeightPx - 10}px`,
+                    bottom: 'auto',
+                    width: `${Math.max(24, Math.max(1, snapMeasures) * MEASURE_WIDTH - 2)}px`,
+                    borderColor: PATTERN_PALETTE[draggingBrushIdx % PATTERN_PALETTE.length]
+                  }}
+                >
+                  P{draggingBrushIdx + 1}
+                </div>
+              )}
 
-            {/* Guía de corte (Slice Tool) */}
-            {isSliceToolActive && slicePreviewMeasure !== null && (
-              <div
-                className="drum-slice-guide"
-                style={{ left: `${slicePreviewMeasure * MEASURE_WIDTH}px` }}
-              />
-            )}
+              {/* Clips Lineales de Batería (en todas las capas 1:1) */}
+              {linearClips.map(clip => {
+                const color = PATTERN_PALETTE[clip.patternIndex % PATTERN_PALETTE.length];
+                const isSelected = selectedChainIds.includes(clip.id);
+                const isPlayingClip =
+                  isPlaying && !isPatternRepeatOn && activePlayingClipIdsRef.current.has(clip.id);
+                const isClipLaneMuted = Boolean(drumLaneMuted[clip.laneIndex]);
 
-            {/* Caja de selección Lasso */}
-            {lasso.isActive && (
-              <div
-                style={{
-                  position: 'absolute',
-                  left: `${Math.min(lasso.startX, lasso.currentX)}px`,
-                  top: `${Math.min(lasso.startY, lasso.currentY)}px`,
-                  width: `${Math.abs(lasso.currentX - lasso.startX)}px`,
-                  height: `${Math.abs(lasso.currentY - lasso.startY)}px`,
-                  border: '1px dashed #ffd875',
-                  backgroundColor: 'rgba(255, 216, 117, 0.12)',
-                  pointerEvents: 'none',
-                  zIndex: 30
-                }}
-              />
-            )}
+                let renderStart = clip.startMeasure;
+                let renderDur = clip.durationMeasures;
+                let renderLane = clip.laneIndex;
+
+                if (activeDrag && !activeDrag.isCloneDrag) {
+                  if (activeDrag.id === clip.id) {
+                    if (activeDrag.mode === 'move' || activeDrag.mode === 'resize_left') {
+                      renderStart = activeDrag.currentStartMeasure;
+                    }
+                    if (activeDrag.mode === 'resize_left' || activeDrag.mode === 'resize_right') {
+                      renderDur = activeDrag.currentDurationMeasures;
+                    }
+                    if (activeDrag.mode === 'move') {
+                      renderLane = Math.max(
+                        0,
+                        Math.min(effectiveLaneCount - 1, activeDrag.initialLaneIndex + activeDrag.currentLaneDelta)
+                      );
+                    }
+                  } else if (activeDrag.mode === 'move' && activeDrag.snapshots.has(clip.id)) {
+                    const snap = activeDrag.snapshots.get(clip.id)!;
+                    const delta = activeDrag.currentStartMeasure - activeDrag.initialStartMeasure;
+                    renderStart = Math.max(0, snap.startMeasure + delta);
+                    renderLane = Math.max(
+                      0,
+                      Math.min(effectiveLaneCount - 1, snap.laneIndex + activeDrag.currentLaneDelta)
+                    );
+                  }
+                }
+
+                const leftPx = renderStart * MEASURE_WIDTH;
+                const widthPx = Math.max(22, renderDur * MEASURE_WIDTH - 2);
+                const topPx = renderLane * laneHeightPx + 5;
+                const heightPx = laneHeightPx - 10;
+                const previewRows = patternPreviewHits.get(clip.patternIndex) || [];
+                const wholeRepeats = Math.max(1, Math.ceil(renderDur));
+
+                return (
+                  <div
+                    key={clip.id}
+                    ref={(el) => {
+                      if (el) clipRefs.current.set(clip.id, el);
+                      else clipRefs.current.delete(clip.id);
+                    }}
+                    className={`drum-linear-clip ${isSelected ? 'selected' : ''} ${isPlayingClip ? 'playing' : ''}`}
+                    style={{
+                      left: `${leftPx}px`,
+                      top: `${topPx}px`,
+                      height: `${heightPx}px`,
+                      bottom: 'auto',
+                      width: `${widthPx}px`,
+                      borderColor: isSelected ? '#ffd875' : color,
+                      backgroundColor: `${color}24`,
+                      opacity: clip.isMuted || isClipLaneMuted ? 0.42 : 1,
+                      filter: clip.isMuted || isClipLaneMuted ? 'saturate(0.3)' : undefined,
+                      cursor: isSliceToolActive ? 'crosshair' : 'grab',
+                      '--clip-color': color
+                    } as React.CSSProperties}
+                    onMouseDown={(e) => handleClipMouseDown(e, clip)}
+                    onMouseMove={(e) => {
+                      if (!isSliceToolActive) {
+                        if (slicePreviewMeasure !== null) setSlicePreviewMeasure(null);
+                        return;
+                      }
+                      const rect = canvasRef.current?.getBoundingClientRect();
+                      if (!rect) return;
+                      const rawM = (e.clientX - rect.left) / MEASURE_WIDTH;
+                      const cutStep = snapGrid === 'off' ? 0.25 : snapMeasures;
+                      const cutM = Math.round(rawM / cutStep) * cutStep;
+                      if (cutM > clip.startMeasure + 0.125 && cutM < clip.startMeasure + clip.durationMeasures - 0.125) {
+                        setSlicePreviewMeasure(cutM);
+                      } else {
+                        setSlicePreviewMeasure(null);
+                      }
+                    }}
+                    onMouseLeave={() => { if (slicePreviewMeasure !== null) setSlicePreviewMeasure(null); }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      setCurrentDrumPatternEdit(clip.patternIndex);
+                      setSelectedChainIds([clip.id]);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (e.shiftKey) return;
+                      const rect = canvasRef.current?.getBoundingClientRect();
+                      const rawM = rect ? (e.clientX - rect.left) / MEASURE_WIDTH : clip.startMeasure + clip.durationMeasures / 2;
+                      const snappedM = Math.round(rawM / snapMeasures) * snapMeasures;
+                      if (!selectedChainIds.includes(clip.id)) {
+                        setSelectedChainIds([clip.id]);
+                      }
+                      setClipContextMenu({ x: e.clientX, y: e.clientY, clip, measure: snappedM });
+                    }}
+                    title={`P${clip.patternIndex + 1} · ${formatMeasureRange(renderStart, renderDur)}${isMultiLane ? ` · Capa C${renderLane + 1}` : ''} · Doble click para editar · Shift+Arrastrar para clonar`}
+                  >
+                    {/* Cabecera del clip con franja de color */}
+                    <div className="drum-clip-header" style={{ backgroundColor: `${color}45` }}>
+                      <span className="drum-clip-title">
+                        <Play
+                          size={9}
+                          fill="currentColor"
+                          className="drum-clip-play-icon"
+                          style={{ marginRight: '3px', display: isPlayingClip ? 'inline-block' : 'none' }}
+                        />
+                        P{clip.patternIndex + 1}
+                      </span>
+                      {widthPx > 62 && (
+                        <span className="drum-clip-span">
+                          {clip.isMuted ? 'MUTE' : formatMeasureRange(renderStart, renderDur)}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Divisiones internas cuando un clip dura varios compases + puntos de actividad */}
+                    <div className="drum-clip-body">
+                      {Array.from({ length: wholeRepeats }).map((_, repIdx) => {
+                        const tileLeftPct = (repIdx / renderDur) * 100;
+                        const tileWidthPct = (Math.min(1, renderDur - repIdx) / renderDur) * 100;
+                        if (tileWidthPct <= 0) return null;
+                        return (
+                          <div
+                            key={repIdx}
+                            className="drum-clip-tile"
+                            style={{
+                              left: `${tileLeftPct}%`,
+                              width: `${tileWidthPct}%`,
+                              borderLeft: repIdx > 0 ? '1px dashed rgba(255,255,255,0.22)' : 'none'
+                            }}
+                          >
+                            {previewRows.map((rowHits, rI) => (
+                              <div
+                                key={rI}
+                                className="drum-mini-row"
+                                style={{ top: `${15 + rI * 13}%` }}
+                              >
+                                {rowHits.map(hit => {
+                                  const frac = hit.stepIdx / hit.totalSteps;
+                                  const visibleLimit = Math.min(1, renderDur - repIdx);
+                                  if (frac >= visibleLimit) return null;
+                                  return (
+                                    <span
+                                      key={hit.stepIdx}
+                                      className="drum-mini-dot"
+                                      style={{
+                                        left: `${(frac / visibleLimit) * 100}%`,
+                                        backgroundColor: color
+                                      }}
+                                    />
+                                  );
+                                })}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Tiradores laterales de redimensionado */}
+                    <div className="drum-clip-handle left" title="Ajustar inicio" />
+                    <div className="drum-clip-handle right" title="Extender/acortar compases" />
+                  </div>
+                );
+              })}
+
+              {/* Fantasmas de clonación en vivo (Shift+Drag) */}
+              {cloneGhostClips.map((g) => (
+                <div
+                  key={`ghost-${g.id}`}
+                  className="drum-clip-ghost"
+                  style={{
+                    left: `${g.startMeasure * MEASURE_WIDTH}px`,
+                    top: `${g.laneIndex * laneHeightPx + 5}px`,
+                    height: `${laneHeightPx - 10}px`,
+                    bottom: 'auto',
+                    width: `${Math.max(22, g.durationMeasures * MEASURE_WIDTH - 2)}px`
+                  }}
+                >
+                  P{g.patternIndex + 1}
+                </div>
+              ))}
+
+              {/* Guía de corte (Slice Tool) */}
+              {isSliceToolActive && slicePreviewMeasure !== null && (
+                <div
+                  className="drum-slice-guide"
+                  style={{ left: `${slicePreviewMeasure * MEASURE_WIDTH}px` }}
+                />
+              )}
+
+              {/* Caja de selección Lasso */}
+              {lasso.isActive && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: `${Math.min(lasso.startX, lasso.currentX)}px`,
+                    top: `${Math.min(lasso.startY, lasso.currentY)}px`,
+                    width: `${Math.abs(lasso.currentX - lasso.startX)}px`,
+                    height: `${Math.abs(lasso.currentY - lasso.startY)}px`,
+                    border: '1px dashed #ffd875',
+                    backgroundColor: 'rgba(255, 216, 117, 0.12)',
+                    pointerEvents: 'none',
+                    zIndex: 30
+                  }}
+                />
+              )}
+            </div>
+
+            {/* Cabezal de reproducción en vivo (60fps) */}
+            <div ref={playheadRef} className="drum-linear-playhead" />
           </div>
-
-          {/* Cabezal de reproducción en vivo (60fps) */}
-          <div ref={playheadRef} className="drum-linear-playhead" />
         </div>
       </div>
 
@@ -1399,13 +1595,21 @@ export const PatternChainArranger: React.FC = () => {
       {trackContextMenu && (
         <ContextMenuContainer x={trackContextMenu.x} y={trackContextMenu.y}>
           <div className="menu-header">
-            <span>TIMELINE BATERÍA · c.{trackContextMenu.measure + 1}</span>
+            <span>
+              TIMELINE BATERÍA · c.{trackContextMenu.measure + 1}
+              {isMultiLane ? ` · C${trackContextMenu.laneIndex + 1}` : ''}
+            </span>
           </div>
           <button
             type="button"
             className="menu-item"
             onClick={() => {
-              addChainItem(currentDrumPatternEdit, 1, trackContextMenu.measure);
+              addChainItem(
+                currentDrumPatternEdit,
+                1,
+                trackContextMenu.measure,
+                trackContextMenu.laneIndex
+              );
               if (isPatternRepeatOn) setPatternRepeatOn(false);
               setTrackContextMenu(null);
             }}
@@ -1417,11 +1621,11 @@ export const PatternChainArranger: React.FC = () => {
             className="menu-item"
             disabled={!chainClipboard || chainClipboard.length === 0}
             onClick={() => {
-              pasteChainItems();
+              pasteChainItems(undefined, trackContextMenu.measure);
               setTrackContextMenu(null);
             }}
           >
-            <Clipboard size={13} /> Pegar en cabezal (Ctrl+V)
+            <Clipboard size={13} /> Pegar aquí (Ctrl+V)
           </button>
           <button
             type="button"
@@ -1447,6 +1651,26 @@ export const PatternChainArranger: React.FC = () => {
           setIsClearConfirmOpen(false);
         }}
         onCancel={() => setIsClearConfirmOpen(false)}
+      />
+
+      <ConfirmModal
+        isOpen={Boolean(lanePendingDelete)}
+        title="Eliminar Capa de Batería"
+        message={
+          lanePendingDelete
+            ? `¿Seguro que deseas eliminar la Capa C${lanePendingDelete.laneIndex + 1} y sus ${lanePendingDelete.clipCount} clips? (Puedes deshacer con Ctrl+Z)`
+            : ''
+        }
+        confirmText="Eliminar Capa"
+        cancelText="Cancelar"
+        isDanger={true}
+        onConfirm={() => {
+          if (lanePendingDelete) {
+            removeDrumLane(lanePendingDelete.laneIndex);
+          }
+          setLanePendingDelete(null);
+        }}
+        onCancel={() => setLanePendingDelete(null)}
       />
     </div>
   );

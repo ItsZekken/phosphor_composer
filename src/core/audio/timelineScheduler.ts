@@ -41,6 +41,7 @@ interface TimelineScheduleInput {
   audioClips?: Array<{ isMuted?: boolean; startBeat: number; durationSeconds?: number }>;
   drumChannels: DrumChannel[];
   patternChain: PatternChainItem[];
+  drumLaneMuted?: boolean[];
   isPatternRepeatOn: boolean;
   patternLengths?: number[];
   currentDrumPatternEdit?: number;
@@ -228,13 +229,16 @@ function scheduleTimelineCore(
 
     if (!isPatternRepeatOn && patternChain.length > 0) {
       const linearClips = normalizePatternChainToLinear(patternChain);
+      const laneMuted = input.drumLaneMuted || [];
+      // Evitar doble disparo / clipping cuando 2 capas simultáneas golpean exactamente el mismo canal y tick
+      const dedupIndexMap = new Map<string, number>();
 
       for (let c = 0; c < linearClips.length; c++) {
         const clip = linearClips[c];
         const clipStartBeat = clip.startMeasure * beatsPerMeasure;
         const clipEndBeat = (clip.startMeasure + clip.durationMeasures) * beatsPerMeasure;
         if (clipEndBeat > maxBeat) maxBeat = clipEndBeat;
-        if (clip.isMuted) continue;
+        if (clip.isMuted || laneMuted[clip.laneIndex]) continue;
 
         const patternIdx = clip.patternIndex;
         const startWholeMeasure = Math.floor(clip.startMeasure);
@@ -251,6 +255,7 @@ function scheduleTimelineCore(
             }
             const stepBeat = applySwingBeat(rawStepBeat, swing);
             const timeSeconds = tempoMap.beatToSeconds(stepBeat);
+            const timeKey = Math.round(timeSeconds * 10000);
 
             for (let chIdx = 0; chIdx < drumChannels.length; chIdx++) {
               const ch = drumChannels[chIdx];
@@ -261,14 +266,23 @@ function scheduleTimelineCore(
 
               const dStep = pat[stepIdx];
               if (dStep && dStep.isActive) {
-                drumEvents.push({
-                  channelId: ch.id,
-                  sampleUrl: ch.sampleUrl,
-                  timeSeconds,
-                  velocity: dStep.velocity,
-                  pan: ch.pan ?? 0,
-                  volume: ch.volume
-                });
+                const dedupKey = `${ch.id}@${timeKey}`;
+                const existingIdx = dedupIndexMap.get(dedupKey);
+                if (existingIdx !== undefined) {
+                  if (dStep.velocity > drumEvents[existingIdx].velocity) {
+                    drumEvents[existingIdx].velocity = dStep.velocity;
+                  }
+                } else {
+                  dedupIndexMap.set(dedupKey, drumEvents.length);
+                  drumEvents.push({
+                    channelId: ch.id,
+                    sampleUrl: ch.sampleUrl,
+                    timeSeconds,
+                    velocity: dStep.velocity,
+                    pan: ch.pan ?? 0,
+                    volume: ch.volume
+                  });
+                }
               }
             }
           }
@@ -344,6 +358,7 @@ export function scheduleSessionTimeline(
       audioClips: session.audio?.clips,
       drumChannels: session.drums.drumChannels || [],
       patternChain: session.drums.patternChain || [],
+      drumLaneMuted: session.drums.drumLaneMuted,
       isPatternRepeatOn: Boolean(session.drums.isPatternRepeatOn),
       patternLengths: session.drums.patternLengths,
       currentDrumPatternEdit: session.drums.currentDrumPatternEdit || 0
@@ -382,6 +397,7 @@ export function scheduleStoreTimeline(state: any): ScheduledSessionEvents {
       audioClips: state.audioClips,
       drumChannels: state.drumChannels || [],
       patternChain: state.patternChain || [],
+      drumLaneMuted: state.drumLaneMuted,
       isPatternRepeatOn: Boolean(state.isPatternRepeatOn),
       patternLengths: state.patternLengths,
       currentDrumPatternEdit: state.currentDrumPatternEdit || 0

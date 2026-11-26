@@ -175,6 +175,8 @@ export interface DrumState {
   clipboardPattern: DrumStep[][] | null;
   clipboardPatternLength?: number | null;
   patternChain: PatternChainItem[];
+  drumLaneCount: number;
+  drumLaneMuted: boolean[];
   selectedChainIds: string[];
   chainClipboard: PatternChainItem[];
   drumTimelineViewport: { scrollLeft: number; zoomLevel: number };
@@ -218,13 +220,16 @@ export interface DrumActions {
   ungroupSelectedChainItems: () => void;
   setDrumTimelineViewport: (viewport: Partial<{ scrollLeft: number; zoomLevel: number }>) => void;
   resetDrumTimelineScroll: () => void;
-  addChainItem: (patternIndex: number, repeatCount?: number, startMeasure?: number) => void;
-  addChainItemsBatch: (clips: Array<{ patternIndex: number; startMeasure: number; durationMeasures: number }>) => string[];
+  addDrumLane: () => number;
+  removeDrumLane: (laneIndex: number) => void;
+  toggleMuteDrumLane: (laneIndex: number) => void;
+  addChainItem: (patternIndex: number, repeatCount?: number, startMeasure?: number, laneIndex?: number) => void;
+  addChainItemsBatch: (clips: Array<{ patternIndex: number; startMeasure: number; durationMeasures: number; laneIndex?: number }>) => string[];
   updateChainItem: (id: string, updates: Partial<PatternChainItem>) => void;
   updateChainItemsBatch: (updates: Array<{ id: string; changes: Partial<PatternChainItem> }>) => void;
   splitChainItem: (id: string, splitMeasure: number) => void;
   makeChainItemUnique: (id: string) => number | null;
-  fillChainToSong: (patternIndex: number, targetMeasures: number) => void;
+  fillChainToSong: (patternIndex: number, targetMeasures: number, laneIndex?: number) => void;
   clearPatternChain: () => void;
   removeChainItem: (id: string) => void;
   moveChainItem: (fromIndex: number, toIndex: number) => void;

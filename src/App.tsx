@@ -95,6 +95,8 @@ export default function App() {
       patternLengths: state.patternLengths,
       drumPatternNames: state.drumPatternNames,
       patternChain: state.patternChain,
+      drumLaneCount: state.drumLaneCount,
+      drumLaneMuted: state.drumLaneMuted,
       isPatternRepeatOn: state.isPatternRepeatOn,
       activeDrumKitId: state.activeDrumKitId,
       channels: state.channels,

@@ -19,7 +19,10 @@ import { buildCustomSampleUrl, isCustomSampleUrl } from '../../constants/drumSam
 import type { NoteClass, ScaleType } from '../music';
 import { normalizePitchClass, noteToMidi } from '../music';
 import { normalizeSynthSettings } from '../audio/engine/synthPresets';
-import { normalizePatternChainItems } from '../../utils/typeDefinitions';
+import {
+  getEffectiveDrumLaneCount,
+  normalizePatternChainItems
+} from '../../utils/typeDefinitions';
 import { materializeLegacyMidiArrangement } from '../audio/arrangementResolver';
 
 export const createEmptyPatterns = (numPatterns = 8, length = 16) => 
@@ -308,6 +311,15 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
     activeTrackId,
     drums: {
       patternChain,
+      drumLaneCount: getEffectiveDrumLaneCount(
+        patternChain,
+        (raw as any).drumLaneCount ?? (raw as any).drums?.drumLaneCount
+      ),
+      drumLaneMuted: Array.isArray((raw as any).drumLaneMuted)
+        ? (raw as any).drumLaneMuted.map(Boolean)
+        : Array.isArray((raw as any).drums?.drumLaneMuted)
+        ? (raw as any).drums.drumLaneMuted.map(Boolean)
+        : [],
       isPatternRepeatOn,
       activeDrumKitId,
       drumChannels,
@@ -408,6 +420,13 @@ export function deserializeSession(rawInput: unknown): { session: SessionV2; war
     if (parsedObj.drums) {
       parsedObj.drums.patternChain = materializedV2.patternChain;
       parsedObj.drums.isPatternRepeatOn = materializedV2.isPatternRepeatOn;
+      parsedObj.drums.drumLaneCount = getEffectiveDrumLaneCount(
+        materializedV2.patternChain,
+        parsedObj.drums.drumLaneCount
+      );
+      parsedObj.drums.drumLaneMuted = Array.isArray(parsedObj.drums.drumLaneMuted)
+        ? parsedObj.drums.drumLaneMuted.map(Boolean)
+        : [];
       delete parsedObj.drums.drumArrangementMode;
     }
     delete parsedObj.midi;
@@ -462,6 +481,8 @@ export function serializeSession(state: any, metadataUpdates?: Partial<SessionMe
     activeTrackId: state.activeTrackId || synchronizedTracks[0]?.id || 'track_melody_1',
     drums: {
       patternChain: state.patternChain || [],
+      drumLaneCount: getEffectiveDrumLaneCount(state.patternChain, state.drumLaneCount),
+      drumLaneMuted: Array.isArray(state.drumLaneMuted) ? state.drumLaneMuted.map(Boolean) : [],
       isPatternRepeatOn: Boolean(state.isPatternRepeatOn),
       activeDrumKitId: state.activeDrumKitId || 'kit_1',
       drumChannels: state.drumChannels || DEFAULT_DRUM_CHANNELS,

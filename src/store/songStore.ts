@@ -25,6 +25,7 @@ import { createAudioTrackSlice, initialAudioTrackState, DEFAULT_AUDIO_TRACKS } f
 import { createPlaylistSlice, initialPlaylistState } from './slices/playlistSlice';
 import { NOTE_CLASSES, transposeNote, transposeChordName } from '../core/music';
 import { deserializeSession } from '../core/session';
+import { getEffectiveDrumLaneCount } from '../utils/typeDefinitions';
 
 export * from './types';
 export { DEFAULT_CHANNELS, DEFAULT_DRUM_CHANNELS, DEFAULT_AUDIO_TRACKS };
@@ -172,6 +173,13 @@ export const useSongStore = create<SongStore>()(
           activeTrackId: activeTrack ? activeTrack.id : session.activeTrackId,
           melodyNotes: activeMelodyNotes,
           patternChain: session.drums.patternChain,
+          drumLaneCount: getEffectiveDrumLaneCount(
+            session.drums.patternChain,
+            session.drums.drumLaneCount
+          ),
+          drumLaneMuted: Array.isArray(session.drums.drumLaneMuted)
+            ? session.drums.drumLaneMuted.map(Boolean)
+            : [],
           isPatternRepeatOn: session.drums.isPatternRepeatOn,
           activeDrumKitId: session.drums.activeDrumKitId,
           drumChannels: normalizedDrumChannels,
@@ -225,6 +233,8 @@ export const useSongStore = create<SongStore>()(
         patternLengths: state.patternLengths,
         drumPatternNames: state.drumPatternNames,
         patternChain: state.patternChain,
+        drumLaneCount: state.drumLaneCount,
+        drumLaneMuted: state.drumLaneMuted,
         audioTracks: state.audioTracks,
         audioClips: state.audioClips
       }),
