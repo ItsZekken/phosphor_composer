@@ -12,6 +12,7 @@ import { audioBufferToWav } from '../../utils/wavEncoder';
 import { audioBufferRegistry } from '../audio/audioBufferRegistry';
 import { waveformService } from '../audio/waveformService';
 import { getNativeAudioContext } from '../audio/worklet/PhosphorWorkletNode';
+import { getCustomSampleBufferId } from '../../constants/drumSamples';
 
 /**
  * Comprueba si un búfer binario corresponde a un archivo ZIP / .phos válido
@@ -57,9 +58,21 @@ export async function exportProjectToPhosBundle(
   };
 
   const audioClips = state.audioClips || [];
-  const uniqueBufferIds = Array.from(
-    new Set<string>(audioClips.map((c: any) => c.bufferId).filter(Boolean))
-  );
+  const drumChannels = state.drumChannels || [];
+  const customDrumSamples = state.customDrumSamples || [];
+  const bufferIdSet = new Set<string>();
+  for (const c of audioClips) {
+    if (c?.bufferId) bufferIdSet.add(c.bufferId);
+  }
+  for (const ch of drumChannels) {
+    const customId = getCustomSampleBufferId(ch?.sampleUrl);
+    if (customId) bufferIdSet.add(customId);
+  }
+  for (const s of customDrumSamples) {
+    const customId = s?.id || getCustomSampleBufferId(s?.sampleUrl);
+    if (customId) bufferIdSet.add(customId);
+  }
+  const uniqueBufferIds = Array.from(bufferIdSet);
 
   let audioCount = 0;
   if (uniqueBufferIds.length > 0) {
@@ -215,7 +228,9 @@ export async function importProjectFromPhosBundle(
           const audioBuffer = await audioCtx.decodeAudioData(arrayBufferCopy);
           audioBufferRegistry.registerBuffer(audioBuffer, bufferId);
           audioBufferRegistry.saveBufferToIndexedDB(bufferId, audioBuffer).catch(() => {});
-          waveformService.getOrGeneratePeaks(bufferId, audioBuffer).catch(() => {});
+          if (!bufferId.startsWith('ds_')) {
+            waveformService.getOrGeneratePeaks(bufferId, audioBuffer).catch(() => {});
+          }
           audioBuffersLoaded++;
         } catch (decodeErr) {
           warnings.push(`No se pudo decodificar el archivo de audio "${baseName}": ${decodeErr}`);

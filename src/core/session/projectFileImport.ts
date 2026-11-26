@@ -4,7 +4,11 @@
  * tanto desde el selector del Header como desde el Drag & Drop global.
  */
 
+import * as Tone from 'tone';
 import { useSongStore } from '../../store/songStore';
+import { toneEngine } from '../../audio/toneEngine';
+import { buildCustomSampleUrl } from '../../constants/drumSamples';
+import type { CustomDrumSample } from '../../utils/typeDefinitions';
 import { importProjectFromPhosBundle, isPhosBundle } from './phosphorBundle';
 import { importMidiToSession } from '../../utils/midiService';
 import { audioBufferRegistry } from '../audio/audioBufferRegistry';
@@ -15,6 +19,44 @@ import { notify } from '../ui/toastBus';
 
 const AUDIO_EXTENSIONS = /\.(wav|mp3|ogg|flac|m4a|aac|webm)$/i;
 const PROJECT_EXTENSIONS = /\.(phos|zip|json|mid|midi)$/i;
+const PROJECT_MIME_TYPES = new Set([
+  'application/json',
+  'text/json',
+  'application/zip',
+  'application/x-zip-compressed',
+  'audio/midi',
+  'audio/mid',
+  'audio/x-midi'
+]);
+
+export function hasExternalFilesPayload(e: { dataTransfer: DataTransfer | null }): boolean {
+  const dt = e.dataTransfer;
+  if (!dt) return false;
+  if (dt.types && Array.from(dt.types).includes('Files')) {
+    return true;
+  }
+  return Boolean(dt.files && dt.files.length > 0);
+}
+
+/**
+ * Devuelve true solo cuando todos los archivos arrastrados declaran explícitamente un MIME de proyecto/MIDI.
+ * Útil en el Drum Sequencer para mostrar el overlay global solo en proyectos y dejar libre el rack para samples.
+ */
+export function isExplicitProjectOnlyDrag(e: { dataTransfer: DataTransfer | null }): boolean {
+  const items = e.dataTransfer?.items;
+  if (!items || items.length === 0) return false;
+  let fileItemCount = 0;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.kind !== 'file') continue;
+    fileItemCount++;
+    const mime = (item.type || '').toLowerCase();
+    if (!mime || !PROJECT_MIME_TYPES.has(mime)) {
+      return false;
+    }
+  }
+  return fileItemCount > 0;
+}
 
 export function stripFileExtension(filename: string): string {
   return filename.replace(/\.[^/.]+$/, '').trim() || 'Phosphor Project';
@@ -100,6 +142,168 @@ export async function importAudioFilesToTracks(
   }
 
   return importedCount;
+}
+
+function resolveUniqueSampleName(baseName: string, existingNames: Set<string>): string {
+  const cleaned = baseName.trim() || 'Sample personalizado';
+  if (!existingNames.has(cleaned.toLowerCase())) {
+    existingNames.add(cleaned.toLowerCase());
+    return cleaned;
+  }
+  let suffix = 2;
+  while (existingNames.has(`${cleaned} (${suffix})`.toLowerCase())) {
+    suffix++;
+  }
+  const uniqueName = `${cleaned} (${suffix})`;
+  existingNames.add(uniqueName.toLowerCase());
+  return uniqueName;
+}
+
+export async function importCustomDrumSamples(
+  files: File[],
+  targetChannelId?: string,
+  options?: { silent?: boolean }
+): Promise<CustomDrumSample[]> {
+  if (!files || files.length === 0) return [];
+
+  const audioFiles = files.filter(isSupportedAudioFile);
+  if (audioFiles.length === 0) {
+    if (!options?.silent) {
+      notify.warning(
+        'Formato de audio no soportado',
+        'Usa archivos .wav, .mp3, .ogg, .flac, .m4a o .aac'
+      );
+    }
+    return [];
+  }
+
+  toneEngine.unlockIfSuspended();
+  const audioCtx =
+    getNativeAudioContext() ||
+    (Tone.getContext().rawContext as AudioContext);
+  if (!audioCtx) {
+    notify.error('Motor de audio no disponible para decodificar el sample');
+    return [];
+  }
+
+  const existingNames = new Set(
+    (useSongStore.getState().customDrumSamples || []).map((s) => s.name.trim().toLowerCase())
+  );
+  const imported: CustomDrumSample[] = [];
+
+  for (const file of audioFiles) {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+        notify.error(`El archivo "${file.name}" está vacío`);
+        continue;
+      }
+
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+      if (!audioBuffer || audioBuffer.length === 0) {
+        notify.error(`No se pudo decodificar "${file.name}"`, 'El archivo no contiene audio válido');
+        continue;
+      }
+
+      const bufferId = generateId('ds');
+      const sampleUrl = buildCustomSampleUrl(bufferId);
+      const sampleName = resolveUniqueSampleName(
+        file.name.replace(/\.[^/.]+$/, '').trim() || 'Sample personalizado',
+        existingNames
+      );
+
+      audioBufferRegistry.registerBuffer(audioBuffer, bufferId);
+      audioBufferRegistry.saveBufferToIndexedDB(bufferId, audioBuffer).catch(() => {});
+      if (typeof toneEngine.registerCustomDrumSample === 'function') {
+        toneEngine.registerCustomDrumSample(sampleUrl, audioBuffer);
+      }
+
+      const newSample: CustomDrumSample = {
+        id: bufferId,
+        name: sampleName,
+        sampleUrl,
+        createdAt: Date.now()
+      };
+
+      useSongStore.getState().addCustomDrumSample(newSample);
+      imported.push(newSample);
+    } catch (err) {
+      notify.error(`No se pudo importar "${file.name}"`, (err as Error).message);
+    }
+  }
+
+  if (imported.length > 0) {
+    if (targetChannelId) {
+      const state = useSongStore.getState();
+      const targetChannel = state.drumChannels.find((c) => c.id === targetChannelId);
+      const shouldAutoRename = Boolean(targetChannel && /^Custom \d+$/i.test(targetChannel.name.trim()));
+      state.updateDrumChannel(targetChannelId, {
+        sampleUrl: imported[0].sampleUrl,
+        ...(shouldAutoRename ? { name: imported[0].name } : {})
+      });
+      toneEngine.playDrumPreview(targetChannelId);
+
+      if (!options?.silent) {
+        const channelLabel = shouldAutoRename ? imported[0].name : (targetChannel?.name || 'canal');
+        notify.success(
+          imported.length === 1
+            ? `Sample asignado a ${channelLabel}: ${imported[0].name}`
+            : `${imported.length} samples importados`,
+          imported.length > 1 ? `Asignado a ${channelLabel}: ${imported[0].name}` : undefined
+        );
+      }
+    } else if (!options?.silent) {
+      notify.success(
+        imported.length === 1
+          ? `Sample importado: ${imported[0].name}`
+          : `${imported.length} samples importados`
+      );
+    }
+  }
+
+  return imported;
+}
+
+export async function importCustomDrumSamplesAsNewChannels(files: File[]): Promise<CustomDrumSample[]> {
+  const imported = await importCustomDrumSamples(files, undefined, { silent: true });
+  if (imported.length === 0) return [];
+
+  const state = useSongStore.getState();
+  const totalPatterns = state.drumChannels[0]?.patterns?.length || 8;
+  const lengths = state.patternLengths || [];
+  let firstChannelId: string | null = null;
+
+  for (const sample of imported) {
+    const channelId = generateId('custom_drum');
+    if (!firstChannelId) firstChannelId = channelId;
+    const patterns = Array.from({ length: totalPatterns }, (_, patIdx) => {
+      const len = lengths[patIdx] || 16;
+      return Array.from({ length: len }, () => ({ isActive: false, velocity: 0.8 }));
+    });
+
+    useSongStore.getState().addDrumChannel({
+      id: channelId,
+      name: sample.name,
+      sampleUrl: sample.sampleUrl,
+      patterns,
+      volume: 80,
+      pan: 0,
+      muted: false,
+      solo: false
+    });
+  }
+
+  if (firstChannelId) {
+    toneEngine.playDrumPreview(firstChannelId);
+  }
+
+  notify.success(
+    imported.length === 1
+      ? `Nuevo canal añadido: ${imported[0].name}`
+      : `${imported.length} canales de batería añadidos`
+  );
+
+  return imported;
 }
 
 export async function importProjectFile(file: File): Promise<boolean> {

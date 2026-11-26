@@ -3,42 +3,47 @@ import { Upload, Package, AudioWaveform } from 'lucide-react';
 import {
   importProjectFile,
   importAudioFilesToTracks,
+  importCustomDrumSamplesAsNewChannels,
   isSupportedAudioFile,
-  isSupportedProjectFile
+  isSupportedProjectFile,
+  hasExternalFilesPayload,
+  isExplicitProjectOnlyDrag
 } from '../../core/session/projectFileImport';
+import { useSongStore } from '../../store/songStore';
 import { notify } from '../../core/ui/toastBus';
-
-function hasFilesPayload(e: DragEvent): boolean {
-  const dt = e.dataTransfer;
-  if (!dt) return false;
-  if (dt.types && Array.from(dt.types).includes('Files')) {
-    return true;
-  }
-  return Boolean(dt.files && dt.files.length > 0);
-}
 
 export const GlobalDropZone: React.FC = () => {
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const dragDepthRef = useRef(0);
 
   useEffect(() => {
+    const shouldSuppressOverlayForSequencer = (e: DragEvent) =>
+      useSongStore.getState().activeView === 'sequencer' && !isExplicitProjectOnlyDrag(e);
+
     const handleDragEnter = (e: DragEvent) => {
-      if (!hasFilesPayload(e)) return;
+      if (!hasExternalFilesPayload(e)) return;
       e.preventDefault();
       dragDepthRef.current += 1;
+      if (shouldSuppressOverlayForSequencer(e)) {
+        setIsDraggingFile(false);
+        return;
+      }
       setIsDraggingFile(true);
     };
 
     const handleDragOver = (e: DragEvent) => {
-      if (!hasFilesPayload(e)) return;
+      if (!hasExternalFilesPayload(e)) return;
       e.preventDefault();
       if (e.dataTransfer) {
         e.dataTransfer.dropEffect = 'copy';
       }
+      if (shouldSuppressOverlayForSequencer(e)) {
+        setIsDraggingFile(false);
+      }
     };
 
     const handleDragLeave = (e: DragEvent) => {
-      if (!hasFilesPayload(e)) return;
+      if (!hasExternalFilesPayload(e)) return;
       dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
       if (dragDepthRef.current === 0) {
         setIsDraggingFile(false);
@@ -46,10 +51,15 @@ export const GlobalDropZone: React.FC = () => {
     };
 
     const handleDrop = async (e: DragEvent) => {
-      if (!hasFilesPayload(e)) return;
-      e.preventDefault();
+      if (!hasExternalFilesPayload(e)) return;
       dragDepthRef.current = 0;
       setIsDraggingFile(false);
+
+      if ((e as unknown as { __phosphorDropHandled?: boolean }).__phosphorDropHandled) {
+        return;
+      }
+
+      e.preventDefault();
 
       const files = Array.from(e.dataTransfer?.files || []);
       if (files.length === 0) return;
@@ -62,7 +72,11 @@ export const GlobalDropZone: React.FC = () => {
 
       const audioFiles = files.filter(isSupportedAudioFile);
       if (audioFiles.length > 0) {
-        await importAudioFilesToTracks(audioFiles, { switchToTracksView: true });
+        if (useSongStore.getState().activeView === 'sequencer') {
+          await importCustomDrumSamplesAsNewChannels(audioFiles);
+        } else {
+          await importAudioFilesToTracks(audioFiles, { switchToTracksView: true });
+        }
         return;
       }
 
@@ -72,7 +86,7 @@ export const GlobalDropZone: React.FC = () => {
       );
     };
 
-    const handleWindowBlur = () => {
+    const handleDragReset = () => {
       dragDepthRef.current = 0;
       setIsDraggingFile(false);
     };
@@ -80,15 +94,19 @@ export const GlobalDropZone: React.FC = () => {
     window.addEventListener('dragenter', handleDragEnter);
     window.addEventListener('dragover', handleDragOver);
     window.addEventListener('dragleave', handleDragLeave);
+    window.addEventListener('drop', handleDragReset, true);
     window.addEventListener('drop', handleDrop);
-    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('dragend', handleDragReset);
+    window.addEventListener('blur', handleDragReset);
 
     return () => {
       window.removeEventListener('dragenter', handleDragEnter);
       window.removeEventListener('dragover', handleDragOver);
       window.removeEventListener('dragleave', handleDragLeave);
+      window.removeEventListener('drop', handleDragReset, true);
       window.removeEventListener('drop', handleDrop);
-      window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('dragend', handleDragReset);
+      window.removeEventListener('blur', handleDragReset);
     };
   }, []);
 

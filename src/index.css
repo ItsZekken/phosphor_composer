@@ -1175,6 +1175,73 @@ select:focus {
   box-shadow: inset 0 2px 4px rgba(0,0,0,0.8), 0 0 0 2px rgba(255, 216, 117, 0.3);
 }
 
+.custom-select-popover .style-list-group {
+  margin-bottom: 0;
+  padding-right: 0;
+}
+
+.custom-select-header-action {
+  background: rgba(132, 112, 204, 0.14);
+  border: 1px solid rgba(132, 112, 204, 0.3);
+  margin-bottom: 0;
+}
+
+.custom-select-header-action:hover,
+.custom-select-header-action:focus-visible {
+  background: rgba(132, 112, 204, 0.26);
+  border-color: rgba(255, 216, 117, 0.45);
+  outline: none;
+}
+
+.custom-select-header-action-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.74rem;
+  color: #f6f2fc;
+}
+
+.custom-select-header-action-content svg {
+  color: #ffd875;
+  flex-shrink: 0;
+}
+
+.custom-select-header-action:hover .custom-select-header-action-content {
+  color: #ffd875;
+}
+
+.custom-select-header-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 1px 2px;
+}
+
+.custom-select-option-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-secondary);
+  opacity: 0.45;
+  cursor: pointer;
+  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.style-item-row:hover .custom-select-option-delete {
+  opacity: 0.85;
+}
+
+.custom-select-option-delete:hover {
+  opacity: 1;
+  color: #ff6b7a;
+  background: rgba(255, 107, 122, 0.15);
+}
+
 /* Custom Context Menu */
 .custom-context-menu {
   background-color: var(--bg-secondary);
@@ -7295,6 +7362,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 .drum-channel-row {
   display: flex;
+  position: relative;
   height: 60px;
   width: 100%;
   background: linear-gradient(180deg, #252030 0%, #1e1a26 100%);
@@ -7309,6 +7377,74 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .drum-channel-container.drag-over-channel {
   border: 2px dashed var(--reposo, #00ffcc) !important;
   box-shadow: 0 0 12px rgba(0, 255, 204, 0.4);
+}
+
+.drum-channel-container.file-drop-target {
+  border-color: #5ef2a8 !important;
+  box-shadow:
+    0 0 0 1px rgba(94, 242, 168, 0.72),
+    0 0 18px rgba(94, 242, 168, 0.36),
+    inset 0 0 14px rgba(94, 242, 168, 0.08);
+}
+
+.drum-channel-container.file-drop-target .drum-channel-row {
+  background: linear-gradient(180deg, rgba(94, 242, 168, 0.14) 0%, rgba(30, 26, 38, 0.96) 100%);
+}
+
+.drum-channel-container.file-drop-target .drum-controls {
+  background: linear-gradient(90deg, rgba(94, 242, 168, 0.16) 0%, rgba(37, 32, 48, 0.96) 100%);
+}
+
+.drum-channel-container.file-drop-target .drum-sample-selector .custom-select-btn {
+  border-color: #5ef2a8 !important;
+  color: #5ef2a8;
+  box-shadow: 0 0 10px rgba(94, 242, 168, 0.4), inset 0 2px 4px rgba(0, 0, 0, 0.8);
+}
+
+.drum-file-drop-badge {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(16, 28, 24, 0.92);
+  border: 1px solid rgba(94, 242, 168, 0.65);
+  color: #5ef2a8;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6), 0 0 12px rgba(94, 242, 168, 0.25);
+}
+
+.drum-new-channel-dropzone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  margin: 4px auto 0 auto;
+  padding: 0 18px;
+  border-radius: 6px;
+  border: 1.5px dashed rgba(132, 112, 204, 0.55);
+  background: rgba(132, 112, 204, 0.08);
+  color: var(--text-secondary);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.drum-new-channel-dropzone.active {
+  border-color: #5ef2a8;
+  background: rgba(94, 242, 168, 0.12);
+  color: #5ef2a8;
+  box-shadow: 0 0 16px rgba(94, 242, 168, 0.25);
 }
 
 .drum-controls {

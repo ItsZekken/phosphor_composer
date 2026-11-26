@@ -259,6 +259,7 @@ export const AudioTrackLane: React.FC<AudioTrackLaneProps> = ({
   const setSelectedTrackId = useSongStore((state) => state.setSelectedTrackId);
   const addAudioClip = useSongStore((state) => state.addAudioClip);
   const snapGrid = useSongStore((state) => state.audioSnapGrid);
+  const playlistTool = useSongStore((state) => state.playlistTool);
   const timeSignature = useSongStore((state) => state.timeSignature);
   const beatsPerMeasure = getBeatsPerMeasure(timeSignature);
 
@@ -277,6 +278,7 @@ export const AudioTrackLane: React.FC<AudioTrackLaneProps> = ({
   const handleLaneClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
       setSelectedTrackId(track.id);
+      if (playlistTool === 'select' || e.ctrlKey || e.metaKey) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const clickX = e.clientX - rect.left;
       const targetBeat = snapRawBeat(clickX / zoomLevel, e.altKey);

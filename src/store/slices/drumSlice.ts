@@ -1,8 +1,56 @@
 import type { SliceCreator, DrumState, DrumActions } from '../types';
-import type { DrumChannel, PatternChainItem } from '../../utils/typeDefinitions';
+import type { CustomDrumSample, DrumChannel, PatternChainItem } from '../../utils/typeDefinitions';
 import { normalizePatternChainItems } from '../../utils/typeDefinitions';
 import { PRESET_DRUM_KITS, findMatchingKitId, inferCategoryFromChannel } from '../../constants/drumKits';
+import { buildCustomSampleUrl, isCustomSampleUrl } from '../../constants/drumSamples';
 import { generateId } from '../../utils/idGenerator';
+
+const CUSTOM_DRUM_SAMPLES_STORAGE_KEY = 'phosphor_custom_drum_samples';
+
+export function normalizeCustomDrumSamples(raw: unknown): CustomDrumSample[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const result: CustomDrumSample[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as Partial<CustomDrumSample>;
+    const id = typeof obj.id === 'string' ? obj.id.trim() : '';
+    const name = typeof obj.name === 'string' ? obj.name.trim() : '';
+    if (!id || !name || seen.has(id)) continue;
+    const sampleUrl =
+      typeof obj.sampleUrl === 'string' && isCustomSampleUrl(obj.sampleUrl)
+        ? obj.sampleUrl
+        : buildCustomSampleUrl(id);
+    seen.add(id);
+    result.push({
+      id,
+      name,
+      sampleUrl,
+      ...(typeof obj.createdAt === 'number' ? { createdAt: obj.createdAt } : {})
+    });
+  }
+  return result;
+}
+
+export function loadPersistedCustomDrumSamples(): CustomDrumSample[] {
+  try {
+    if (typeof localStorage === 'undefined') return [];
+    const raw = localStorage.getItem(CUSTOM_DRUM_SAMPLES_STORAGE_KEY);
+    if (!raw) return [];
+    return normalizeCustomDrumSamples(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+}
+
+export function savePersistedCustomDrumSamples(samples: CustomDrumSample[]): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(CUSTOM_DRUM_SAMPLES_STORAGE_KEY, JSON.stringify(samples));
+  } catch {
+    // ignore storage quota errors
+  }
+}
 
 const createEmptyPatterns = (numPatterns = 8, length = 16) =>
   Array.from({ length: numPatterns }).map(() =>
@@ -20,6 +68,7 @@ export const DEFAULT_DRUM_CHANNELS: DrumChannel[] = [
 
 export const initialDrumState: DrumState = {
   drumChannels: DEFAULT_DRUM_CHANNELS,
+  customDrumSamples: loadPersistedCustomDrumSamples(),
   activeDrumKitId: 'kit_1',
   patternLengths: [16, 16, 16, 16, 16, 16, 16, 16],
   drumPatternNames: [],
@@ -125,6 +174,51 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set, get)
   removeDrumChannel: (id) => set((state) => ({
     drumChannels: state.drumChannels.filter(c => c.id !== id)
   })),
+
+  addCustomDrumSample: (sample) => set((state) => {
+    const existingIdx = state.customDrumSamples.findIndex(s => s.id === sample.id);
+    const nextSamples =
+      existingIdx >= 0
+        ? state.customDrumSamples.map((s, i) => (i === existingIdx ? sample : s))
+        : [...state.customDrumSamples, sample];
+    savePersistedCustomDrumSamples(nextSamples);
+    return { customDrumSamples: nextSamples };
+  }),
+
+  removeCustomDrumSample: (sampleId) => set((state) => {
+    const target = state.customDrumSamples.find(s => s.id === sampleId);
+    if (!target) return state;
+
+    const nextSamples = state.customDrumSamples.filter(s => s.id !== sampleId);
+    savePersistedCustomDrumSamples(nextSamples);
+
+    let channelsUpdated = false;
+    const nextChannels = state.drumChannels.map((ch) => {
+      if (ch.sampleUrl !== target.sampleUrl) return ch;
+      channelsUpdated = true;
+      const fallbackUrl =
+        PRESET_DRUM_KITS[0]?.samples[ch.id] ||
+        PRESET_DRUM_KITS[0]?.samples[inferCategoryFromChannel(ch)] ||
+        '/drums/kicks/kick1.wav';
+      return { ...ch, sampleUrl: fallbackUrl };
+    });
+
+    return {
+      customDrumSamples: nextSamples,
+      ...(channelsUpdated
+        ? {
+            drumChannels: nextChannels,
+            activeDrumKitId: findMatchingKitId(nextChannels)
+          }
+        : {})
+    };
+  }),
+
+  setCustomDrumSamples: (samples) => set(() => {
+    const normalized = normalizeCustomDrumSamples(samples);
+    savePersistedCustomDrumSamples(normalized);
+    return { customDrumSamples: normalized };
+  }),
 
   reorderDrumChannels: (fromIndex, toIndex) => set((state) => {
     if (

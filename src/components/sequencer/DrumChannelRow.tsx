@@ -1,14 +1,17 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useSongStore } from '../../store/songStore';
 import { toneEngine } from '../../audio/toneEngine';
 import { liveTelemetryBus } from '../../core/audio/liveTelemetryBus';
-import type { DrumChannel } from '../../utils/typeDefinitions';
+import type { CustomDrumSample, DrumChannel } from '../../utils/typeDefinitions';
 import { Knob } from '../ui/Knob';
 import { DRUM_CATEGORIES, getSamplesByCategory } from '../../constants/drumSamples';
 import { CustomSelect } from '../ui/CustomSelect';
 import type { SelectGroup } from '../ui/CustomSelect';
-import { Trash2, Sparkles, RefreshCw } from 'lucide-react';
+import { Trash2, Sparkles, RefreshCw, Upload } from 'lucide-react';
 import { ContextMenuContainer } from '../ui/ContextMenuContainer';
+import { importCustomDrumSamples, hasExternalFilesPayload } from '../../core/session/projectFileImport';
+import { audioBufferRegistry } from '../../core/audio/audioBufferRegistry';
+import { notify } from '../../core/ui/toastBus';
 
 interface Props {
   channel: DrumChannel;
@@ -21,6 +24,9 @@ interface Props {
   onDragEndRow?: (e: React.DragEvent) => void;
   isDragging?: boolean;
   isDragOver?: boolean;
+  isFileDragOver?: boolean;
+  onFileDragOverChannel?: (channelId: string) => void;
+  onFileDropChannel?: (channelId: string, files: File[]) => void;
 }
 
 // Subcomponente aislado para el LED del medidor de actividad
@@ -192,15 +198,22 @@ export const DrumChannelRow: React.FC<Props> = React.memo(({
   onDropRow,
   onDragEndRow,
   isDragging,
-  isDragOver
+  isDragOver,
+  isFileDragOver,
+  onFileDragOverChannel,
+  onFileDropChannel
 }) => {
   const toggleDrumStep = useSongStore(s => s.toggleDrumStep);
   const setDrumStepVelocity = useSongStore(s => s.setDrumStepVelocity);
   const updateDrumChannel = useSongStore(s => s.updateDrumChannel);
   const removeDrumChannel = useSongStore(s => s.removeDrumChannel);
+  const customDrumSamples = useSongStore(s => s.customDrumSamples);
+  const removeCustomDrumSample = useSongStore(s => s.removeCustomDrumSample);
   const currentDrumPatternEdit = useSongStore(s => s.currentDrumPatternEdit);
   const patternLengths = useSongStore(s => s.patternLengths);
   const currentPatternLength = (patternLengths && patternLengths[currentDrumPatternEdit]) || 16;
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const previewSeqRef = useRef(0);
   
   // Smart Draw State
   const [isDrawing, setIsDrawing] = useState(false);
@@ -263,10 +276,34 @@ export const DrumChannelRow: React.FC<Props> = React.memo(({
 
   const handleSampleChange = (newSampleUrl: string) => {
     updateDrumChannel(channel.id, { sampleUrl: newSampleUrl });
-    setTimeout(() => {
-      toneEngine.playDrumPreview(channel.id);
-    }, 50);
+    const reqSeq = ++previewSeqRef.current;
+    const preloadPromise =
+      typeof toneEngine.preloadDrumSample === 'function'
+        ? toneEngine.preloadDrumSample(newSampleUrl)
+        : Promise.resolve(null);
+    preloadPromise.finally(() => {
+      if (previewSeqRef.current === reqSeq) {
+        toneEngine.playDrumPreview(channel.id);
+      }
+    });
   };
+
+  const handleImportSampleFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length === 0) return;
+    await importCustomDrumSamples(files, channel.id);
+  };
+
+  const handleRemoveCustomSample = useCallback((sample: CustomDrumSample) => {
+    removeCustomDrumSample(sample.id);
+    if (typeof toneEngine.removeCachedDrumSample === 'function') {
+      toneEngine.removeCachedDrumSample(sample.sampleUrl);
+    }
+    audioBufferRegistry.deleteBuffer(sample.id);
+    audioBufferRegistry.deleteBufferFromIndexedDB(sample.id).catch(() => {});
+    notify.info(`Sample eliminado: ${sample.name}`, undefined, 2000);
+  }, [removeCustomDrumSample]);
 
   // Velocity Draw Logic
   const handleVelocityMouseDown = useCallback((e: React.MouseEvent | React.TouchEvent, stepIndex: number) => {
@@ -298,14 +335,32 @@ export const DrumChannelRow: React.FC<Props> = React.memo(({
   );
   const channelRowWidth = 362 + currentPatternLength * 30;
 
-  // Cargar lista de muestras por categorías
-  const selectGroups: SelectGroup[] = DRUM_CATEGORIES.map(cat => ({
-    label: cat.label,
-    options: getSamplesByCategory(cat.key).map(sample => ({
-      value: sample.path,
-      label: sample.name
-    }))
-  })).filter(g => g.options.length > 0);
+  // Cargar lista de muestras por categorías (incluyendo samples importados si existen)
+  const selectGroups: SelectGroup[] = useMemo(() => {
+    const builtInGroups: SelectGroup[] = DRUM_CATEGORIES.map(cat => ({
+      label: cat.label,
+      options: getSamplesByCategory(cat.key).map(sample => ({
+        value: sample.path,
+        label: sample.name
+      }))
+    })).filter(g => g.options.length > 0);
+
+    if (!customDrumSamples || customDrumSamples.length === 0) {
+      return builtInGroups;
+    }
+
+    const importedGroup: SelectGroup = {
+      label: 'Importados',
+      options: customDrumSamples.map(sample => ({
+        value: sample.sampleUrl,
+        label: sample.name,
+        onDelete: () => handleRemoveCustomSample(sample),
+        deleteTitle: `Eliminar "${sample.name}"`
+      }))
+    };
+
+    return [importedGroup, ...builtInGroups];
+  }, [customDrumSamples, handleRemoveCustomSample]);
 
   const [contextMenuPos, setContextMenuPos] = useState<{ x: number, y: number } | null>(null);
 
@@ -338,10 +393,32 @@ export const DrumChannelRow: React.FC<Props> = React.memo(({
 
   return (
     <div 
-      className={`drum-channel-container ${isExpanded ? 'expanded' : ''} ${isDragging ? 'dragging-channel' : ''} ${isDragOver ? 'drag-over-channel' : ''}`}
+      className={`drum-channel-container ${isExpanded ? 'expanded' : ''} ${isDragging ? 'dragging-channel' : ''} ${isDragOver ? 'drag-over-channel' : ''} ${isFileDragOver ? 'file-drop-target' : ''}`}
       style={{ width: `${channelRowWidth}px`, maxWidth: 'none' }}
+      onDragOver={(e) => {
+        if (!hasExternalFilesPayload(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
+        onFileDragOverChannel?.(channel.id);
+      }}
+      onDrop={(e) => {
+        if (!hasExternalFilesPayload(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        (e.nativeEvent as unknown as { __phosphorDropHandled?: boolean }).__phosphorDropHandled = true;
+        const files = Array.from(e.dataTransfer.files || []);
+        onFileDropChannel?.(channel.id, files);
+      }}
     >
       <div className="drum-channel-row">
+        {isFileDragOver && (
+          <div className="drum-file-drop-badge" aria-hidden="true">
+            <Upload size={12} />
+            <span>Asignar a {channel.name}</span>
+          </div>
+        )}
+
         {/* Panel Izquierdo: Controles */}
         <div 
           className={`drum-controls ${isDragging ? 'is-dragging' : ''}`}
@@ -350,9 +427,11 @@ export const DrumChannelRow: React.FC<Props> = React.memo(({
             if (onDragStartRow) onDragStartRow(e, channelIndex);
           }}
           onDragOver={(e) => {
+            if (hasExternalFilesPayload(e)) return;
             if (onDragOverRow) onDragOverRow(e, channelIndex);
           }}
           onDrop={(e) => {
+            if (hasExternalFilesPayload(e)) return;
             if (onDropRow) onDropRow(e, channelIndex);
           }}
           onDragEnd={(e) => {
@@ -468,10 +547,24 @@ export const DrumChannelRow: React.FC<Props> = React.memo(({
             onMouseEnter={() => setIsInteractiveHovered(true)}
             onMouseLeave={() => setIsInteractiveHovered(false)}
           >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="audio/*,.wav,.mp3,.ogg,.flac,.m4a,.aac,.webm"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleImportSampleFiles}
+            />
             <CustomSelect
               value={channel.sampleUrl}
               onChange={handleSampleChange}
               groups={selectGroups}
+              headerAction={{
+                label: 'Importar sample',
+                icon: <Upload size={13} />,
+                title: 'Importar archivo de audio (.wav, .mp3, .ogg, .flac, .m4a)',
+                onClick: () => fileInputRef.current?.click()
+              }}
               style={{ width: '100%' }}
             />
           </div>

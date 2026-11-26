@@ -9,7 +9,14 @@ import type { SongStore } from './types';
 import { createTransportSlice, initialTransportState } from './slices/transportSlice';
 import { createHarmonySlice, initialHarmonyState } from './slices/harmonySlice';
 import { createTrackSlice, initialTrackState } from './slices/trackSlice';
-import { createDrumSlice, initialDrumState, DEFAULT_DRUM_CHANNELS } from './slices/drumSlice';
+import {
+  createDrumSlice,
+  initialDrumState,
+  DEFAULT_DRUM_CHANNELS,
+  normalizeCustomDrumSamples,
+  savePersistedCustomDrumSamples
+} from './slices/drumSlice';
+import { getCustomSampleBufferId } from '../constants/drumSamples';
 import { createMixerSlice, initialMixerState, DEFAULT_CHANNELS } from './slices/mixerSlice';
 import { createUISlice, initialUIState } from './slices/uiSlice';
 import { createAudioTrackSlice, initialAudioTrackState, DEFAULT_AUDIO_TRACKS } from './slices/audioTrackSlice';
@@ -95,6 +102,7 @@ export const useSongStore = create<SongStore>()(
           lastSavedAt: null,
           commandPaletteMode: 'closed',
           isCrtEnabled: get().isCrtEnabled,
+          customDrumSamples: get().customDrumSamples,
           bpm: 100,
           isAutoKey: false,
           detectedKey: null,
@@ -127,6 +135,30 @@ export const useSongStore = create<SongStore>()(
           : (rawDrumChannels && typeof rawDrumChannels === 'object' && Object.values(rawDrumChannels).length > 0
             ? (Object.values(rawDrumChannels) as any)
             : DEFAULT_DRUM_CHANNELS);
+
+        const existingCustomSamples = get().customDrumSamples || [];
+        const sessionCustomSamples = normalizeCustomDrumSamples(session.drums.customSamples);
+        const mergedCustomSampleMap = new Map<string, typeof existingCustomSamples[number]>();
+        for (const s of existingCustomSamples) {
+          mergedCustomSampleMap.set(s.id, s);
+        }
+        for (const s of sessionCustomSamples) {
+          mergedCustomSampleMap.set(s.id, s);
+        }
+        for (const ch of normalizedDrumChannels) {
+          const customId = getCustomSampleBufferId(ch?.sampleUrl);
+          if (customId && !mergedCustomSampleMap.has(customId)) {
+            mergedCustomSampleMap.set(customId, {
+              id: customId,
+              name: ch?.name?.trim() || 'Sample importado',
+              sampleUrl: ch.sampleUrl
+            });
+          }
+        }
+        const mergedCustomSamples = Array.from(mergedCustomSampleMap.values());
+        if (mergedCustomSamples.length !== existingCustomSamples.length) {
+          savePersistedCustomDrumSamples(mergedCustomSamples);
+        }
 
         const rawTitle = session.metadata?.title?.trim();
         const isGenericTitle =
@@ -167,6 +199,7 @@ export const useSongStore = create<SongStore>()(
           isPatternRepeatOn: session.drums.isPatternRepeatOn,
           activeDrumKitId: session.drums.activeDrumKitId,
           drumChannels: normalizedDrumChannels,
+          customDrumSamples: mergedCustomSamples,
           patternLengths: session.drums.patternLengths || Array.from({ length: normalizedDrumChannels[0]?.patterns?.length || 8 }).map(() => 16),
           drumPatternNames: session.drums.drumPatternNames || [],
           drumArrangementMode: resolvedDrumArrangementMode,

@@ -970,6 +970,18 @@ class ToneEngine {
     this.drumManager.removeDrumPlayer(channelId);
   }
 
+  public registerCustomDrumSample(sampleUrl: string, audioBuffer: AudioBuffer) {
+    return this.drumManager.registerCustomSampleBuffer(sampleUrl, audioBuffer);
+  }
+
+  public removeCachedDrumSample(sampleUrl: string) {
+    this.drumManager.removeCachedSample(sampleUrl);
+  }
+
+  public preloadDrumSample(sampleUrl: string) {
+    return this.drumManager.preloadSample(sampleUrl);
+  }
+
   public playDrumPreview(channelId: string, customVelocity?: number) {
     this.unlockIfSuspended();
     const state = useSongStore.getState();
@@ -1182,5 +1194,10 @@ if (typeof window !== 'undefined') {
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     toneEngine.dispose();
+  });
+  import.meta.hot.accept(() => {
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
   });
 }

@@ -14,6 +14,7 @@ import type {
   CRTParams,
   DrumChannel,
   DrumStep,
+  CustomDrumSample,
   PatternChainItem,
   PianoRollTrack,
   StyleMarker,
@@ -175,6 +176,7 @@ export interface TrackActions {
 
 export interface DrumState {
   drumChannels: DrumChannel[];
+  customDrumSamples: CustomDrumSample[];
   activeDrumKitId: string;
   patternLengths: number[];
   drumPatternNames: string[];
@@ -202,6 +204,9 @@ export interface DrumActions {
   addDrumChannel: (channel: DrumChannel) => void;
   updateDrumChannel: (id: string, updates: Partial<DrumChannel>) => void;
   removeDrumChannel: (id: string) => void;
+  addCustomDrumSample: (sample: CustomDrumSample) => void;
+  removeCustomDrumSample: (sampleId: string) => void;
+  setCustomDrumSamples: (samples: CustomDrumSample[]) => void;
   reorderDrumChannels: (fromIndex: number, toIndex: number) => void;
   toggleDrumStep: (channelId: string, stepIndex: number, patternIndex: number, forceState?: boolean) => void;
   setDrumStepVelocity: (channelId: string, stepIndex: number, patternIndex: number, velocity: number) => void;

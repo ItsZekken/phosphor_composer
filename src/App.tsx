@@ -91,6 +91,7 @@ export default function App() {
       activeTrackId: state.activeTrackId,
       melodyNotes: state.melodyNotes,
       drumChannels: state.drumChannels,
+      customDrumSamples: state.customDrumSamples,
       patternLengths: state.patternLengths,
       drumPatternNames: state.drumPatternNames,
       drumArrangementMode: state.drumArrangementMode,

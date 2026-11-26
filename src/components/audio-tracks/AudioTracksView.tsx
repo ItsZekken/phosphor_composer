@@ -98,6 +98,7 @@ export const AudioTracksView: React.FC = () => {
   const lanesContainerRef = useRef<HTMLDivElement | null>(null);
   const emptyFileInputRef = useRef<HTMLInputElement | null>(null);
   const isSyncingScrollRef = useRef(false);
+  const suppressNextBgClickRef = useRef(false);
   const [dragOver, setDragOver] = useState(false);
   const [marquee, setMarquee] = useState<MarqueeRect | null>(null);
 
@@ -411,15 +412,25 @@ export const AudioTracksView: React.FC = () => {
     if (!container) return;
 
     e.preventDefault();
-    const rect = container.getBoundingClientRect();
-    const startX = e.clientX - rect.left;
-    const startY = e.clientY - rect.top;
+    const startRect = container.getBoundingClientRect();
+    const startX = e.clientX - startRect.left;
+    const startY = e.clientY - startRect.top;
 
+    const isAdditive = e.shiftKey;
+    const initialState = useSongStore.getState();
+    const baseMidiSel = isAdditive ? [...initialState.selectedMidiClipIds] : [];
+    const baseAudioSel = isAdditive ? [...initialState.selectedClipIds] : [];
+
+    let didMarqueeDrag = false;
     setMarquee({ x1: startX, y1: startY, x2: startX, y2: startY });
 
     const onMove = (me: PointerEvent) => {
-      const curX = me.clientX - rect.left;
-      const curY = me.clientY - rect.top;
+      const curRect = container.getBoundingClientRect();
+      const curX = me.clientX - curRect.left;
+      const curY = me.clientY - curRect.top;
+      if (!didMarqueeDrag && (Math.abs(curX - startX) > 3 || Math.abs(curY - startY) > 3)) {
+        didMarqueeDrag = true;
+      }
       setMarquee({ x1: startX, y1: startY, x2: curX, y2: curY });
 
       const minX = Math.min(startX, curX);
@@ -429,8 +440,8 @@ export const AudioTracksView: React.FC = () => {
 
       const state = useSongStore.getState();
       const laneNodes = container.querySelectorAll<HTMLElement>('[data-midi-track-id], [data-track-id]');
-      const hitMidiIds: string[] = [];
-      const hitAudioIds: string[] = [];
+      const hitMidiSet = new Set<string>(baseMidiSel);
+      const hitAudioSet = new Set<string>(baseAudioSel);
 
       laneNodes.forEach((laneEl) => {
         const laneTop = laneEl.offsetTop;
@@ -444,7 +455,7 @@ export const AudioTracksView: React.FC = () => {
             .forEach((c) => {
               const cx1 = c.startBeat * zoomLevel;
               const cx2 = cx1 + c.durationBeats * zoomLevel;
-              if (cx2 >= minX && cx1 <= maxX) hitMidiIds.push(c.id);
+              if (cx2 >= minX && cx1 <= maxX) hitMidiSet.add(c.id);
             });
         }
         const audioTrackId = laneEl.dataset.trackId;
@@ -454,29 +465,41 @@ export const AudioTracksView: React.FC = () => {
             .forEach((c) => {
               const cx1 = c.startBeat * zoomLevel;
               const cx2 = cx1 + (c.durationSeconds * (state.bpm / 60)) * zoomLevel;
-              if (cx2 >= minX && cx1 <= maxX) hitAudioIds.push(c.id);
+              if (cx2 >= minX && cx1 <= maxX) hitAudioSet.add(c.id);
             });
         }
       });
 
       useSongStore.setState({
-        selectedMidiClipIds: hitMidiIds,
-        selectedClipIds: hitAudioIds
+        selectedMidiClipIds: Array.from(hitMidiSet),
+        selectedClipIds: Array.from(hitAudioSet)
       });
     };
 
     const onUp = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
       setMarquee(null);
+      if (didMarqueeDrag) {
+        suppressNextBgClickRef.current = true;
+        window.setTimeout(() => {
+          suppressNextBgClickRef.current = false;
+        }, 60);
+      }
     };
 
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
   };
 
   // 5. Deselección al hacer click en espacio vacío
   const handleTimelineBackgroundClick = (e: React.MouseEvent) => {
+    if (suppressNextBgClickRef.current) {
+      suppressNextBgClickRef.current = false;
+      return;
+    }
     const target = e.target as HTMLElement;
     if (
       e.target === e.currentTarget ||

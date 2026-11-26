@@ -233,6 +233,13 @@ export interface DrumChannel {
   solo: boolean;
 }
 
+export interface CustomDrumSample {
+  id: string;        // bufferId en AudioBufferRegistry / IndexedDB (ej: 'ds_...')
+  name: string;      // Nombre visible del sample (sin extensión)
+  sampleUrl: string; // URL canónica 'custom-sample://<id>'
+  createdAt?: number;
+}
+
 export interface PatternChainItem {
   id: string;
   type: 'pattern' | 'group' | 'rest';

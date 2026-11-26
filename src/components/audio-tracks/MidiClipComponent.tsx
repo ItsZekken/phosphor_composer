@@ -16,7 +16,7 @@ import {
   Sparkles,
   Grid3X3
 } from 'lucide-react';
-import type { AudioSnapGrid, MidiPatternClip } from '../../utils/typeDefinitions';
+import type { MidiPatternClip } from '../../utils/typeDefinitions';
 import { useSongStore } from '../../store/songStore';
 import { useShallow } from 'zustand/react/shallow';
 import {
@@ -29,6 +29,7 @@ import {
 import { PatternMiniPreview } from './PatternMiniPreview';
 import { MidiKeysMiniIcon } from './PatternPickerSidebar';
 import { ContextMenuContainer } from '../ui/ContextMenuContainer';
+import { startPlaylistGroupDrag, snapPlaylistBeat } from './playlistGroupDrag';
 
 interface MidiClipComponentProps {
   clip: MidiPatternClip;
@@ -37,17 +38,7 @@ interface MidiClipComponentProps {
   onSelect: (e: React.MouseEvent | React.PointerEvent) => void;
 }
 
-export function snapBeatByGrid(beat: number, grid: AudioSnapGrid, beatsPerMeasure: number): number {
-  if (grid === 'off') return Math.max(0, beat);
-  let step = 1;
-  if (grid === 'bar') step = beatsPerMeasure;
-  else if (grid === 'beat') step = 1;
-  else if (grid === '1/2') step = 0.5;
-  else if (grid === '1/4') step = 0.25;
-  else if (grid === '1/8') step = 0.125;
-  else if (grid === '1/16') step = 0.0625;
-  return Math.max(0, Math.round(beat / step) * step);
-}
+export const snapBeatByGrid = snapPlaylistBeat;
 
 export const MidiClipComponent: React.FC<MidiClipComponentProps> = ({
   clip,
@@ -65,8 +56,6 @@ export const MidiClipComponent: React.FC<MidiClipComponentProps> = ({
     drumPatternNames,
     tracks,
     updateMidiClip,
-    updateMidiClipsBatch,
-    addMidiClipsBatch,
     splitMidiClip,
     duplicateMidiClip,
     makeMidiClipUnique,
@@ -85,8 +74,6 @@ export const MidiClipComponent: React.FC<MidiClipComponentProps> = ({
       drumPatternNames: state.drumPatternNames || [],
       tracks: state.tracks || [],
       updateMidiClip: state.updateMidiClip,
-      updateMidiClipsBatch: state.updateMidiClipsBatch,
-      addMidiClipsBatch: state.addMidiClipsBatch,
       splitMidiClip: state.splitMidiClip,
       duplicateMidiClip: state.duplicateMidiClip,
       makeMidiClipUnique: state.makeMidiClipUnique,
@@ -98,7 +85,6 @@ export const MidiClipComponent: React.FC<MidiClipComponentProps> = ({
   );
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const [clonePreviewOffsetPx, setClonePreviewOffsetPx] = useState<number | null>(null);
 
   const beatsPerMeasure = getBeatsPerMeasure(timeSignature);
 
@@ -224,125 +210,15 @@ export const MidiClipComponent: React.FC<MidiClipComponentProps> = ({
       return;
     }
 
-    onSelect(e);
     syncBrushToThisClip();
-
-    const startX = e.clientX;
-    const isCloneDrag = e.shiftKey && !e.ctrlKey && !e.metaKey;
-    const storeState = useSongStore.getState();
-    const activeSelIds = storeState.selectedMidiClipIds.includes(clip.id)
-      ? storeState.selectedMidiClipIds
-      : [clip.id];
-    const snapshots = storeState.midiClips
-      .filter((c) => activeSelIds.includes(c.id))
-      .map((c) => ({ ...c }));
-    const minStartBeat = Math.min(...snapshots.map((s) => s.startBeat));
-
-    const el = e.currentTarget;
-    el.setPointerCapture(e.pointerId);
-
-    let lastDeltaBeat = 0;
-    let lastTargetTrackId = clip.midiTrackId;
-    let didMove = false;
-
-    if (!isCloneDrag) {
-      useSongStore.temporal.getState().pause();
-    }
-
-    const onPointerMove = (moveEvent: PointerEvent) => {
-      const dx = moveEvent.clientX - startX;
-      if (!didMove && Math.abs(dx) < 3 && Math.abs(moveEvent.clientY - e.clientY) < 6) {
-        return;
-      }
-      didMove = true;
-
-      const rawTargetStart = clip.startBeat + dx / zoomLevel;
-      const snappedTargetStart = moveEvent.altKey
-        ? Math.max(0, rawTargetStart)
-        : snapBeatByGrid(rawTargetStart, snapGrid, beatsPerMeasure);
-      const rawDelta = snappedTargetStart - clip.startBeat;
-      const safeDelta = Math.max(-minStartBeat, rawDelta);
-      lastDeltaBeat = safeDelta;
-
-      const elements = document.elementsFromPoint(moveEvent.clientX, moveEvent.clientY);
-      const laneEl = elements.find((node) => (node as HTMLElement).dataset?.midiTrackId) as HTMLElement | undefined;
-      lastTargetTrackId = laneEl?.dataset?.midiTrackId || clip.midiTrackId;
-
-      if (isCloneDrag) {
-        setClonePreviewOffsetPx(safeDelta * zoomLevel);
-        return;
-      }
-
-      if (snapshots.length === 1) {
-        updateMidiClip(clip.id, {
-          startBeat: Math.max(0, clip.startBeat + safeDelta),
-          midiTrackId: lastTargetTrackId
-        });
-      } else {
-        updateMidiClipsBatch(
-          snapshots.map((s) => ({
-            id: s.id,
-            changes: {
-              startBeat: Math.max(0, s.startBeat + safeDelta),
-              ...(s.id === clip.id ? { midiTrackId: lastTargetTrackId } : {})
-            }
-          }))
-        );
-      }
-    };
-
-    const onPointerUp = (upEvent: PointerEvent) => {
-      el.removeEventListener('pointermove', onPointerMove);
-      el.removeEventListener('pointerup', onPointerUp);
-      try {
-        el.releasePointerCapture(upEvent.pointerId);
-      } catch (_) {}
-
-      if (isCloneDrag) {
-        setClonePreviewOffsetPx(null);
-        if (didMove && (Math.abs(lastDeltaBeat) > 1e-4 || lastTargetTrackId !== clip.midiTrackId)) {
-          const newIds = addMidiClipsBatch(
-            snapshots.map((s) => ({
-              midiTrackId: snapshots.length === 1 ? lastTargetTrackId : s.midiTrackId,
-              sourceType: s.sourceType,
-              drumPatternIndex: s.drumPatternIndex,
-              melodyTrackId: s.melodyTrackId,
-              melodyPatternId: s.melodyPatternId,
-              startBeat: Math.max(0, s.startBeat + lastDeltaBeat),
-              durationBeats: s.durationBeats,
-              offsetBeats: s.offsetBeats,
-              isMuted: s.isMuted
-            }))
-          );
-          if (newIds.length > 0) {
-            useSongStore.getState().setSelectedMidiClipIds(newIds);
-          }
-        }
-      } else {
-        useSongStore.temporal.getState().resume();
-        if (didMove) {
-          if (snapshots.length === 1) {
-            updateMidiClip(clip.id, {
-              startBeat: Math.max(0, clip.startBeat + lastDeltaBeat),
-              midiTrackId: lastTargetTrackId
-            });
-          } else {
-            updateMidiClipsBatch(
-              snapshots.map((s) => ({
-                id: s.id,
-                changes: {
-                  startBeat: Math.max(0, s.startBeat + lastDeltaBeat),
-                  ...(s.id === clip.id ? { midiTrackId: lastTargetTrackId } : {})
-                }
-              }))
-            );
-          }
-        }
-      }
-    };
-
-    el.addEventListener('pointermove', onPointerMove);
-    el.addEventListener('pointerup', onPointerUp);
+    startPlaylistGroupDrag({
+      e,
+      anchorKind: 'midi',
+      anchorClipId: clip.id,
+      zoomLevel,
+      beatsPerMeasure,
+      snapGrid
+    });
   };
 
   // Tirador Izquierdo (Trim Start + Offset no destructivo)
@@ -448,7 +324,9 @@ export const MidiClipComponent: React.FC<MidiClipComponentProps> = ({
     e.preventDefault();
     e.stopPropagation();
     if (e.shiftKey) return;
-    onSelect(e);
+    if (!isSelected) {
+      onSelect(e);
+    }
     syncBrushToThisClip();
     setContextMenu({ x: e.clientX, y: e.clientY });
   };
@@ -466,6 +344,7 @@ export const MidiClipComponent: React.FC<MidiClipComponentProps> = ({
           '--clip-accent': patternInfo.color
         } as React.CSSProperties}
         onPointerDown={handleBodyPointerDown}
+        onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => {
           e.stopPropagation();
           handleOpenInEditor();
@@ -538,22 +417,6 @@ export const MidiClipComponent: React.FC<MidiClipComponentProps> = ({
           title="Estirar para repetir patrón o recortar final (Mantén Alt para ajuste libre)"
         />
       </div>
-
-      {/* Fantasma de clonación durante Shift+Drag */}
-      {clonePreviewOffsetPx !== null && (
-        <div
-          className="midi-pattern-clip clone-ghost"
-          style={{
-            left: Math.max(0, leftPx + clonePreviewOffsetPx),
-            width: widthPx,
-            borderColor: '#ffd875'
-          }}
-        >
-          <div className="midi-clip-header" style={{ backgroundColor: `${patternInfo.color}44` }}>
-            <span className="midi-clip-title">+ {patternInfo.title}</span>
-          </div>
-        </div>
-      )}
 
       {/* Menú contextual del Clip MIDI */}
       {contextMenu && (

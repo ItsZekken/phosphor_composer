@@ -1,4 +1,4 @@
-import type { DrumCategoryKey } from './drumSamples';
+import { isCustomSampleUrl, type DrumCategoryKey } from './drumSamples';
 import type { DrumChannel } from '../utils/typeDefinitions';
 
 export interface DrumKitPreset {
@@ -46,6 +46,9 @@ export const PRESET_DRUM_KITS: DrumKitPreset[] = Array.from({ length: 10 }, (_, 
  * Si no coincide con ninguno, retorna 'custom'.
  */
 export const findMatchingKitId = (channels: DrumChannel[]): string => {
+  if (channels.some(ch => isCustomSampleUrl(ch.sampleUrl))) {
+    return 'custom';
+  }
   for (const kit of PRESET_DRUM_KITS) {
     const isMatch = channels.every(ch => {
       const expectedUrl = kit.samples[ch.id] || kit.samples[inferCategoryFromChannel(ch)];
@@ -63,8 +66,8 @@ export const findMatchingKitId = (channels: DrumChannel[]): string => {
  * Infiere la categoría de sample a partir del id o sampleUrl del canal.
  */
 export const inferCategoryFromChannel = (channel: DrumChannel): DrumCategoryKey => {
-  const url = channel.sampleUrl.toLowerCase();
-  const id = channel.id.toLowerCase();
+  const url = (channel.sampleUrl || '').toLowerCase();
+  const id = (channel.id || '').toLowerCase();
 
   if (url.includes('kick') || id.includes('kick')) return 'kicks';
   if (url.includes('snare') || id.includes('snare')) return 'snares';

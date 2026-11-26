@@ -12,6 +12,9 @@
 import * as Tone from 'tone';
 import type { ScheduledDrumEvent } from '../audioTypes';
 import { createAudioBufferFromChannels } from './PhosphorDSPKernel';
+import { audioBufferRegistry } from '../audioBufferRegistry';
+import { getNativeAudioContext } from '../worklet/PhosphorWorkletNode';
+import { getCustomSampleBufferId, isCustomSampleUrl } from '../../../constants/drumSamples';
 
 function resolveAssetUrl(url: string): string {
   if (!url) return url;
@@ -29,6 +32,31 @@ function resolveAssetUrl(url: string): string {
  * Carga un AudioBuffer de muestra de batería y lanza un error estricto si falla.
  */
 async function loadDrumSampleBuffer(url: string): Promise<AudioBuffer> {
+  if (isCustomSampleUrl(url)) {
+    const bufferId = getCustomSampleBufferId(url);
+    if (!bufferId) {
+      throw new Error(`[Exportación de Audio] URL de sample personalizado inválida: "${url}".`);
+    }
+
+    let customBuf = audioBufferRegistry.getBuffer(bufferId);
+    if (!customBuf) {
+      const audioCtx =
+        getNativeAudioContext() ||
+        (Tone.getContext().rawContext as AudioContext) ||
+        (typeof OfflineAudioContext !== 'undefined' ? new OfflineAudioContext(2, 1, 44100) : null);
+      if (audioCtx) {
+        customBuf = (await audioBufferRegistry.loadBufferFromIndexedDB(bufferId, audioCtx)) || undefined;
+      }
+    }
+
+    if (!customBuf || customBuf.length === 0) {
+      throw new Error(
+        `[Exportación de Audio] Error crítico: No se encontró el sample de batería importado "${url}" en memoria ni en IndexedDB.`
+      );
+    }
+    return customBuf;
+  }
+
   const resolvedUrl = resolveAssetUrl(url);
   try {
     const toneBuffer = await Tone.ToneAudioBuffer.fromUrl(resolvedUrl);

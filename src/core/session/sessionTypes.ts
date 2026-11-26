@@ -11,6 +11,7 @@ import type {
   TempoMarker,
   ChannelConfig, 
   DrumChannel, 
+  CustomDrumSample,
   TimeSignature,
   SynthSettings,
   CRTParams,
@@ -51,6 +52,7 @@ export interface DrumSessionState {
   isPatternRepeatOn: boolean;
   activeDrumKitId: string;
   drumChannels: DrumChannel[];
+  customSamples?: CustomDrumSample[];
   patternLengths?: number[];
   drumPatternNames?: string[];
   drumArrangementMode?: 'sequencer' | 'playlist';

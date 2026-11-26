@@ -12,8 +12,10 @@ import type {
   TempoMarker,
   ChannelConfig, 
   DrumChannel,
+  CustomDrumSample,
   TimeSignature
 } from '../../utils/typeDefinitions';
+import { buildCustomSampleUrl, isCustomSampleUrl } from '../../constants/drumSamples';
 import type { NoteClass, ScaleType } from '../music';
 import { normalizePitchClass, noteToMidi } from '../music';
 import { normalizeSynthSettings } from '../audio/engine/synthPresets';
@@ -24,6 +26,31 @@ export const createEmptyPatterns = (numPatterns = 8, length = 16) =>
   Array.from({ length: numPatterns }).map(() => 
     Array.from({ length }).map(() => ({ isActive: false, velocity: 0.8 }))
   );
+
+function normalizeSessionCustomSamples(raw: unknown): CustomDrumSample[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const result: CustomDrumSample[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as Partial<CustomDrumSample>;
+    const id = typeof obj.id === 'string' ? obj.id.trim() : '';
+    const name = typeof obj.name === 'string' ? obj.name.trim() : '';
+    if (!id || !name || seen.has(id)) continue;
+    const sampleUrl =
+      typeof obj.sampleUrl === 'string' && isCustomSampleUrl(obj.sampleUrl)
+        ? obj.sampleUrl
+        : buildCustomSampleUrl(id);
+    seen.add(id);
+    result.push({
+      id,
+      name,
+      sampleUrl,
+      ...(typeof obj.createdAt === 'number' ? { createdAt: obj.createdAt } : {})
+    });
+  }
+  return result;
+}
 
 export const DEFAULT_DRUM_CHANNELS: DrumChannel[] = [
   { id: 'kick_1', name: 'Kick', sampleUrl: '/drums/kicks/kick1.wav', patterns: createEmptyPatterns(), volume: 80, pan: 0, muted: false, solo: false },
@@ -276,6 +303,7 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
       isPatternRepeatOn,
       activeDrumKitId,
       drumChannels,
+      customSamples: normalizeSessionCustomSamples((raw as any).customDrumSamples || (raw as any).drums?.customSamples),
       patternLengths: Array.isArray((raw as any).patternLengths)
         ? (raw as any).patternLengths
         : Array.isArray((raw as any).drums?.patternLengths)
@@ -355,6 +383,7 @@ export function deserializeSession(rawInput: unknown): { session: SessionV2; war
       if (Array.isArray(parsedObj.drums.patternChain)) {
         parsedObj.drums.patternChain = normalizePatternChainItems(parsedObj.drums.patternChain);
       }
+      parsedObj.drums.customSamples = normalizeSessionCustomSamples(parsedObj.drums.customSamples);
     }
     // Normalizar synthSettings en todos los canales existentes para robustez total
     if (parsedObj.mixer?.channels) {
@@ -442,6 +471,7 @@ export function serializeSession(state: any, metadataUpdates?: Partial<SessionMe
       isPatternRepeatOn: Boolean(state.isPatternRepeatOn),
       activeDrumKitId: state.activeDrumKitId || 'kit_1',
       drumChannels: state.drumChannels || DEFAULT_DRUM_CHANNELS,
+      customSamples: normalizeSessionCustomSamples(state.customDrumSamples),
       patternLengths: state.patternLengths || Array.from({ length: (state.drumChannels || DEFAULT_DRUM_CHANNELS)[0]?.patterns?.length || 8 }).map(() => 16),
       drumPatternNames: state.drumPatternNames || [],
       drumArrangementMode: state.drumArrangementMode || 'sequencer',
