@@ -126,6 +126,8 @@ export const Header = () => {
     detectedKey,
     isPlaying,
     setPlaying,
+    playbackMode,
+    setPlaybackMode,
     clearSong,
     isLooping,
     setLooping,
@@ -157,6 +159,8 @@ export const Header = () => {
       detectedKey: state.detectedKey,
       isPlaying: state.isPlaying,
       setPlaying: state.setPlaying,
+      playbackMode: state.playbackMode || 'song',
+      setPlaybackMode: state.setPlaybackMode,
       clearSong: state.clearSong,
       isLooping: state.isLooping,
       setLooping: state.setLooping,
@@ -190,6 +194,11 @@ export const Header = () => {
       for (let i = 0; i < audioTracks.length; i++) {
         if (audioTracks[i].solo) solo = true;
         if (audioTracks[i].muted) mute = true;
+      }
+      const midiTracks = state.midiTracks || [];
+      for (let i = 0; i < midiTracks.length; i++) {
+        if (midiTracks[i].solo) solo = true;
+        if (midiTracks[i].muted) mute = true;
       }
       return { hasAnySolo: solo, hasAnyMute: mute };
     })
@@ -332,13 +341,20 @@ export const Header = () => {
 
   const isSongEmpty = (state: ReturnType<typeof useSongStore.getState>, includeAudio = true): boolean => {
     const hasChords = Boolean(state.chordBlocks && state.chordBlocks.length > 0);
-    const hasTracks = Boolean(state.tracks && state.tracks.some((t) => t.notes && t.notes.length > 0));
+    const hasTracks = Boolean(
+      state.tracks &&
+      state.tracks.some((t) =>
+        (t.notes && t.notes.length > 0) ||
+        (t.patterns && t.patterns.some((p) => p.notes && p.notes.length > 0))
+      )
+    );
     const hasMelody = Boolean(state.melodyNotes && state.melodyNotes.length > 0);
     const hasDrums =
       Boolean(state.drumChannels && state.drumChannels.some((ch) => ch.patterns && ch.patterns.some((p) => p.some((s) => s?.isActive)))) ||
       Boolean(state.patternChain && state.patternChain.length > 0);
+    const hasMidiClips = Boolean(state.midiClips && state.midiClips.length > 0);
     const hasAudioClips = includeAudio && Boolean(state.audioClips && state.audioClips.length > 0);
-    return !hasChords && !hasTracks && !hasMelody && !hasDrums && !hasAudioClips;
+    return !hasChords && !hasTracks && !hasMelody && !hasDrums && !hasMidiClips && !hasAudioClips;
   };
 
   const getExportBaseName = useCallback(
@@ -380,7 +396,10 @@ export const Header = () => {
         currentDrumPatternEdit: state.currentDrumPatternEdit,
         channels: state.channels,
         customPatterns: state.customPatterns,
-        activeDrumKitId: state.activeDrumKitId
+        activeDrumKitId: state.activeDrumKitId,
+        drumArrangementMode: state.drumArrangementMode,
+        midiTracks: state.midiTracks,
+        midiClips: state.midiClips
       },
       'normal'
     );
@@ -644,6 +663,32 @@ export const Header = () => {
         <div className="header-controls">
           {/* Playback Controls */}
           <div className="control-group">
+            {/* Conmutador PAT / SONG estilo FL Studio */}
+            <div
+              className="playback-mode-switch"
+              role="group"
+              aria-label="Modo de reproducción"
+              title="Alternar entre Patrón (PAT) y Canción completa (SONG) · Tecla L"
+            >
+              <button
+                type="button"
+                className={`playback-mode-btn mode-pat ${playbackMode === 'pattern' ? 'active' : ''}`}
+                onClick={() => setPlaybackMode('pattern')}
+                disabled={isAudioLoading}
+                title="Modo PAT: reproduce en bucle solo el patrón activo (Tecla L)"
+              >
+                PAT
+              </button>
+              <button
+                type="button"
+                className={`playback-mode-btn mode-song ${playbackMode === 'song' ? 'active' : ''}`}
+                onClick={() => setPlaybackMode('song')}
+                disabled={isAudioLoading}
+                title="Modo SONG: reproduce el arreglo completo de Playlist/Tracks y Acordes (Tecla L)"
+              >
+                SONG
+              </button>
+            </div>
             <button
               className={`control-btn play ${isPlaying ? 'active' : ''}`}
               onClick={handlePlayToggle}

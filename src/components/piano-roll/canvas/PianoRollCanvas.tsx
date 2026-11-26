@@ -4,6 +4,7 @@ import type { PianoRollGridSnap } from '../../../store/types';
 import { toneEngine } from '../../../audio/toneEngine';
 import type { ChordBlock, MelodyNote } from '../../../utils/typeDefinitions';
 import { generateId } from '../../../utils/idGenerator';
+import { ensureTrackPatterns, getMelodyPatternLengthBeats } from '../../../core/audio/arrangementResolver';
 import {
   MAX_MIDI,
   NOTE_COUNT,
@@ -193,8 +194,20 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
   const melodyNotes = useSongStore(state => state.melodyNotes || []);
   const tracks = useSongStore(state => state.tracks || []);
   const activeTrackId = useSongStore(state => state.activeTrackId);
+  const playbackMode = useSongStore(state => state.playbackMode || 'song');
   const activeTrack = tracks.find(t => t.id === activeTrackId);
   const activeColor = activeTrack?.color || '#6880ad';
+  const activePatternBoundaryBeats = useMemo(() => {
+    if (!activeTrack) return null;
+    const { patterns, activePattern } = ensureTrackPatterns(activeTrack);
+    const shouldShow =
+      playbackMode === 'pattern' ||
+      activeTrack.arrangementMode === 'playlist' ||
+      patterns.length > 1 ||
+      typeof activePattern.lengthBeats === 'number';
+    if (!shouldShow) return null;
+    return getMelodyPatternLengthBeats(activePattern, beatsPerMeasure);
+  }, [activeTrack, playbackMode, beatsPerMeasure]);
 
   const chordSpans = useMemo(
     () => (isChordHighlightActive ? computeChordTonesMap(chordBlocks) : []),
@@ -214,7 +227,8 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
     isScaleHighlightActive,
     isChordHighlightActive,
     gridSnap,
-    chordSpans
+    chordSpans,
+    activePatternBoundaryBeats
   });
   drawGridParamsRef.current = {
     beatWidth,
@@ -228,7 +242,8 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
     isScaleHighlightActive,
     isChordHighlightActive,
     gridSnap,
-    chordSpans
+    chordSpans,
+    activePatternBoundaryBeats
   };
 
   const drawNotesParamsRef = useRef({
@@ -292,7 +307,8 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
       isScaleHighlightActive: scaleActive,
       isChordHighlightActive: chordActive,
       gridSnap: snap,
-      chordSpans: spans
+      chordSpans: spans,
+      activePatternBoundaryBeats: patEndBeats
     } = drawGridParamsRef.current;
 
     const { drawWidth, drawHeight, offsetX, offsetY, dpr } = getViewportMetrics();
@@ -446,6 +462,45 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
       ctx.lineTo(x, offsetY + drawHeight);
     }
     ctx.stroke();
+
+    // 4. Marcador visual del límite de bucle del patrón (FL Pattern Boundary)
+    if (patEndBeats && patEndBeats > 0) {
+      const boundX = patEndBeats * bw;
+      if (boundX < offsetX + drawWidth) {
+        const shadeStart = Math.max(offsetX, boundX);
+        const shadeW = offsetX + drawWidth - shadeStart;
+        if (shadeW > 0) {
+          ctx.fillStyle = 'rgba(5, 4, 10, 0.34)';
+          ctx.fillRect(shadeStart, offsetY, shadeW, drawHeight);
+        }
+      }
+      if (boundX >= offsetX && boundX <= offsetX + drawWidth) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 216, 117, 0.65)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(boundX, offsetY);
+        ctx.lineTo(boundX, offsetY + drawHeight);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        const barsCount = Math.round((patEndBeats / Math.max(1, bpmMeasure)) * 10) / 10;
+        const tag = `FIN PATRÓN · ${barsCount}c`;
+        ctx.font = 'bold 9px "Share Tech Mono", monospace';
+        const tw = ctx.measureText(tag).width + 10;
+        const tagX = Math.max(offsetX + 4, boundX - tw - 4);
+        const tagY = offsetY + 6;
+        ctx.fillStyle = 'rgba(20, 16, 28, 0.9)';
+        ctx.strokeStyle = 'rgba(255, 216, 117, 0.55)';
+        ctx.lineWidth = 1;
+        ctx.fillRect(tagX, tagY, tw, 15);
+        ctx.strokeRect(tagX, tagY, tw, 15);
+        ctx.fillStyle = '#ffd875';
+        ctx.fillText(tag, tagX + 5, tagY + 10.5);
+        ctx.restore();
+      }
+    }
   }, [getViewportMetrics]);
 
   const drawNotes = useCallback(() => {
@@ -776,7 +831,8 @@ export const PianoRollCanvas: React.FC<PianoRollCanvasProps> = React.memo(({
     gridSnap,
     TOTAL_BEATS,
     beatsPerMeasure,
-    chordSpans
+    chordSpans,
+    activePatternBoundaryBeats
   ]);
 
   // Redibujo ante cambios de notas, selección o overrides efímeros

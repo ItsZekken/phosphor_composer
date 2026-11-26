@@ -92,6 +92,8 @@ export default function App() {
       melodyNotes: state.melodyNotes,
       drumChannels: state.drumChannels,
       patternLengths: state.patternLengths,
+      drumPatternNames: state.drumPatternNames,
+      drumArrangementMode: state.drumArrangementMode,
       patternChain: state.patternChain,
       isPatternRepeatOn: state.isPatternRepeatOn,
       activeDrumKitId: state.activeDrumKitId,
@@ -100,6 +102,8 @@ export default function App() {
       audioTracks: state.audioTracks,
       audioClips: state.audioClips,
       audioLatencyCalibrationMs: state.audioLatencyCalibrationMs,
+      midiTracks: state.midiTracks,
+      midiClips: state.midiClips,
     });
 
     let prevRefs = getMusicalSnapshot(useSongStore.getState());
@@ -337,6 +341,19 @@ export default function App() {
       if (keyLower === 'k' && !e.shiftKey && !store.isKeyboardMelodyEnabled) {
         e.preventDefault();
         store.setMetronomeActive(!store.isMetronomeActive);
+        return;
+      }
+
+      // L: Alternar modo PAT / SONG estilo FL Studio (cuando el teclado QWERTY melódico está desactivado)
+      if (keyLower === 'l' && !e.shiftKey && !store.isKeyboardMelodyEnabled) {
+        e.preventDefault();
+        const nextMode = store.playbackMode === 'pattern' ? 'song' : 'pattern';
+        store.setPlaybackMode(nextMode);
+        notify.info(
+          nextMode === 'pattern' ? 'Modo PAT (Bucle de Patrón)' : 'Modo SONG (Playlist Completa)',
+          undefined,
+          1600
+        );
         return;
       }
 

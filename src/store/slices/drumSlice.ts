@@ -22,6 +22,8 @@ export const initialDrumState: DrumState = {
   drumChannels: DEFAULT_DRUM_CHANNELS,
   activeDrumKitId: 'kit_1',
   patternLengths: [16, 16, 16, 16, 16, 16, 16, 16],
+  drumPatternNames: [],
+  drumArrangementMode: 'sequencer',
   userDrumPatternEdit: 0,
   currentDrumPatternEdit: 0,
   isLiveFollowLocked: false,
@@ -95,6 +97,19 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set, get)
       patternLengths: nextLengths
     };
   }),
+
+  renameDrumPattern: (patternIndex: number, name: string) => set((state) => {
+    const trimmed = name.trim();
+    const totalPatterns = state.drumChannels[0]?.patterns.length || 8;
+    const nextNames = [...(state.drumPatternNames || [])];
+    while (nextNames.length < totalPatterns) {
+      nextNames.push('');
+    }
+    nextNames[patternIndex] = trimmed;
+    return { drumPatternNames: nextNames };
+  }),
+
+  setDrumArrangementMode: (drumArrangementMode) => set({ drumArrangementMode }),
 
   addDrumChannel: (channel) => set((state) => ({ drumChannels: [...state.drumChannels, channel] })),
 
@@ -227,9 +242,13 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set, get)
       newIndex = (nextChannels[0]?.patterns.length ?? 1) - 1;
       const nextLengths = [...(state.patternLengths || [])];
       nextLengths.push(16);
+      const nextNames = [...(state.drumPatternNames || [])];
+      while (nextNames.length < newIndex) nextNames.push('');
+      nextNames.push('');
       return {
         drumChannels: nextChannels,
         patternLengths: nextLengths,
+        drumPatternNames: nextNames,
         userDrumPatternEdit: newIndex,
         currentDrumPatternEdit: newIndex,
         isLiveFollowLocked: state.isPlaying ? true : state.isLiveFollowLocked
@@ -251,9 +270,14 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set, get)
       newIndex = (nextChannels[0]?.patterns.length ?? 1) - 1;
       const nextLengths = [...(state.patternLengths || [])];
       nextLengths.push(sourceLen);
+      const nextNames = [...(state.drumPatternNames || [])];
+      while (nextNames.length < newIndex) nextNames.push('');
+      const sourceCustomName = state.drumPatternNames?.[sourceIndex]?.trim();
+      nextNames.push(sourceCustomName ? `${sourceCustomName} (copia)` : '');
       return {
         drumChannels: nextChannels,
         patternLengths: nextLengths,
+        drumPatternNames: nextNames,
         userDrumPatternEdit: newIndex,
         currentDrumPatternEdit: newIndex,
         isLiveFollowLocked: state.isPlaying ? true : state.isLiveFollowLocked
@@ -272,6 +296,7 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set, get)
     });
 
     const nextLengths = (state.patternLengths || []).filter((_, idx) => idx !== targetIndex);
+    const nextNames = (state.drumPatternNames || []).filter((_, idx) => idx !== targetIndex);
 
     const nextChain: PatternChainItem[] = normalizePatternChainItems(state.patternChain).map(item => {
       if (item.patternIndex === undefined || item.patternIndex < 0) return item;
@@ -280,12 +305,51 @@ export const createDrumSlice: SliceCreator<DrumState & DrumActions> = (set, get)
       return item;
     });
 
+    const removedMidiClipIds = new Set<string>();
+    const nextMidiClips = (state.midiClips || []).reduce<typeof state.midiClips>((acc, clip) => {
+      if (clip.sourceType !== 'drums') {
+        acc.push(clip);
+        return acc;
+      }
+      const pIdx = clip.drumPatternIndex ?? 0;
+      if (pIdx === targetIndex) {
+        removedMidiClipIds.add(clip.id);
+        return acc;
+      }
+      if (pIdx > targetIndex) {
+        acc.push({ ...clip, drumPatternIndex: pIdx - 1 });
+        return acc;
+      }
+      acc.push(clip);
+      return acc;
+    }, []);
+
+    const nextSelectedMidiClipIds = removedMidiClipIds.size > 0
+      ? (state.selectedMidiClipIds || []).filter((id) => !removedMidiClipIds.has(id))
+      : state.selectedMidiClipIds;
+
     const newEditIndex = Math.max(0, Math.min(totalPatterns - 2, state.userDrumPatternEdit >= targetIndex ? state.userDrumPatternEdit - 1 : state.userDrumPatternEdit));
+    const nextSelectedPatternRef =
+      state.selectedPatternRef?.sourceType === 'drums'
+        ? {
+            sourceType: 'drums' as const,
+            drumPatternIndex:
+              state.selectedPatternRef.drumPatternIndex === targetIndex
+                ? newEditIndex
+                : state.selectedPatternRef.drumPatternIndex > targetIndex
+                ? state.selectedPatternRef.drumPatternIndex - 1
+                : state.selectedPatternRef.drumPatternIndex
+          }
+        : state.selectedPatternRef;
 
     return {
       drumChannels: nextChannels,
       patternLengths: nextLengths,
+      drumPatternNames: nextNames,
       patternChain: nextChain,
+      midiClips: nextMidiClips,
+      selectedMidiClipIds: nextSelectedMidiClipIds,
+      selectedPatternRef: nextSelectedPatternRef,
       userDrumPatternEdit: newEditIndex,
       currentDrumPatternEdit: newEditIndex,
       isLiveFollowLocked: state.isPlaying ? true : state.isLiveFollowLocked

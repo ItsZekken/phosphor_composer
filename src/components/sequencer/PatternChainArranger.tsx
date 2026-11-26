@@ -20,7 +20,9 @@ import {
   Repeat,
   Wand2,
   Sparkles,
-  Play
+  Play,
+  ArrowUpRight,
+  Radio
 } from 'lucide-react';
 
 const PATTERN_PALETTE = [
@@ -137,7 +139,13 @@ export const PatternChainArranger: React.FC = () => {
     removeChainItem,
     chainClipboard,
     drumTimelineViewport,
-    setDrumTimelineViewport
+    setDrumTimelineViewport,
+    drumArrangementMode,
+    setDrumArrangementMode,
+    midiClips,
+    setSelectedPatternRef,
+    setActiveView,
+    importDrumChainToMidiTrack
   } = useSongStore(useShallow(state => ({
     patternChain: state.patternChain || [],
     drumChannels: state.drumChannels || [],
@@ -170,8 +178,20 @@ export const PatternChainArranger: React.FC = () => {
     removeChainItem: state.removeChainItem,
     chainClipboard: state.chainClipboard || [],
     drumTimelineViewport: state.drumTimelineViewport,
-    setDrumTimelineViewport: state.setDrumTimelineViewport
+    setDrumTimelineViewport: state.setDrumTimelineViewport,
+    drumArrangementMode: state.drumArrangementMode,
+    setDrumArrangementMode: state.setDrumArrangementMode,
+    midiClips: state.midiClips || [],
+    setSelectedPatternRef: state.setSelectedPatternRef,
+    setActiveView: state.setActiveView,
+    importDrumChainToMidiTrack: state.importDrumChainToMidiTrack
   })));
+
+  const playlistDrumClipsCount = useMemo(
+    () => midiClips.filter((c) => c.sourceType === 'drums').length,
+    [midiClips]
+  );
+  const isPlaylistControlled = drumArrangementMode === 'playlist' || playlistDrumClipsCount > 0;
 
   const beatsPerMeasure = timeSignature === '3/4' ? 3 : timeSignature === '6/8' ? 6 : 4;
   const totalPatterns = drumChannels[0]?.patterns?.length || 8;
@@ -830,6 +850,57 @@ export const PatternChainArranger: React.FC = () => {
           <span className="chain-meta-summary">
             {linearClips.length} {linearClips.length === 1 ? 'clip' : 'clips'} · {Math.ceil(maxClipEndMeasure)} c.
           </span>
+
+          {isPlaylistControlled ? (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <button
+                type="button"
+                className="piano-playlist-link-btn is-playlist"
+                onClick={() => {
+                  setSelectedPatternRef({ sourceType: 'drums', drumPatternIndex: currentDrumPatternEdit });
+                  setActiveView('audio-tracks');
+                }}
+                title="Los patrones de batería se están secuenciando en los MIDI Tracks de TRACKS. Clic para abrir TRACKS."
+              >
+                <Radio size={11} />
+                <span>EN TRACKS ({playlistDrumClipsCount})</span>
+                <ArrowUpRight size={11} />
+              </button>
+              {playlistDrumClipsCount === 0 && (
+                <button
+                  type="button"
+                  className="physical-btn"
+                  style={{ fontSize: '0.64rem', padding: '0 6px', height: '22px' }}
+                  onClick={() => setDrumArrangementMode('sequencer')}
+                  title="Devolver control al secuenciador local"
+                >
+                  Usar local
+                </button>
+              )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="piano-playlist-link-btn"
+              onClick={() => {
+                if (linearClips.length > 0) {
+                  importDrumChainToMidiTrack();
+                } else {
+                  setSelectedPatternRef({ sourceType: 'drums', drumPatternIndex: currentDrumPatternEdit });
+                }
+                setActiveView('audio-tracks');
+              }}
+              title={
+                linearClips.length > 0
+                  ? 'Exportar esta cadena de batería a un MIDI Track en TRACKS (Playlist)'
+                  : 'Secuenciar este patrón de batería en TRACKS (Playlist)'
+              }
+            >
+              <Radio size={11} />
+              <span>{linearClips.length > 0 ? 'ENVIAR A TRACKS' : 'SECUENCIAR EN TRACKS'}</span>
+              <ArrowUpRight size={11} />
+            </button>
+          )}
         </div>
 
         {/* Brocha de Patrones (Click selecciona, Drag suelta en el timeline) */}

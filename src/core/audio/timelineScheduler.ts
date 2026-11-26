@@ -1,7 +1,8 @@
 /**
  * timelineScheduler.ts
  * Transforma determinísticamente una SessionV2 o el estado en vivo del store
- * en una lista cronológica de eventos de audio, con caché LRU de patrones de acordes.
+ * en una lista cronológica de eventos de audio, con caché LRU de patrones de acordes
+ * y soporte completo para MIDI Tracks / Patrones estilo FL Studio (modos SONG y PAT).
  */
 
 import type { SessionV2 } from '../session';
@@ -17,13 +18,25 @@ import {
   type ChannelConfig,
   type ChordBlock,
   type DrumChannel,
+  type MidiPatternClip,
+  type MidiTrack,
   type PatternChainItem,
   type PianoRollTrack,
+  type PlaybackMode,
+  type SelectedPatternRef,
   type StyleMarker,
   type TempoMarker,
   type TimeSignature
 } from '../../utils/typeDefinitions';
 import type { PatternDef } from '../../patterns/patternTypes';
+import {
+  ensureTrackPatterns,
+  getBeatsPerMeasure,
+  getMelodyPatternLengthBeats,
+  resolveArrangedDrumClips,
+  resolveArrangedMelodyTrackNotes,
+  resolvePatternAuditionTarget
+} from './arrangementResolver';
 
 interface TimelineScheduleInput {
   bpm: number;
@@ -35,13 +48,20 @@ interface TimelineScheduleInput {
   styleMarkers: StyleMarker[];
   defaultPattern: string;
   chordOctaveShift: number;
-  tracks: Array<{ id: string; channelId: string; notes?: PianoRollTrack['notes'] }>;
+  tracks: PianoRollTrack[];
   audioClips?: Array<{ isMuted?: boolean; startBeat: number; durationSeconds?: number }>;
   drumChannels: DrumChannel[];
   patternChain: PatternChainItem[];
   isPatternRepeatOn: boolean;
   patternLengths?: number[];
   currentDrumPatternEdit?: number;
+  drumArrangementMode?: 'sequencer' | 'playlist';
+  midiTracks?: MidiTrack[];
+  midiClips?: MidiPatternClip[];
+  playbackMode?: PlaybackMode;
+  activeView?: string;
+  activeTrackId?: string;
+  selectedPatternRef?: SelectedPatternRef | null;
 }
 
 const CHORD_PATTERN_LRU_LIMIT = 512;
@@ -62,7 +82,6 @@ function renderChordPatternZeroShiftedCached(
   const key = `${block.chord}|${block.durationBeats}|${block.voicing ?? ''}|${block.inversion ?? 0}|${block.type ?? ''}|${block.bassNote ?? ''}|${pattern}|${chordOctaveShift}`;
   const hit = chordPatternLruCache.get(key);
   if (hit !== undefined) {
-    // Promover en LRU sin re-computar armonías ni inversiones
     chordPatternLruCache.delete(key);
     chordPatternLruCache.set(key, hit);
     return hit;
@@ -104,13 +123,11 @@ function scheduleTimelineCore(
   const tempoMarkers = input.tempoMarkers || [];
   const tempoMap = createTempoMap(bpm, tempoMarkers);
   const swing = input.swing || 0;
-  const beatsPerMeasure = input.timeSignature === '3/4' ? 3 : input.timeSignature === '6/8' ? 6 : 4;
+  const beatsPerMeasure = getBeatsPerMeasure(input.timeSignature);
 
   const chordEvents: ScheduledChordEvent[] = [];
   const trackEvents: ScheduledTrackEvent[] = [];
   const drumEvents: ScheduledDrumEvent[] = [];
-
-  let maxBeat = 4;
 
   // 1. Armadura de Mute / Solo del Mixer
   const channels = input.channels || {};
@@ -131,6 +148,125 @@ function scheduleTimelineCore(
     if (isAnyChannelSolo && !ch.solo) return false;
     return true;
   };
+
+  const drumChannels = input.drumChannels || [];
+  let isAnyDrumSolo = false;
+  for (let i = 0; i < drumChannels.length; i++) {
+    if (drumChannels[i].solo) {
+      isAnyDrumSolo = true;
+      break;
+    }
+  }
+
+  // --- MODO PAT (Audición aislada en bucle del patrón activo, estilo FL Studio) ---
+  if (input.playbackMode === 'pattern') {
+    const target = resolvePatternAuditionTarget({
+      activeView: input.activeView,
+      currentDrumPatternEdit: input.currentDrumPatternEdit,
+      tracks: input.tracks,
+      activeTrackId: input.activeTrackId,
+      selectedPatternRef: input.selectedPatternRef
+    });
+
+    if (target.sourceType === 'drums') {
+      const patternIdx = Math.max(0, target.drumPatternIndex);
+      const patternLen = input.patternLengths?.[patternIdx] || 16;
+      const stepDuration = beatsPerMeasure / patternLen;
+      const isDrumsAudible = isChannelAudible('drums');
+
+      if (isDrumsAudible && drumChannels.length > 0) {
+        for (let stepIdx = 0; stepIdx < patternLen; stepIdx++) {
+          const stepBeat = applySwingBeat(stepIdx * stepDuration, swing);
+          const timeSeconds = tempoMap.beatToSeconds(stepBeat);
+
+          for (let chIdx = 0; chIdx < drumChannels.length; chIdx++) {
+            const ch = drumChannels[chIdx];
+            if (ch.muted) continue;
+            if (isAnyDrumSolo && !ch.solo) continue;
+            const pat = ch.patterns?.[patternIdx];
+            if (!pat) continue;
+            const dStep = pat[stepIdx];
+            if (dStep && dStep.isActive) {
+              drumEvents.push({
+                channelId: ch.id,
+                sampleUrl: ch.sampleUrl,
+                timeSeconds,
+                velocity: dStep.velocity,
+                pan: ch.pan ?? 0,
+                volume: ch.volume
+              });
+            }
+          }
+        }
+      }
+
+      return {
+        totalBeats: beatsPerMeasure,
+        totalDurationSeconds: tempoMap.getTotalDurationSeconds(beatsPerMeasure),
+        chordEvents,
+        trackEvents,
+        drumEvents
+      };
+    }
+
+    // Audición de patrón de melodía
+    const track = (input.tracks || []).find((t) => t.id === target.melodyTrackId) || input.tracks?.[0];
+    if (track) {
+      const { patterns, activePattern } = ensureTrackPatterns(track);
+      const pattern = patterns.find((p) => p.id === target.melodyPatternId) || activePattern;
+      const patLenBeats = getMelodyPatternLengthBeats(pattern, beatsPerMeasure);
+
+      if (isChannelAudible(track.channelId)) {
+        const notes = pattern.notes || [];
+        for (let nIdx = 0; nIdx < notes.length; nIdx++) {
+          const n = notes[nIdx];
+          if (n.startBeat >= patLenBeats - 1e-6) continue;
+          const clampedDur = Math.max(0.02, Math.min(n.durationBeats, patLenBeats - n.startBeat));
+          const swungStart = applySwingBeat(n.startBeat, swing);
+          const swungEnd = applySwingBeat(n.startBeat + clampedDur, swing);
+          const swungDuration = Math.max(0.02, swungEnd - swungStart);
+
+          trackEvents.push({
+            trackId: track.id,
+            channelId: track.channelId,
+            note: n.note,
+            timeSeconds: tempoMap.beatToSeconds(swungStart),
+            durationSeconds: tempoMap.getDurationSeconds(swungStart, swungDuration),
+            velocity: typeof n.velocity === 'number' ? n.velocity : 0.8
+          });
+        }
+      }
+
+      return {
+        totalBeats: patLenBeats,
+        totalDurationSeconds: tempoMap.getTotalDurationSeconds(patLenBeats),
+        chordEvents,
+        trackEvents,
+        drumEvents
+      };
+    }
+
+    return {
+      totalBeats: beatsPerMeasure,
+      totalDurationSeconds: tempoMap.getTotalDurationSeconds(beatsPerMeasure),
+      chordEvents,
+      trackEvents,
+      drumEvents
+    };
+  }
+
+  // --- MODO SONG (Arreglo completo: Acordes + MIDI Tracks/Patrones + Melodías + Drums + Audio) ---
+  let maxBeat = beatsPerMeasure;
+  const midiTracks = input.midiTracks || [];
+  const midiClips = input.midiClips || [];
+
+  // Extender maxBeat al alcance de cualquier clip MIDI no silenciado en la Playlist
+  for (let i = 0; i < midiClips.length; i++) {
+    const clip = midiClips[i];
+    if (clip.isMuted) continue;
+    const clipEnd = (clip.startBeat || 0) + (clip.durationBeats || 0);
+    if (clipEnd > maxBeat) maxBeat = clipEnd;
+  }
 
   // 2. Programar Acordes y Patrones Rítmicos (con caché LRU de patrones)
   const isChordsAudible = isChannelAudible('chords');
@@ -168,12 +304,13 @@ function scheduleTimelineCore(
     }
   }
 
-  // 3. Programar Pistas Melódicas del Piano Roll
+  // 3. Programar Pistas Melódicas (desde MIDI Tracks si están en Playlist, o directas)
   const tracks = input.tracks || [];
   for (let t = 0; t < tracks.length; t++) {
     const track = tracks[t];
     const isAudible = isChannelAudible(track.channelId);
-    const notes = track.notes || [];
+    const { notes } = resolveArrangedMelodyTrackNotes(track, midiTracks, midiClips, beatsPerMeasure);
+
     for (let nIdx = 0; nIdx < notes.length; nIdx++) {
       const n = notes[nIdx];
       const endBeat = n.startBeat + n.durationBeats;
@@ -209,44 +346,35 @@ function scheduleTimelineCore(
     }
   }
 
-  // 5. Programar Secuenciador de Batería
+  // 5. Programar Secuenciador de Batería (Playlist MIDI Tracks tiene prioridad si está activo)
   const isDrumsAudible = isChannelAudible('drums');
-  const drumChannels = input.drumChannels || [];
-  let isAnyDrumSolo = false;
-  for (let i = 0; i < drumChannels.length; i++) {
-    if (drumChannels[i].solo) {
-      isAnyDrumSolo = true;
-      break;
-    }
-  }
-
-  const patternChain = input.patternChain || [];
-  const isPatternRepeatOn = input.isPatternRepeatOn;
+  const drumResolution = resolveArrangedDrumClips(midiTracks, midiClips, input.drumArrangementMode);
 
   if (isDrumsAudible && drumChannels.length > 0) {
-    if (!isPatternRepeatOn && patternChain.length > 0) {
-      const linearClips = normalizePatternChainToLinear(patternChain);
-
-      for (let c = 0; c < linearClips.length; c++) {
-        const clip = linearClips[c];
-        const patternIdx = clip.patternIndex;
-        const clipStartBeat = clip.startMeasure * beatsPerMeasure;
-        const clipEndBeat = (clip.startMeasure + clip.durationMeasures) * beatsPerMeasure;
-        if (clipEndBeat > maxBeat) maxBeat = clipEndBeat;
-
-        const startWholeMeasure = Math.floor(clip.startMeasure);
-        const endWholeMeasure = Math.ceil(clip.startMeasure + clip.durationMeasures);
+    if (drumResolution.isPlaylistControlled) {
+      const clips = drumResolution.audibleDrumClips;
+      for (let c = 0; c < clips.length; c++) {
+        const clip = clips[c];
+        const patternIdx = Math.max(0, clip.drumPatternIndex ?? 0);
         const patternLen = input.patternLengths?.[patternIdx] || 16;
         const stepDuration = beatsPerMeasure / patternLen;
+        const winStart = Math.max(0, clip.offsetBeats || 0);
+        const dur = Math.max(0, clip.durationBeats || 0);
+        const winEnd = winStart + dur;
+        if (dur <= 1e-6) continue;
 
-        for (let m = startWholeMeasure; m < endWholeMeasure; m++) {
-          const measureStartBeat = m * beatsPerMeasure;
+        const firstCycle = Math.floor(winStart / beatsPerMeasure);
+        const lastCycle = Math.floor((winEnd - 1e-6) / beatsPerMeasure);
+
+        for (let cycle = firstCycle; cycle <= lastCycle; cycle++) {
+          const cycleBase = cycle * beatsPerMeasure;
           for (let stepIdx = 0; stepIdx < patternLen; stepIdx++) {
-            const rawStepBeat = measureStartBeat + stepIdx * stepDuration;
-            if (rawStepBeat < clipStartBeat - 1e-6 || rawStepBeat >= clipEndBeat - 1e-6) {
+            const localBeat = cycleBase + stepIdx * stepDuration;
+            if (localBeat < winStart - 1e-6 || localBeat >= winEnd - 1e-6) {
               continue;
             }
-            const stepBeat = applySwingBeat(rawStepBeat, swing);
+            const rawSongBeat = clip.startBeat + (localBeat - winStart);
+            const stepBeat = applySwingBeat(rawSongBeat, swing);
             const timeSeconds = tempoMap.beatToSeconds(stepBeat);
 
             for (let chIdx = 0; chIdx < drumChannels.length; chIdx++) {
@@ -272,34 +400,86 @@ function scheduleTimelineCore(
         }
       }
     } else {
-      const patternIdx = input.currentDrumPatternEdit || 0;
-      const totalMeasures = Math.max(1, Math.ceil(maxBeat / beatsPerMeasure));
-      const patternLen = input.patternLengths?.[patternIdx] || 16;
-      const stepDuration = beatsPerMeasure / patternLen;
+      const patternChain = input.patternChain || [];
+      const isPatternRepeatOn = input.isPatternRepeatOn;
 
-      for (let m = 0; m < totalMeasures; m++) {
-        const measureStartBeat = m * beatsPerMeasure;
-        for (let stepIdx = 0; stepIdx < patternLen; stepIdx++) {
-          const stepBeat = applySwingBeat(measureStartBeat + stepIdx * stepDuration, swing);
-          const timeSeconds = tempoMap.beatToSeconds(stepBeat);
+      if (!isPatternRepeatOn && patternChain.length > 0) {
+        const linearClips = normalizePatternChainToLinear(patternChain);
 
-          for (let chIdx = 0; chIdx < drumChannels.length; chIdx++) {
-            const ch = drumChannels[chIdx];
-            if (ch.muted) continue;
-            if (isAnyDrumSolo && !ch.solo) continue;
-            const pat = ch.patterns?.[patternIdx];
-            if (!pat) continue;
+        for (let c = 0; c < linearClips.length; c++) {
+          const clip = linearClips[c];
+          const patternIdx = clip.patternIndex;
+          const clipStartBeat = clip.startMeasure * beatsPerMeasure;
+          const clipEndBeat = (clip.startMeasure + clip.durationMeasures) * beatsPerMeasure;
+          if (clipEndBeat > maxBeat) maxBeat = clipEndBeat;
 
-            const dStep = pat[stepIdx];
-            if (dStep && dStep.isActive) {
-              drumEvents.push({
-                channelId: ch.id,
-                sampleUrl: ch.sampleUrl,
-                timeSeconds,
-                velocity: dStep.velocity,
-                pan: ch.pan ?? 0,
-                volume: ch.volume
-              });
+          const startWholeMeasure = Math.floor(clip.startMeasure);
+          const endWholeMeasure = Math.ceil(clip.startMeasure + clip.durationMeasures);
+          const patternLen = input.patternLengths?.[patternIdx] || 16;
+          const stepDuration = beatsPerMeasure / patternLen;
+
+          for (let m = startWholeMeasure; m < endWholeMeasure; m++) {
+            const measureStartBeat = m * beatsPerMeasure;
+            for (let stepIdx = 0; stepIdx < patternLen; stepIdx++) {
+              const rawStepBeat = measureStartBeat + stepIdx * stepDuration;
+              if (rawStepBeat < clipStartBeat - 1e-6 || rawStepBeat >= clipEndBeat - 1e-6) {
+                continue;
+              }
+              const stepBeat = applySwingBeat(rawStepBeat, swing);
+              const timeSeconds = tempoMap.beatToSeconds(stepBeat);
+
+              for (let chIdx = 0; chIdx < drumChannels.length; chIdx++) {
+                const ch = drumChannels[chIdx];
+                if (ch.muted) continue;
+                if (isAnyDrumSolo && !ch.solo) continue;
+                const pat = ch.patterns?.[patternIdx];
+                if (!pat) continue;
+
+                const dStep = pat[stepIdx];
+                if (dStep && dStep.isActive) {
+                  drumEvents.push({
+                    channelId: ch.id,
+                    sampleUrl: ch.sampleUrl,
+                    timeSeconds,
+                    velocity: dStep.velocity,
+                    pan: ch.pan ?? 0,
+                    volume: ch.volume
+                  });
+                }
+              }
+            }
+          }
+        }
+      } else {
+        const patternIdx = input.currentDrumPatternEdit || 0;
+        const totalMeasures = Math.max(1, Math.ceil(maxBeat / beatsPerMeasure));
+        const patternLen = input.patternLengths?.[patternIdx] || 16;
+        const stepDuration = beatsPerMeasure / patternLen;
+
+        for (let m = 0; m < totalMeasures; m++) {
+          const measureStartBeat = m * beatsPerMeasure;
+          for (let stepIdx = 0; stepIdx < patternLen; stepIdx++) {
+            const stepBeat = applySwingBeat(measureStartBeat + stepIdx * stepDuration, swing);
+            const timeSeconds = tempoMap.beatToSeconds(stepBeat);
+
+            for (let chIdx = 0; chIdx < drumChannels.length; chIdx++) {
+              const ch = drumChannels[chIdx];
+              if (ch.muted) continue;
+              if (isAnyDrumSolo && !ch.solo) continue;
+              const pat = ch.patterns?.[patternIdx];
+              if (!pat) continue;
+
+              const dStep = pat[stepIdx];
+              if (dStep && dStep.isActive) {
+                drumEvents.push({
+                  channelId: ch.id,
+                  sampleUrl: ch.sampleUrl,
+                  timeSeconds,
+                  velocity: dStep.velocity,
+                  pan: ch.pan ?? 0,
+                  volume: ch.volume
+                });
+              }
             }
           }
         }
@@ -320,7 +500,7 @@ function scheduleTimelineCore(
 }
 
 /**
- * Calcula los eventos programados en segundos para una sesión SessionV2 (usado en export y pruebas).
+ * Calcula los eventos programados en segundos para una sesión SessionV2 (siempre modo SONG para export y pruebas).
  */
 export function scheduleSessionTimeline(
   session: SessionV2,
@@ -338,12 +518,16 @@ export function scheduleSessionTimeline(
       defaultPattern: session.harmony.defaultPattern || 'hold',
       chordOctaveShift: session.harmony.chordOctaveShift || 0,
       tracks: session.tracks || [],
-      audioClips: (session as any).audio?.clips,
+      audioClips: session.audio?.clips,
       drumChannels: session.drums.drumChannels || [],
       patternChain: session.drums.patternChain || [],
       isPatternRepeatOn: Boolean(session.drums.isPatternRepeatOn),
       patternLengths: session.drums.patternLengths,
-      currentDrumPatternEdit: session.drums.currentDrumPatternEdit || 0
+      currentDrumPatternEdit: session.drums.currentDrumPatternEdit || 0,
+      drumArrangementMode: session.drums.drumArrangementMode,
+      midiTracks: session.midi?.tracks,
+      midiClips: session.midi?.clips,
+      playbackMode: 'song'
     },
     customPatterns
   );
@@ -357,9 +541,18 @@ export function scheduleStoreTimeline(state: any): ScheduledSessionEvents {
   const activeId = state.activeTrackId;
   const activeNotes = state.melodyNotes;
 
-  const syncedTracks = rawTracks.map((t) =>
-    t.id === activeId && activeNotes ? { id: t.id, channelId: t.channelId, notes: activeNotes } : t
-  );
+  const syncedTracks: PianoRollTrack[] = rawTracks.map((t) => {
+    if (t.id === activeId && activeNotes && t.notes !== activeNotes) {
+      const { patterns, activePatternId } = ensureTrackPatterns(t);
+      return {
+        ...t,
+        notes: activeNotes,
+        activePatternId,
+        patterns: patterns.map((p) => (p.id === activePatternId ? { ...p, notes: activeNotes } : p))
+      };
+    }
+    return t;
+  });
 
   return scheduleTimelineCore(
     {
@@ -378,7 +571,14 @@ export function scheduleStoreTimeline(state: any): ScheduledSessionEvents {
       patternChain: state.patternChain || [],
       isPatternRepeatOn: Boolean(state.isPatternRepeatOn),
       patternLengths: state.patternLengths,
-      currentDrumPatternEdit: state.currentDrumPatternEdit || 0
+      currentDrumPatternEdit: state.currentDrumPatternEdit || 0,
+      drumArrangementMode: state.drumArrangementMode,
+      midiTracks: state.midiTracks,
+      midiClips: state.midiClips,
+      playbackMode: state.playbackMode || 'song',
+      activeView: state.activeView,
+      activeTrackId: state.activeTrackId,
+      selectedPatternRef: state.selectedPatternRef
     },
     state.customPatterns || []
   );

@@ -164,12 +164,23 @@ export interface SynthSettings {
 
 export type ChannelInstrument = 'synth' | 'piano' | 'sampler';
 
+export interface MelodyPattern {
+  id: string;
+  name: string;
+  notes: MelodyNote[];
+  /** Duración explícita en beats (undefined = auto-ajuste a compases enteros según notas, mín 1 compás) */
+  lengthBeats?: number;
+}
+
 export interface PianoRollTrack {
   id: string;
   name: string;
   color: string;
   channelId: string;
   notes: MelodyNote[];
+  patterns?: MelodyPattern[];
+  activePatternId?: string;
+  arrangementMode?: 'direct' | 'playlist';
   synthSettings?: SynthSettings;
   viewport?: {
     scrollLeft?: number;
@@ -377,4 +388,39 @@ export interface AudioTrack {
 export interface AudioTracksTimelineViewport {
   scrollLeft: number;
   zoomLevel: number; // Píxeles por beat (default 60)
+}
+
+export type PlaybackMode = 'song' | 'pattern';
+export type PlaylistTool = 'paint' | 'slice' | 'select';
+
+export interface MidiTrack {
+  id: string;
+  name: string;
+  color: string;
+  muted: boolean;
+  solo: boolean;
+}
+
+export type SelectedPatternRef =
+  | {
+      sourceType: 'drums';
+      drumPatternIndex: number;
+    }
+  | {
+      sourceType: 'melody';
+      melodyTrackId: string;
+      melodyPatternId: string;
+    };
+
+export interface MidiPatternClip {
+  id: string;
+  midiTrackId: string;
+  sourceType: 'drums' | 'melody';
+  drumPatternIndex?: number;
+  melodyTrackId?: string;
+  melodyPatternId?: string;
+  startBeat: number;
+  durationBeats: number;
+  offsetBeats: number;
+  isMuted: boolean;
 }

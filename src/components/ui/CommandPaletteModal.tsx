@@ -57,6 +57,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     accent: '#82a5f5',
     items: [
       { keys: ['Space'], desc: 'Reproducir / Pausar' },
+      { keys: ['L'], desc: 'Alternar modo PAT (patrón) / SONG (canción)' },
       { keys: ['W', 'Home'], desc: 'Detener y volver al inicio' },
       { keys: ['R'], desc: 'Alternar Loop (en Tracks: Grabar)' },
       { keys: ['K'], desc: 'Alternar Metrónomo' },
@@ -109,12 +110,14 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     ]
   },
   {
-    title: 'Drum Sequencer y Tracks',
+    title: 'Drum Sequencer y Tracks (Playlist)',
     accent: '#e5a93c',
     items: [
-      { keys: ['S / C'], desc: 'Cortar clip de audio / patrón en el cabezal' },
+      { keys: ['P / C / E'], desc: 'Herramientas Playlist: Pincel · Navaja · Seleccionar' },
+      { keys: ['S'], desc: 'Dividir clip MIDI o Audio en el cabezal' },
+      { keys: ['Shift', 'Arrastrar'], desc: 'Clonar clips de patrón MIDI' },
       { keys: ['R'], desc: 'Iniciar / detener grabación en pista armada (Tracks)' },
-      { keys: ['Ctrl', 'D'], desc: 'Duplicar clips seleccionados' },
+      { keys: ['Ctrl', 'C / V / D'], desc: 'Copiar / Pegar / Duplicar clips seleccionados' },
       { keys: ['Supr'], desc: 'Eliminar selección activa' }
     ]
   },
@@ -217,9 +220,9 @@ export const CommandPaletteModal: React.FC = () => {
       },
       {
         id: 'view-tracks',
-        label: 'Ir a Audio Tracks',
+        label: 'Ir a Tracks / Playlist (MIDI & Audio)',
         category: 'Navegación',
-        keywords: 'audio pistas grabar wav multitrack',
+        keywords: 'audio midi tracks playlist patrones fl studio grabar wav multitrack',
         shortcut: 'Alt+4',
         icon: <AudioWaveform size={14} />,
         run: () => store().setActiveView('audio-tracks')
@@ -256,6 +259,20 @@ export const CommandPaletteModal: React.FC = () => {
         shortcut: 'W',
         icon: <Square size={14} />,
         run: () => toneEngine.stop()
+      },
+      {
+        id: 'toggle-playback-mode',
+        label: 'Alternar modo PAT / SONG (FL Studio)',
+        category: 'Transporte',
+        keywords: 'pat song patron playlist modo reproduccion fl',
+        shortcut: 'L',
+        icon: <Grid3X3 size={14} />,
+        run: () => {
+          const s = store();
+          const next = s.playbackMode === 'pattern' ? 'song' : 'pattern';
+          s.setPlaybackMode(next);
+          notify.info(next === 'pattern' ? 'Modo PAT (Bucle de Patrón)' : 'Modo SONG (Playlist Completa)');
+        }
       },
       {
         id: 'toggle-loop',

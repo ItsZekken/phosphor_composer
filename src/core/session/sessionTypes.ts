@@ -52,6 +52,8 @@ export interface DrumSessionState {
   activeDrumKitId: string;
   drumChannels: DrumChannel[];
   patternLengths?: number[];
+  drumPatternNames?: string[];
+  drumArrangementMode?: 'sequencer' | 'playlist';
   currentDrumPatternEdit?: number;
   drumTimelineViewport?: { scrollLeft: number; zoomLevel: number };
 }
@@ -76,6 +78,11 @@ export interface AudioSessionState {
   latencyMs?: number;
 }
 
+export interface MidiPlaylistSessionState {
+  tracks: import('../../utils/typeDefinitions').MidiTrack[];
+  clips: import('../../utils/typeDefinitions').MidiPatternClip[];
+}
+
 /**
  * Esquema de Proyecto / Sesión Canónico v2 (Phosphor Composer)
  */
@@ -90,6 +97,7 @@ export interface SessionV2 {
   mixer: MixerState;
   ui?: UIPreferenceState;
   audio?: AudioSessionState;
+  midi?: MidiPlaylistSessionState;
   customSynthSettings?: Record<string, SynthSettings>;
 }
 

@@ -1,10 +1,25 @@
 import type { SliceCreator, TrackState, TrackActions } from '../types';
-import type { MelodyNote, PianoRollTrack, ChannelConfig } from '../../utils/typeDefinitions';
+import type { MelodyNote, MelodyPattern, PianoRollTrack, ChannelConfig } from '../../utils/typeDefinitions';
 import { generateId } from '../../utils/idGenerator';
 import { PIANO_ROLL_COLOR_PALETTE } from '../../components/visualizer/hooks/useStageTimelineNotes';
+import { ensureTrackPatterns } from '../../core/audio/arrangementResolver';
 
 const DEFAULT_TRACK_ID = 'track_melody_1';
 const DEFAULT_CHANNEL_ID = 'melody';
+const DEFAULT_PATTERN_ID = 'pat_melody_1_1';
+
+function syncTrackNotes(track: PianoRollTrack, nextNotes: MelodyNote[]): PianoRollTrack {
+  const { patterns, activePatternId } = ensureTrackPatterns(track);
+  const nextPatterns = patterns.map((p) =>
+    p.id === activePatternId ? { ...p, notes: nextNotes } : p
+  );
+  return {
+    ...track,
+    notes: nextNotes,
+    patterns: nextPatterns,
+    activePatternId
+  };
+}
 
 export const initialTrackState: TrackState = {
   tracks: [
@@ -14,6 +29,15 @@ export const initialTrackState: TrackState = {
       channelId: DEFAULT_CHANNEL_ID,
       color: PIANO_ROLL_COLOR_PALETTE[0] || '#6880ad',
       notes: [],
+      patterns: [
+        {
+          id: DEFAULT_PATTERN_ID,
+          name: 'Patrón 1',
+          notes: []
+        }
+      ],
+      activePatternId: DEFAULT_PATTERN_ID,
+      arrangementMode: 'direct',
       viewport: { scrollLeft: 0, scrollTop: 600, beatWidth: 40, rowHeight: 20 }
     }
   ],
@@ -32,6 +56,7 @@ export const createTrackSlice: SliceCreator<TrackState & TrackActions> = (set, g
     const channelId = `ch_${trackId}`;
     const trackName = name || `Melodía ${trackNum}`;
     const trackColor = PIANO_ROLL_COLOR_PALETTE[state.tracks.length % PIANO_ROLL_COLOR_PALETTE.length];
+    const firstPatternId = generateId('mpat');
 
     const newChannel: ChannelConfig = {
       id: channelId,
@@ -51,6 +76,15 @@ export const createTrackSlice: SliceCreator<TrackState & TrackActions> = (set, g
       channelId: channelId,
       color: trackColor,
       notes: [],
+      patterns: [
+        {
+          id: firstPatternId,
+          name: 'Patrón 1',
+          notes: []
+        }
+      ],
+      activePatternId: firstPatternId,
+      arrangementMode: 'direct',
       viewport: { scrollLeft: 0, scrollTop: 600, beatWidth: 40, rowHeight: 20 }
     };
 
@@ -76,12 +110,32 @@ export const createTrackSlice: SliceCreator<TrackState & TrackActions> = (set, g
     }
     const currentOrder = state.channelOrder || Object.keys(state.channels || {});
     const nextChannelOrder = currentOrder.filter(chId => chId !== track?.channelId);
+
+    const removedClipIds = new Set(
+      (state.midiClips || [])
+        .filter((c) => c.sourceType === 'melody' && c.melodyTrackId === id)
+        .map((c) => c.id)
+    );
+    const nextMidiClips = removedClipIds.size > 0
+      ? (state.midiClips || []).filter((c) => !removedClipIds.has(c.id))
+      : state.midiClips;
+    const nextSelectedMidiClipIds = removedClipIds.size > 0
+      ? (state.selectedMidiClipIds || []).filter((cid) => !removedClipIds.has(cid))
+      : state.selectedMidiClipIds;
+    const nextSelectedPatternRef =
+      state.selectedPatternRef?.sourceType === 'melody' && state.selectedPatternRef.melodyTrackId === id
+        ? { sourceType: 'drums' as const, drumPatternIndex: state.currentDrumPatternEdit || 0 }
+        : state.selectedPatternRef;
+
     return {
       tracks: nextTracks,
       activeTrackId: nextActiveId,
       melodyNotes: nextActiveTrack ? nextActiveTrack.notes : [],
       channels: nextChannels,
-      channelOrder: nextChannelOrder
+      channelOrder: nextChannelOrder,
+      midiClips: nextMidiClips,
+      selectedMidiClipIds: nextSelectedMidiClipIds,
+      selectedPatternRef: nextSelectedPatternRef
     };
   }),
 
@@ -109,9 +163,11 @@ export const createTrackSlice: SliceCreator<TrackState & TrackActions> = (set, g
 
   setActiveTrackId: (id) => set((state) => {
     const activeTrack = state.tracks.find(t => t.id === id);
+    if (!activeTrack) return { activeTrackId: id };
+    const { activePattern } = ensureTrackPatterns(activeTrack);
     return {
       activeTrackId: id,
-      melodyNotes: activeTrack ? activeTrack.notes : state.melodyNotes
+      melodyNotes: activePattern.notes
     };
   }),
 
@@ -131,7 +187,7 @@ export const createTrackSlice: SliceCreator<TrackState & TrackActions> = (set, g
   })),
 
   setTrackNotes: (trackId, notes) => set((state) => ({
-    tracks: state.tracks.map(t => t.id === trackId ? { ...t, notes } : t),
+    tracks: state.tracks.map(t => t.id === trackId ? syncTrackNotes(t, notes) : t),
     melodyNotes: state.activeTrackId === trackId ? notes : state.melodyNotes
   })),
 
@@ -141,7 +197,7 @@ export const createTrackSlice: SliceCreator<TrackState & TrackActions> = (set, g
       const activeTrack = state.tracks.find(t => t.id === state.activeTrackId);
       const currentNotes = activeTrack ? activeTrack.notes : state.melodyNotes;
       const nextNotes = [...currentNotes, newNote];
-      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? { ...t, notes: nextNotes } : t);
+      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? syncTrackNotes(t, nextNotes) : t);
       return { melodyNotes: nextNotes, tracks: nextTracks };
     });
     if (get().isAutoSuggestions) get().updateSuggestions();
@@ -152,7 +208,7 @@ export const createTrackSlice: SliceCreator<TrackState & TrackActions> = (set, g
       const activeTrack = state.tracks.find(t => t.id === state.activeTrackId);
       const currentNotes = activeTrack ? activeTrack.notes : state.melodyNotes;
       const nextNotes = currentNotes.map(n => n.id === id ? { ...n, ...updates } : n);
-      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? { ...t, notes: nextNotes } : t);
+      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? syncTrackNotes(t, nextNotes) : t);
       return { melodyNotes: nextNotes, tracks: nextTracks };
     });
     if (get().isAutoSuggestions) get().updateSuggestions();
@@ -163,7 +219,7 @@ export const createTrackSlice: SliceCreator<TrackState & TrackActions> = (set, g
       const activeTrack = state.tracks.find(t => t.id === state.activeTrackId);
       const currentNotes = activeTrack ? activeTrack.notes : state.melodyNotes;
       const nextNotes = currentNotes.filter(n => n.id !== id);
-      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? { ...t, notes: nextNotes } : t);
+      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? syncTrackNotes(t, nextNotes) : t);
       return { melodyNotes: nextNotes, tracks: nextTracks };
     });
     if (get().isAutoSuggestions) get().updateSuggestions();
@@ -171,7 +227,7 @@ export const createTrackSlice: SliceCreator<TrackState & TrackActions> = (set, g
 
   setMelodyNotes: (melodyNotes) => {
     set((state) => {
-      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? { ...t, notes: melodyNotes } : t);
+      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? syncTrackNotes(t, melodyNotes) : t);
       return { melodyNotes, tracks: nextTracks };
     });
     if (get().isAutoSuggestions) get().updateSuggestions();
@@ -191,7 +247,7 @@ export const createTrackSlice: SliceCreator<TrackState & TrackActions> = (set, g
         const changes = updateMap.get(n.id);
         return changes ? { ...n, ...changes } : n;
       });
-      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? { ...t, notes: nextNotes } : t);
+      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? syncTrackNotes(t, nextNotes) : t);
       return { melodyNotes: nextNotes, tracks: nextTracks };
     });
     if (get().isAutoSuggestions) get().updateSuggestions();
@@ -204,9 +260,212 @@ export const createTrackSlice: SliceCreator<TrackState & TrackActions> = (set, g
       const activeTrack = state.tracks.find(t => t.id === state.activeTrackId);
       const currentNotes = activeTrack ? activeTrack.notes : state.melodyNotes;
       const nextNotes = currentNotes.filter(n => !idSet.has(n.id));
-      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? { ...t, notes: nextNotes } : t);
+      const nextTracks = state.tracks.map(t => t.id === state.activeTrackId ? syncTrackNotes(t, nextNotes) : t);
       return { melodyNotes: nextNotes, tracks: nextTracks };
     });
     if (get().isAutoSuggestions) get().updateSuggestions();
   },
+
+  setActiveTrackPattern: (trackId, patternId) => set((state) => {
+    const targetTrack = state.tracks.find((t) => t.id === trackId);
+    if (!targetTrack) return state;
+    const { patterns } = ensureTrackPatterns(targetTrack);
+    const targetPattern = patterns.find((p) => p.id === patternId);
+    if (!targetPattern) return state;
+
+    const nextTracks = state.tracks.map((t) =>
+      t.id === trackId
+        ? { ...t, patterns, activePatternId: targetPattern.id, notes: targetPattern.notes }
+        : t
+    );
+
+    return {
+      tracks: nextTracks,
+      ...(state.activeTrackId === trackId ? { melodyNotes: targetPattern.notes } : {})
+    };
+  }),
+
+  addMelodyPattern: (trackId, name, lengthBeats) => {
+    let createdId: string | null = null;
+    set((state) => {
+      const targetTrack = state.tracks.find((t) => t.id === trackId);
+      if (!targetTrack) return state;
+      const { patterns } = ensureTrackPatterns(targetTrack);
+      const newId = generateId('mpat');
+      createdId = newId;
+      const newPattern: MelodyPattern = {
+        id: newId,
+        name: name?.trim() || `Patrón ${patterns.length + 1}`,
+        notes: [],
+        ...(typeof lengthBeats === 'number' && lengthBeats > 0 ? { lengthBeats } : {})
+      };
+      const nextPatterns = [...patterns, newPattern];
+      const nextTracks = state.tracks.map((t) =>
+        t.id === trackId
+          ? { ...t, patterns: nextPatterns, activePatternId: newId, notes: [] }
+          : t
+      );
+      return {
+        tracks: nextTracks,
+        ...(state.activeTrackId === trackId ? { melodyNotes: [] } : {})
+      };
+    });
+    return createdId;
+  },
+
+  duplicateMelodyPattern: (trackId, patternId) => {
+    let createdId: string | null = null;
+    set((state) => {
+      const targetTrack = state.tracks.find((t) => t.id === trackId);
+      if (!targetTrack) return state;
+      const { patterns } = ensureTrackPatterns(targetTrack);
+      const source = patterns.find((p) => p.id === patternId) || patterns[0];
+      if (!source) return state;
+
+      const newId = generateId('mpat');
+      createdId = newId;
+      const clonedNotes: MelodyNote[] = (source.notes || []).map((n) => ({
+        ...n,
+        id: generateId('mn')
+      }));
+      const newPattern: MelodyPattern = {
+        id: newId,
+        name: `Patrón ${patterns.length + 1}`,
+        notes: clonedNotes,
+        ...(typeof source.lengthBeats === 'number' && source.lengthBeats > 0 ? { lengthBeats: source.lengthBeats } : {})
+      };
+      const nextPatterns = [...patterns, newPattern];
+      const nextTracks = state.tracks.map((t) =>
+        t.id === trackId
+          ? { ...t, patterns: nextPatterns, activePatternId: newId, notes: clonedNotes }
+          : t
+      );
+      return {
+        tracks: nextTracks,
+        ...(state.activeTrackId === trackId ? { melodyNotes: clonedNotes } : {})
+      };
+    });
+    return createdId;
+  },
+
+  renameMelodyPattern: (trackId, patternId, name) => set((state) => {
+    const trimmed = name.trim();
+    if (!trimmed) return state;
+    return {
+      tracks: state.tracks.map((t) => {
+        if (t.id !== trackId) return t;
+        const { patterns, activePatternId } = ensureTrackPatterns(t);
+        return {
+          ...t,
+          activePatternId,
+          patterns: patterns.map((p) => (p.id === patternId ? { ...p, name: trimmed } : p))
+        };
+      })
+    };
+  }),
+
+  setMelodyPatternLength: (trackId, patternId, lengthBeats) => set((state) => ({
+    tracks: state.tracks.map((t) => {
+      if (t.id !== trackId) return t;
+      const { patterns, activePatternId } = ensureTrackPatterns(t);
+      return {
+        ...t,
+        activePatternId,
+        patterns: patterns.map((p) => {
+          if (p.id !== patternId) return p;
+          if (typeof lengthBeats === 'number' && lengthBeats > 0) {
+            return { ...p, lengthBeats };
+          }
+          const { lengthBeats: _removed, ...rest } = p;
+          return rest;
+        })
+      };
+    })
+  })),
+
+  clearMelodyPattern: (trackId, patternId) => set((state) => {
+    let nextActiveMelodyNotes = state.melodyNotes;
+    const nextTracks = state.tracks.map((t) => {
+      if (t.id !== trackId) return t;
+      const { patterns, activePatternId } = ensureTrackPatterns(t);
+      const nextPatterns = patterns.map((p) => (p.id === patternId ? { ...p, notes: [] } : p));
+      const isClearingActive = activePatternId === patternId;
+      if (isClearingActive && state.activeTrackId === trackId) {
+        nextActiveMelodyNotes = [];
+      }
+      return {
+        ...t,
+        patterns: nextPatterns,
+        activePatternId,
+        notes: isClearingActive ? [] : t.notes
+      };
+    });
+    return {
+      tracks: nextTracks,
+      melodyNotes: nextActiveMelodyNotes
+    };
+  }),
+
+  removeMelodyPattern: (trackId, patternId) => set((state) => {
+    const targetTrack = state.tracks.find((t) => t.id === trackId);
+    if (!targetTrack) return state;
+    const { patterns, activePatternId } = ensureTrackPatterns(targetTrack);
+    if (patterns.length <= 1) return state;
+
+    const removeIdx = patterns.findIndex((p) => p.id === patternId);
+    if (removeIdx < 0) return state;
+
+    const nextPatterns = patterns.filter((p) => p.id !== patternId);
+    const nextActivePattern =
+      activePatternId === patternId
+        ? nextPatterns[Math.max(0, removeIdx - 1)] || nextPatterns[0]
+        : nextPatterns.find((p) => p.id === activePatternId) || nextPatterns[0];
+
+    const nextTracks = state.tracks.map((t) =>
+      t.id === trackId
+        ? {
+            ...t,
+            patterns: nextPatterns,
+            activePatternId: nextActivePattern.id,
+            notes: nextActivePattern.notes
+          }
+        : t
+    );
+
+    const removedClipIds = new Set(
+      (state.midiClips || [])
+        .filter(
+          (c) =>
+            c.sourceType === 'melody' &&
+            c.melodyTrackId === trackId &&
+            c.melodyPatternId === patternId
+        )
+        .map((c) => c.id)
+    );
+
+    const nextMidiClips = removedClipIds.size > 0
+      ? (state.midiClips || []).filter((c) => !removedClipIds.has(c.id))
+      : state.midiClips;
+    const nextSelectedMidiClipIds = removedClipIds.size > 0
+      ? (state.selectedMidiClipIds || []).filter((cid) => !removedClipIds.has(cid))
+      : state.selectedMidiClipIds;
+    const nextSelectedPatternRef =
+      state.selectedPatternRef?.sourceType === 'melody' &&
+      state.selectedPatternRef.melodyTrackId === trackId &&
+      state.selectedPatternRef.melodyPatternId === patternId
+        ? { sourceType: 'melody' as const, melodyTrackId: trackId, melodyPatternId: nextActivePattern.id }
+        : state.selectedPatternRef;
+
+    return {
+      tracks: nextTracks,
+      ...(state.activeTrackId === trackId ? { melodyNotes: nextActivePattern.notes } : {}),
+      midiClips: nextMidiClips,
+      selectedMidiClipIds: nextSelectedMidiClipIds,
+      selectedPatternRef: nextSelectedPatternRef
+    };
+  }),
+
+  setTrackArrangementMode: (trackId, mode) => set((state) => ({
+    tracks: state.tracks.map((t) => (t.id === trackId ? { ...t, arrangementMode: mode } : t))
+  }))
 });

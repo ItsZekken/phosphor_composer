@@ -29,6 +29,7 @@ export const AudioClipComponent: React.FC<AudioClipComponentProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const bpm = useSongStore((state) => state.bpm);
   const snapGrid = useSongStore((state) => state.audioSnapGrid);
+  const playlistTool = useSongStore((state) => state.playlistTool);
   const currentBeat = useSongStore((state) => state.currentBeat);
   const updateAudioClip = useSongStore((state) => state.updateAudioClip);
   const splitAudioClip = useSongStore((state) => state.splitAudioClip);
@@ -169,10 +170,24 @@ export const AudioClipComponent: React.FC<AudioClipComponentProps> = ({
     return Math.max(0, Math.round(beat / step) * step);
   };
 
-  // 4. Arrastre del cuerpo del clip (Move horizontal + Cross-track vertical)
+  // 4. Arrastre del cuerpo del clip (Move horizontal + Cross-track vertical + Slice tool)
   const handleBodyPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).classList.contains('audio-clip-trim-handle')) return;
     if (e.button !== 0) return;
+
+    if (playlistTool === 'slice') {
+      e.preventDefault();
+      e.stopPropagation();
+      const laneEl = e.currentTarget.parentElement;
+      if (laneEl) {
+        const laneRect = laneEl.getBoundingClientRect();
+        const rawBeat = (e.clientX - laneRect.left) / zoomLevel;
+        const cutBeat = e.altKey ? Math.max(0, rawBeat) : snapBeat(rawBeat, snapGrid);
+        splitAudioClip(clip.id, cutBeat);
+      }
+      return;
+    }
+
     onSelect(e);
 
     const startX = e.clientX;

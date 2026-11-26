@@ -23,6 +23,7 @@ export const AudioTimelineRuler: React.FC<AudioTimelineRulerProps> = ({
   const isScrubbingRef = useRef(false);
 
   const timeSignature = useSongStore((state) => state.timeSignature);
+  const chordBlocks = useSongStore((state) => state.chordBlocks);
   const beatsPerMeasure = timeSignature === '3/4' ? 3 : timeSignature === '6/8' ? 6 : 4;
 
   const totalWidth = Math.max(1200, totalBeats * zoomLevel);
@@ -83,6 +84,21 @@ export const AudioTimelineRuler: React.FC<AudioTimelineRulerProps> = ({
       }
     }
 
+    // Referencia armónica sutil de los acordes sobre la regla
+    if (chordBlocks && chordBlocks.length > 0) {
+      ctx.font = 'bold 9px "Share Tech Mono", monospace';
+      for (let i = 0; i < chordBlocks.length; i++) {
+        const block = chordBlocks[i];
+        const bx = block.startBeat * zoomLevel;
+        const bw = block.durationBeats * zoomLevel;
+        if (bw < 22) continue;
+        ctx.fillStyle = 'rgba(96, 165, 250, 0.14)';
+        ctx.fillRect(bx + 1, 14, bw - 2, 12);
+        ctx.fillStyle = 'rgba(147, 197, 253, 0.85)';
+        ctx.fillText(block.chord, bx + 4, 20.5);
+      }
+    }
+
     // Línea divisoria inferior
     ctx.strokeStyle = '#38304a';
     ctx.beginPath();
@@ -91,7 +107,7 @@ export const AudioTimelineRuler: React.FC<AudioTimelineRulerProps> = ({
     ctx.stroke();
 
     ctx.restore();
-  }, [totalWidth, totalBeats, beatsPerMeasure, zoomLevel]);
+  }, [totalWidth, totalBeats, beatsPerMeasure, zoomLevel, chordBlocks]);
 
   useEffect(() => {
     drawRuler();

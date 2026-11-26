@@ -18,6 +18,7 @@ import type { NoteClass, ScaleType } from '../music';
 import { normalizePitchClass, noteToMidi } from '../music';
 import { normalizeSynthSettings } from '../audio/engine/synthPresets';
 import { normalizePatternChainItems } from '../../utils/typeDefinitions';
+import { ensureTrackPatterns } from '../audio/arrangementResolver';
 
 export const createEmptyPatterns = (numPatterns = 8, length = 16) => 
   Array.from({ length: numPatterns }).map(() => 
@@ -128,23 +129,38 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
           })
         : [];
 
-      return {
-        id: t.id || `track_melody_${index + 1}`,
+      const trackId = t.id || `track_melody_${index + 1}`;
+      const baseTrack: PianoRollTrack = {
+        id: trackId,
         name: t.name || `Pista ${index + 1}`,
         channelId: t.channelId || (index === 0 ? 'melody' : `ch_${t.id || `track_${index + 1}`}`),
         color: t.color || '#ff00aa',
         notes: trackNotes,
+        patterns: Array.isArray(t.patterns) && t.patterns.length > 0 ? t.patterns : undefined,
+        activePatternId: typeof t.activePatternId === 'string' ? t.activePatternId : undefined,
+        arrangementMode: t.arrangementMode === 'playlist' ? 'playlist' : 'direct',
         viewport: t.viewport || { ...DEFAULT_VIEWPORT }
+      };
+      const ensured = ensureTrackPatterns(baseTrack);
+      return {
+        ...baseTrack,
+        patterns: ensured.patterns,
+        activePatternId: ensured.activePatternId,
+        notes: ensured.activePattern.notes
       };
     });
 
     // Si la primera pista no tiene notas pero existía melodyNotes plano en la raíz, sincronizar
     if (rawNotes.length > 0 && tracks[0].notes.length === 0) {
       tracks[0].notes = rawNotes;
+      if (tracks[0].patterns && tracks[0].patterns[0]) {
+        tracks[0].patterns[0] = { ...tracks[0].patterns[0], notes: rawNotes };
+      }
       warnings.push('Se migraron notas planas de melodyNotes a la primera pista de Piano Roll.');
     }
   } else {
     // Si no había tracks definidos (v1 plano), construir la pista inicial
+    const firstPatId = 'pat_melody_1_1';
     tracks = [
       {
         id: 'track_melody_1',
@@ -152,6 +168,9 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
         channelId: 'melody',
         color: '#ff00aa',
         notes: rawNotes,
+        patterns: [{ id: firstPatId, name: 'Patrón 1', notes: rawNotes }],
+        activePatternId: firstPatId,
+        arrangementMode: 'direct',
         viewport: { ...DEFAULT_VIEWPORT }
       }
     ];
@@ -262,6 +281,15 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
         : Array.isArray((raw as any).drums?.patternLengths)
         ? (raw as any).drums.patternLengths
         : Array.from({ length: drumChannels[0]?.patterns?.length || 8 }).map(() => 16),
+      drumPatternNames: Array.isArray((raw as any).drumPatternNames)
+        ? (raw as any).drumPatternNames
+        : Array.isArray((raw as any).drums?.drumPatternNames)
+        ? (raw as any).drums.drumPatternNames
+        : [],
+      drumArrangementMode:
+        (raw as any).drumArrangementMode === 'playlist' || (raw as any).drums?.drumArrangementMode === 'playlist'
+          ? 'playlist'
+          : 'sequencer',
       drumTimelineViewport: (raw as any).drumTimelineViewport || (raw as any).drums?.drumTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 }
     },
     mixer: {
@@ -272,6 +300,10 @@ export function migrateLegacyToV2(raw: LegacySessionV1): { session: SessionV2; w
       tracks: (raw as any).audio?.tracks || (raw as any).audioTracks || [],
       clips: (raw as any).audio?.clips || (raw as any).audioClips || [],
       latencyMs: (raw as any).audio?.latencyMs ?? 20
+    },
+    midi: {
+      tracks: (raw as any).midi?.tracks || (raw as any).midiTracks || [],
+      clips: (raw as any).midi?.clips || (raw as any).midiClips || []
     },
     ui: {
       isCrtEnabled: raw.isCrtEnabled,
@@ -333,6 +365,18 @@ export function deserializeSession(rawInput: unknown): { session: SessionV2; war
         }
       });
     }
+    // Normalizar patrones de melodía en sesiones v2 previas
+    if (Array.isArray(parsedObj.tracks)) {
+      parsedObj.tracks = parsedObj.tracks.map((t: PianoRollTrack) => {
+        const ensured = ensureTrackPatterns(t);
+        return {
+          ...t,
+          patterns: ensured.patterns,
+          activePatternId: ensured.activePatternId,
+          notes: ensured.activePattern.notes
+        };
+      });
+    }
     return { session: parsedObj as SessionV2, warnings: [] };
   }
 
@@ -344,11 +388,25 @@ export function deserializeSession(rawInput: unknown): { session: SessionV2; war
  * Serializa el estado de la aplicación en una estructura limpia SessionV2.
  */
 export function serializeSession(state: any, metadataUpdates?: Partial<SessionMetadata>): SessionV2 {
-  const synchronizedTracks: PianoRollTrack[] = (state.tracks || []).map((t: any) => {
+  const synchronizedTracks: PianoRollTrack[] = (state.tracks || []).map((t: PianoRollTrack) => {
+    const ensured = ensureTrackPatterns(t);
     if (t.id === state.activeTrackId && state.melodyNotes) {
-      return { ...t, notes: state.melodyNotes };
+      const nextPatterns = ensured.patterns.map((p) =>
+        p.id === ensured.activePatternId ? { ...p, notes: state.melodyNotes } : p
+      );
+      return {
+        ...t,
+        patterns: nextPatterns,
+        activePatternId: ensured.activePatternId,
+        notes: state.melodyNotes
+      };
     }
-    return t;
+    return {
+      ...t,
+      patterns: ensured.patterns,
+      activePatternId: ensured.activePatternId,
+      notes: ensured.activePattern.notes
+    };
   });
 
   return {
@@ -385,6 +443,8 @@ export function serializeSession(state: any, metadataUpdates?: Partial<SessionMe
       activeDrumKitId: state.activeDrumKitId || 'kit_1',
       drumChannels: state.drumChannels || DEFAULT_DRUM_CHANNELS,
       patternLengths: state.patternLengths || Array.from({ length: (state.drumChannels || DEFAULT_DRUM_CHANNELS)[0]?.patterns?.length || 8 }).map(() => 16),
+      drumPatternNames: state.drumPatternNames || [],
+      drumArrangementMode: state.drumArrangementMode || 'sequencer',
       currentDrumPatternEdit: state.currentDrumPatternEdit,
       drumTimelineViewport: state.drumTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 }
     },
@@ -406,6 +466,10 @@ export function serializeSession(state: any, metadataUpdates?: Partial<SessionMe
       tracks: state.audioTracks || [],
       clips: state.audioClips || [],
       latencyMs: state.audioLatencyCalibrationMs ?? 20
+    },
+    midi: {
+      tracks: state.midiTracks || [],
+      clips: state.midiClips || []
     },
     ui: {
       isCrtEnabled: state.isCrtEnabled,

@@ -86,7 +86,7 @@ export const initialAudioTrackState: AudioTrackState = {
   armedTrackId: null,
   isRecordingAudio: false,
   recordingRms: 0,
-  audioSnapGrid: 'beat',
+  audioSnapGrid: 'bar',
   audioTimelineViewport: { scrollLeft: 0, zoomLevel: 60 },
   audioLatencyCalibrationMs: 20, // Calibración por defecto razonable (20 ms)
   isLatencyModalOpen: false
@@ -118,7 +118,8 @@ export const createAudioTrackSlice: StateCreator<
 
     set({
       audioTracks: [...state.audioTracks, newTrack],
-      selectedTrackId: id
+      selectedTrackId: id,
+      selectedPlaylistTrackKind: 'audio'
     });
     return id;
   },
@@ -146,7 +147,10 @@ export const createAudioTrackSlice: StateCreator<
   },
 
   setSelectedTrackId: (id) => {
-    set({ selectedTrackId: id });
+    set({
+      selectedTrackId: id,
+      ...(id ? { selectedPlaylistTrackKind: 'audio' as const } : {})
+    });
   },
 
   addAudioClip: (clip) => {
@@ -269,7 +273,7 @@ export const createAudioTrackSlice: StateCreator<
             : [...state.selectedClipIds, id]
         };
       }
-      return { selectedClipIds: [id] };
+      return { selectedClipIds: [id], selectedMidiClipIds: [] };
     });
   },
 
