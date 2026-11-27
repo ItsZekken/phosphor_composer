@@ -12,7 +12,8 @@ import {
   computeSliceMatches,
   type EphemeralDragState,
   type LassoRect,
-  type TempNote
+  type TempNote,
+  type PianoRollTool
 } from '../utils/pianoRollUtils';
 
 export interface ContextMenuState {
@@ -46,7 +47,7 @@ interface UsePianoRollInteractionsProps {
   gridSnap: PianoRollGridSnap;
   ephemeralDragRef: React.RefObject<EphemeralDragState | null>;
   triggerNotesRedraw: () => void;
-  isSliceToolActive: boolean;
+  activeTool: PianoRollTool;
   isGhostNotesActive: boolean;
 }
 
@@ -125,7 +126,7 @@ export function usePianoRollInteractions({
   gridSnap,
   ephemeralDragRef,
   triggerNotesRedraw,
-  isSliceToolActive,
+  activeTool,
   isGhostNotesActive
 }: UsePianoRollInteractionsProps) {
   const [lassoRect, setLassoRect] = useState<LassoRect | null>(null);
@@ -167,16 +168,19 @@ export function usePianoRollInteractions({
       return;
     }
 
-    // 2. Herramienta Slice / Corte (C activa + Left-Drag, o Shift + Right-Drag en cualquier momento)
-    if ((isSliceToolActive && e.button === 0) || (e.shiftKey && e.button === 2)) {
+    // 2. Herramienta Navaja / Corte (Slice activa + Left-Drag, o Shift + Right-Drag en cualquier momento)
+    if ((activeTool === 'slice' && e.button === 0) || (e.shiftKey && e.button === 2)) {
       e.preventDefault();
+      const isToolLeftSlice = activeTool === 'slice' && e.button === 0;
       const pointerPos = { x: e.clientX, y: e.clientY };
       let lastAlt = e.altKey;
+      let lastShift = isToolLeftSlice && e.shiftKey;
       const selSet = new Set(selectedNoteIds);
 
-      const updateSlice = (altKey: boolean) => {
+      const updateSlice = (altKey: boolean, lockVertical: boolean) => {
         const curRect = wrapper.getBoundingClientRect();
-        const curX = pointerPos.x - curRect.left;
+        const rawCurX = pointerPos.x - curRect.left;
+        const curX = lockVertical ? startX : rawCurX;
         const curY = pointerPos.y - curRect.top;
         const line = { x1: startX, y1: startY, x2: curX, y2: curY };
         const snapStep = getSnapStepBeats(gridSnap, altKey);
@@ -191,13 +195,16 @@ export function usePianoRollInteractions({
         triggerNotesRedraw();
       };
 
-      const stopAutoScroll = startEdgeAutoScroll(containerRef, pianoRef, () => pointerPos, () => updateSlice(lastAlt));
+      updateSlice(lastAlt, lastShift);
+
+      const stopAutoScroll = startEdgeAutoScroll(containerRef, pianoRef, () => pointerPos, () => updateSlice(lastAlt, lastShift));
 
       const onMoveSlice = (moveEvent: MouseEvent) => {
         pointerPos.x = moveEvent.clientX;
         pointerPos.y = moveEvent.clientY;
         lastAlt = moveEvent.altKey;
-        updateSlice(lastAlt);
+        lastShift = isToolLeftSlice && moveEvent.shiftKey;
+        updateSlice(lastAlt, lastShift);
       };
 
       const onUpSlice = (upEvent: MouseEvent) => {
@@ -206,7 +213,8 @@ export function usePianoRollInteractions({
         stopAutoScroll();
 
         const upRect = wrapper.getBoundingClientRect();
-        const curX = upEvent.clientX - upRect.left;
+        const lockVertical = isToolLeftSlice && upEvent.shiftKey;
+        const curX = lockVertical ? startX : (upEvent.clientX - upRect.left);
         const curY = upEvent.clientY - upRect.top;
         const line = { x1: startX, y1: startY, x2: curX, y2: curY };
         const snapStep = getSnapStepBeats(gridSnap, upEvent.altKey);
@@ -254,39 +262,23 @@ export function usePianoRollInteractions({
       return;
     }
 
-    // Detectar si hacemos clic sobre alguna nota existente (de arriba hacia abajo)
-    let clickedNote: MelodyNote | null = null;
-    let edgeMode: 'move' | 'resize_left' | 'resize_right' = 'move';
-
-    const notesList = melodyNotes || [];
-    for (let i = notesList.length - 1; i >= 0; i--) {
-      const note = notesList[i];
-      const row = MAX_MIDI - note.midi;
-      const ny = row * rowHeight;
-      const nx = note.startBeat * beatWidth;
-      const nw = Math.max(8, note.durationBeats * beatWidth);
-
-      if (startX >= nx && startX <= nx + nw && startY >= ny && startY <= ny + rowHeight) {
-        clickedNote = note;
-        const clickOffset = startX - nx;
-        if (clickOffset < 10 && nw > 20) {
-          edgeMode = 'resize_left';
-        } else if (nw - clickOffset < 10 && nw > 20) {
-          edgeMode = 'resize_right';
-        } else {
-          edgeMode = 'move';
-        }
-        break;
-      }
-    }
-
-    // 3. CASO A: CLICK DERECHO (sin Shift) -> Área de Selección Lasso o Menú Contextual
-    if (e.button === 2) {
+    // Helper compartido de selección por área (Marquee / Lasso) para modo Seleccionar, Ctrl+Arrastre y Clic Derecho
+    const startMarqueeSelection = (opts: {
+      ctrlTriggersAdditive: boolean;
+      openContextMenuOnClick: boolean;
+      clickedNote: MelodyNote | null;
+    }) => {
       e.preventDefault();
       let hasMoved = false;
       const pointerPos = { x: e.clientX, y: e.clientY };
+      const initialSelectedIds = [...selectedNoteIds];
+      let lastAdditive = e.shiftKey || (opts.ctrlTriggersAdditive && (e.ctrlKey || e.metaKey));
+      const prevBodyCursor = document.body.style.cursor;
+      if (!opts.openContextMenuOnClick) {
+        document.body.style.cursor = 'crosshair';
+      }
 
-      const updateLasso = (ctrlOrShift: boolean) => {
+      const updateLasso = (additive: boolean) => {
         const currentRect = wrapper.getBoundingClientRect();
         const curX = pointerPos.x - currentRect.left;
         const curY = pointerPos.y - currentRect.top;
@@ -316,8 +308,8 @@ export function usePianoRollInteractions({
           }
         }
 
-        if (ctrlOrShift) {
-          setSelectedNoteIds(Array.from(new Set([...selectedNoteIds, ...intersectingIds])));
+        if (additive) {
+          setSelectedNoteIds(Array.from(new Set([...initialSelectedIds, ...intersectingIds])));
         } else {
           setSelectedNoteIds(intersectingIds);
         }
@@ -325,7 +317,7 @@ export function usePianoRollInteractions({
 
       const stopAutoScroll = startEdgeAutoScroll(containerRef, pianoRef, () => pointerPos, () => {
         hasMoved = true;
-        updateLasso(false);
+        updateLasso(lastAdditive);
       });
 
       const handleMouseMoveLasso = (moveEvent: MouseEvent) => {
@@ -333,48 +325,96 @@ export function usePianoRollInteractions({
         pointerPos.y = moveEvent.clientY;
         const dx = Math.abs(moveEvent.clientX - e.clientX);
         const dy = Math.abs(moveEvent.clientY - e.clientY);
-        if (dx > 4 || dy > 4) {
+        if (dx > 3 || dy > 3) {
           hasMoved = true;
         }
-        updateLasso(moveEvent.ctrlKey || moveEvent.shiftKey);
+        lastAdditive = moveEvent.shiftKey || (opts.ctrlTriggersAdditive && (moveEvent.ctrlKey || moveEvent.metaKey));
+        if (hasMoved) {
+          updateLasso(lastAdditive);
+        }
       };
 
       const handleMouseUpLasso = () => {
         window.removeEventListener('mousemove', handleMouseMoveLasso);
         window.removeEventListener('mouseup', handleMouseUpLasso);
         stopAutoScroll();
+        if (!opts.openContextMenuOnClick) {
+          document.body.style.cursor = prevBodyCursor;
+        }
         setLassoRect(null);
 
         if (!hasMoved) {
-          const snapStep = getSnapStepBeats(gridSnap);
-          const clickBeat = Math.floor((startX / beatWidth) / snapStep) * snapStep;
-          const clickMidi = MAX_MIDI - Math.floor(startY / rowHeight);
-          setContextMenu({
-            x: e.clientX,
-            y: e.clientY,
-            type: clickedNote ? 'notes' : 'canvas',
-            beat: clickBeat,
-            midi: clickMidi
-          });
+          if (opts.openContextMenuOnClick) {
+            if (opts.clickedNote && !selectedNoteIds.includes(opts.clickedNote.id)) {
+              setSelectedNoteIds([opts.clickedNote.id]);
+            }
+            const snapStep = getSnapStepBeats(gridSnap);
+            const clickBeat = Math.floor((startX / beatWidth) / snapStep) * snapStep;
+            const clickMidi = MAX_MIDI - Math.floor(startY / rowHeight);
+            setContextMenu({
+              x: e.clientX,
+              y: e.clientY,
+              type: opts.clickedNote ? 'notes' : 'canvas',
+              beat: clickBeat,
+              midi: clickMidi
+            });
 
-          const closeMenu = () => {
-            setContextMenu(null);
-            window.removeEventListener('click', closeMenu);
-          };
-          window.addEventListener('click', closeMenu);
+            const closeMenu = () => {
+              setContextMenu(null);
+              window.removeEventListener('click', closeMenu);
+            };
+            window.addEventListener('click', closeMenu);
+          } else if (!lastAdditive) {
+            setSelectedNoteIds([]);
+          }
         }
       };
 
       window.addEventListener('mousemove', handleMouseMoveLasso);
       window.addEventListener('mouseup', handleMouseUpLasso);
+    };
+
+    // Detectar si hacemos clic sobre alguna nota existente (de arriba hacia abajo)
+    let clickedNote: MelodyNote | null = null;
+    let edgeMode: 'move' | 'resize_left' | 'resize_right' = 'move';
+
+    const notesList = melodyNotes || [];
+    for (let i = notesList.length - 1; i >= 0; i--) {
+      const note = notesList[i];
+      const row = MAX_MIDI - note.midi;
+      const ny = row * rowHeight;
+      const nx = note.startBeat * beatWidth;
+      const nw = Math.max(8, note.durationBeats * beatWidth);
+
+      if (startX >= nx && startX <= nx + nw && startY >= ny && startY <= ny + rowHeight) {
+        clickedNote = note;
+        const clickOffset = startX - nx;
+        if (clickOffset < 10 && nw > 20) {
+          edgeMode = 'resize_left';
+        } else if (nw - clickOffset < 10 && nw > 20) {
+          edgeMode = 'resize_right';
+        } else {
+          edgeMode = 'move';
+        }
+        break;
+      }
+    }
+
+    // 3. CASO A: CLICK DERECHO (sin Shift) -> Área de Selección Lasso o Menú Contextual
+    if (e.button === 2) {
+      startMarqueeSelection({
+        ctrlTriggersAdditive: true,
+        openContextMenuOnClick: true,
+        clickedNote
+      });
       return;
     }
 
     // 4. CASO B: CLICK IZQUIERDO
     if (e.button === 0) {
       if (clickedNote) {
-        // B1. Doble clic izquierdo sobre nota existente -> ELIMINAR NOTA (esquema Phosphor)
-        if (e.detail === 2 && !e.shiftKey) {
+        // B1. Doble clic izquierdo sobre nota existente -> ELIMINAR NOTA (solo en modo Lápiz)
+        if (activeTool === 'pencil' && e.detail === 2 && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
           removeMelodyNote(clickedNote.id);
           setSelectedNoteIds(selectedNoteIds.filter(id => id !== clickedNote!.id));
           return;
@@ -385,9 +425,10 @@ export function usePianoRollInteractions({
 
         const isAlreadySelected = selectedNoteIds.includes(clickedNote.id);
         const startedWithShift = e.shiftKey;
+        const startedWithCtrl = e.ctrlKey || e.metaKey;
         let dragSelection = [...selectedNoteIds];
 
-        if (e.ctrlKey) {
+        if (startedWithCtrl) {
           dragSelection = isAlreadySelected
             ? dragSelection.filter(id => id !== clickedNote!.id)
             : [...dragSelection, clickedNote.id];
@@ -621,7 +662,7 @@ export function usePianoRollInteractions({
         window.addEventListener('mousemove', handleMouseMoveDrag);
         window.addEventListener('mouseup', handleMouseUpDrag);
       } else {
-        // B3. Clic en espacio vacío -> Alt+DobleClic en Ghost Note salta a esa pista; si no, creación instantánea 0ms
+        // B3. Clic en espacio vacío -> Alt+DobleClic en Ghost Note salta a esa pista
         if (e.detail === 2 && e.altKey && isGhostNotesActive && tracks.length > 1) {
           const clickedRow = Math.max(0, Math.min(NOTE_COUNT - 1, Math.floor(startY / rowHeight)));
           const clickedMidi = MAX_MIDI - clickedRow;
@@ -640,7 +681,26 @@ export function usePianoRollInteractions({
           }
         }
 
-        if (!e.ctrlKey && !e.shiftKey) {
+        // B4. Modo Seleccionar (E) o Ctrl+Arrastre rápido estilo FL Studio en modo Lápiz -> Caja de selección (Marquee)
+        if (activeTool === 'select') {
+          startMarqueeSelection({
+            ctrlTriggersAdditive: true,
+            openContextMenuOnClick: false,
+            clickedNote: null
+          });
+          return;
+        }
+
+        if (e.ctrlKey || e.metaKey) {
+          startMarqueeSelection({
+            ctrlTriggersAdditive: false,
+            openContextMenuOnClick: false,
+            clickedNote: null
+          });
+          return;
+        }
+
+        if (!e.shiftKey) {
           setSelectedNoteIds([]);
         }
 
@@ -736,7 +796,7 @@ export function usePianoRollInteractions({
     const wrapper = contentWrapperRef.current;
     if (!wrapper) return;
 
-    if (isSliceToolActive) {
+    if (activeTool === 'slice') {
       wrapper.style.cursor = 'crosshair';
       return;
     }
@@ -745,7 +805,7 @@ export function usePianoRollInteractions({
     const curX = e.clientX - rect.left;
     const curY = e.clientY - rect.top;
 
-    let hoverMode: 'move' | 'resize' | 'crosshair' = 'crosshair';
+    let hoverMode: 'move' | 'resize' | 'empty' = 'empty';
 
     const notesList = melodyNotes || [];
     for (let i = notesList.length - 1; i >= 0; i--) {
@@ -768,7 +828,7 @@ export function usePianoRollInteractions({
     } else if (hoverMode === 'move') {
       wrapper.style.cursor = 'grab';
     } else {
-      wrapper.style.cursor = 'crosshair';
+      wrapper.style.cursor = activeTool === 'select' ? 'default' : 'crosshair';
     }
   };
 

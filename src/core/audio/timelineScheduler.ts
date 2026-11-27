@@ -2,6 +2,7 @@
  * timelineScheduler.ts
  * Transforma determinísticamente una SessionV2 o el estado en vivo del store
  * en una lista cronológica de eventos de audio, con caché LRU de patrones de acordes.
+ * Single Source of Truth 1:1: lee directamente chordBlocks, tracks[].notes, patternChain y audioClips.
  */
 
 import type { SessionV2 } from '../session';
@@ -24,6 +25,7 @@ import {
   type TimeSignature
 } from '../../utils/typeDefinitions';
 import type { PatternDef } from '../../patterns/patternTypes';
+import { getBeatsPerMeasure } from './arrangementResolver';
 
 interface TimelineScheduleInput {
   bpm: number;
@@ -35,10 +37,11 @@ interface TimelineScheduleInput {
   styleMarkers: StyleMarker[];
   defaultPattern: string;
   chordOctaveShift: number;
-  tracks: Array<{ id: string; channelId: string; notes?: PianoRollTrack['notes'] }>;
+  tracks: PianoRollTrack[];
   audioClips?: Array<{ isMuted?: boolean; startBeat: number; durationSeconds?: number }>;
   drumChannels: DrumChannel[];
   patternChain: PatternChainItem[];
+  drumLaneMuted?: boolean[];
   isPatternRepeatOn: boolean;
   patternLengths?: number[];
   currentDrumPatternEdit?: number;
@@ -62,7 +65,6 @@ function renderChordPatternZeroShiftedCached(
   const key = `${block.chord}|${block.durationBeats}|${block.voicing ?? ''}|${block.inversion ?? 0}|${block.type ?? ''}|${block.bassNote ?? ''}|${pattern}|${chordOctaveShift}`;
   const hit = chordPatternLruCache.get(key);
   if (hit !== undefined) {
-    // Promover en LRU sin re-computar armonías ni inversiones
     chordPatternLruCache.delete(key);
     chordPatternLruCache.set(key, hit);
     return hit;
@@ -104,13 +106,11 @@ function scheduleTimelineCore(
   const tempoMarkers = input.tempoMarkers || [];
   const tempoMap = createTempoMap(bpm, tempoMarkers);
   const swing = input.swing || 0;
-  const beatsPerMeasure = input.timeSignature === '3/4' ? 3 : input.timeSignature === '6/8' ? 6 : 4;
+  const beatsPerMeasure = getBeatsPerMeasure(input.timeSignature);
 
   const chordEvents: ScheduledChordEvent[] = [];
   const trackEvents: ScheduledTrackEvent[] = [];
   const drumEvents: ScheduledDrumEvent[] = [];
-
-  let maxBeat = 4;
 
   // 1. Armadura de Mute / Solo del Mixer
   const channels = input.channels || {};
@@ -131,6 +131,17 @@ function scheduleTimelineCore(
     if (isAnyChannelSolo && !ch.solo) return false;
     return true;
   };
+
+  const drumChannels = input.drumChannels || [];
+  let isAnyDrumSolo = false;
+  for (let i = 0; i < drumChannels.length; i++) {
+    if (drumChannels[i].solo) {
+      isAnyDrumSolo = true;
+      break;
+    }
+  }
+
+  let maxBeat = beatsPerMeasure;
 
   // 2. Programar Acordes y Patrones Rítmicos (con caché LRU de patrones)
   const isChordsAudible = isChannelAudible('chords');
@@ -168,17 +179,18 @@ function scheduleTimelineCore(
     }
   }
 
-  // 3. Programar Pistas Melódicas del Piano Roll
+  // 3. Programar Pistas Melódicas (directamente desde `track.notes`, saltando notas muteadas)
   const tracks = input.tracks || [];
   for (let t = 0; t < tracks.length; t++) {
     const track = tracks[t];
     const isAudible = isChannelAudible(track.channelId);
     const notes = track.notes || [];
+
     for (let nIdx = 0; nIdx < notes.length; nIdx++) {
       const n = notes[nIdx];
       const endBeat = n.startBeat + n.durationBeats;
       if (endBeat > maxBeat) maxBeat = endBeat;
-      if (!isAudible) continue;
+      if (!isAudible || n.muted) continue;
 
       const swungStart = applySwingBeat(n.startBeat, swing);
       const swungEnd = applySwingBeat(endBeat, swing);
@@ -209,31 +221,26 @@ function scheduleTimelineCore(
     }
   }
 
-  // 5. Programar Secuenciador de Batería
+  // 5. Programar Secuenciador de Batería directamente desde `patternChain` (1:1 con Tracks y Drum Sequencer)
   const isDrumsAudible = isChannelAudible('drums');
-  const drumChannels = input.drumChannels || [];
-  let isAnyDrumSolo = false;
-  for (let i = 0; i < drumChannels.length; i++) {
-    if (drumChannels[i].solo) {
-      isAnyDrumSolo = true;
-      break;
-    }
-  }
-
-  const patternChain = input.patternChain || [];
-  const isPatternRepeatOn = input.isPatternRepeatOn;
-
   if (isDrumsAudible && drumChannels.length > 0) {
+    const patternChain = input.patternChain || [];
+    const isPatternRepeatOn = input.isPatternRepeatOn;
+
     if (!isPatternRepeatOn && patternChain.length > 0) {
       const linearClips = normalizePatternChainToLinear(patternChain);
+      const laneMuted = input.drumLaneMuted || [];
+      // Evitar doble disparo / clipping cuando 2 capas simultáneas golpean exactamente el mismo canal y tick
+      const dedupIndexMap = new Map<string, number>();
 
       for (let c = 0; c < linearClips.length; c++) {
         const clip = linearClips[c];
-        const patternIdx = clip.patternIndex;
         const clipStartBeat = clip.startMeasure * beatsPerMeasure;
         const clipEndBeat = (clip.startMeasure + clip.durationMeasures) * beatsPerMeasure;
         if (clipEndBeat > maxBeat) maxBeat = clipEndBeat;
+        if (clip.isMuted || laneMuted[clip.laneIndex]) continue;
 
+        const patternIdx = clip.patternIndex;
         const startWholeMeasure = Math.floor(clip.startMeasure);
         const endWholeMeasure = Math.ceil(clip.startMeasure + clip.durationMeasures);
         const patternLen = input.patternLengths?.[patternIdx] || 16;
@@ -248,6 +255,7 @@ function scheduleTimelineCore(
             }
             const stepBeat = applySwingBeat(rawStepBeat, swing);
             const timeSeconds = tempoMap.beatToSeconds(stepBeat);
+            const timeKey = Math.round(timeSeconds * 10000);
 
             for (let chIdx = 0; chIdx < drumChannels.length; chIdx++) {
               const ch = drumChannels[chIdx];
@@ -258,14 +266,23 @@ function scheduleTimelineCore(
 
               const dStep = pat[stepIdx];
               if (dStep && dStep.isActive) {
-                drumEvents.push({
-                  channelId: ch.id,
-                  sampleUrl: ch.sampleUrl,
-                  timeSeconds,
-                  velocity: dStep.velocity,
-                  pan: ch.pan ?? 0,
-                  volume: ch.volume
-                });
+                const dedupKey = `${ch.id}@${timeKey}`;
+                const existingIdx = dedupIndexMap.get(dedupKey);
+                if (existingIdx !== undefined) {
+                  if (dStep.velocity > drumEvents[existingIdx].velocity) {
+                    drumEvents[existingIdx].velocity = dStep.velocity;
+                  }
+                } else {
+                  dedupIndexMap.set(dedupKey, drumEvents.length);
+                  drumEvents.push({
+                    channelId: ch.id,
+                    sampleUrl: ch.sampleUrl,
+                    timeSeconds,
+                    velocity: dStep.velocity,
+                    pan: ch.pan ?? 0,
+                    volume: ch.volume
+                  });
+                }
               }
             }
           }
@@ -320,7 +337,7 @@ function scheduleTimelineCore(
 }
 
 /**
- * Calcula los eventos programados en segundos para una sesión SessionV2 (usado en export y pruebas).
+ * Calcula los eventos programados en segundos para una sesión SessionV2.
  */
 export function scheduleSessionTimeline(
   session: SessionV2,
@@ -338,9 +355,10 @@ export function scheduleSessionTimeline(
       defaultPattern: session.harmony.defaultPattern || 'hold',
       chordOctaveShift: session.harmony.chordOctaveShift || 0,
       tracks: session.tracks || [],
-      audioClips: (session as any).audio?.clips,
+      audioClips: session.audio?.clips,
       drumChannels: session.drums.drumChannels || [],
       patternChain: session.drums.patternChain || [],
+      drumLaneMuted: session.drums.drumLaneMuted,
       isPatternRepeatOn: Boolean(session.drums.isPatternRepeatOn),
       patternLengths: session.drums.patternLengths,
       currentDrumPatternEdit: session.drums.currentDrumPatternEdit || 0
@@ -357,9 +375,12 @@ export function scheduleStoreTimeline(state: any): ScheduledSessionEvents {
   const activeId = state.activeTrackId;
   const activeNotes = state.melodyNotes;
 
-  const syncedTracks = rawTracks.map((t) =>
-    t.id === activeId && activeNotes ? { id: t.id, channelId: t.channelId, notes: activeNotes } : t
-  );
+  const syncedTracks: PianoRollTrack[] = rawTracks.map((t) => {
+    if (t.id === activeId && activeNotes && t.notes !== activeNotes) {
+      return { ...t, notes: activeNotes };
+    }
+    return t;
+  });
 
   return scheduleTimelineCore(
     {
@@ -376,6 +397,7 @@ export function scheduleStoreTimeline(state: any): ScheduledSessionEvents {
       audioClips: state.audioClips,
       drumChannels: state.drumChannels || [],
       patternChain: state.patternChain || [],
+      drumLaneMuted: state.drumLaneMuted,
       isPatternRepeatOn: Boolean(state.isPatternRepeatOn),
       patternLengths: state.patternLengths,
       currentDrumPatternEdit: state.currentDrumPatternEdit || 0

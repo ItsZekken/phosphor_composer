@@ -18,7 +18,13 @@ import { PreviewManager } from '../core/audio/engine/PreviewManager';
 import { AudioTransport } from '../core/audio/engine/AudioTransport';
 import { AudioTrackEngine } from '../core/audio/engine/AudioTrackEngine';
 import { LookaheadScheduler } from '../core/audio/lookaheadScheduler';
-import { normalizePatternChainToLinear, type ChannelConfig, type SynthSettings, type PianoRollTrack } from '../utils/typeDefinitions';
+import {
+  normalizePatternChainToLinear,
+  type ChannelConfig,
+  type ChannelSoundFontConfig,
+  type SynthSettings,
+  type PianoRollTrack
+} from '../utils/typeDefinitions';
 import type { PatternDef } from '../patterns/patternTypes';
 import { exportStageToMp4 } from '../core/video/stageVideoExporter';
 import { ensurePhosphorWorkletRegistered, getNativeAudioContext } from '../core/audio/worklet/PhosphorWorkletNode';
@@ -37,7 +43,11 @@ const didTracksMusicalContentChange = (prev: PianoRollTrack[] | undefined, next:
   if (!prev || !next) return true;
   if (prev.length !== next.length) return true;
   for (let i = 0; i < prev.length; i++) {
-    if (prev[i].id !== next[i].id || prev[i].channelId !== next[i].channelId || prev[i].notes !== next[i].notes) {
+    if (
+      prev[i].id !== next[i].id ||
+      prev[i].channelId !== next[i].channelId ||
+      prev[i].notes !== next[i].notes
+    ) {
       return true;
     }
   }
@@ -145,14 +155,14 @@ class ToneEngine {
         this.audioTrackEngine.onLoopWrap();
       },
       onTriggerChord: (evt, time) => {
-        const isPiano = useSongStore.getState().channels.chords?.instrument === 'piano';
-        this.instrumentManager.triggerAttackRelease('chords', isPiano, evt.note, evt.durationSeconds, time, evt.velocity);
+        const chordInstrument = useSongStore.getState().channels.chords?.instrument || 'synth';
+        this.instrumentManager.triggerAttackRelease('chords', chordInstrument, evt.note, evt.durationSeconds, time, evt.velocity);
         this.scheduleVisualNote(evt.note, false, time, evt.durationSeconds);
       },
       onTriggerTrack: (evt, time) => {
         const channelConfig = useSongStore.getState().channels[evt.channelId];
-        const isPiano = channelConfig?.instrument === 'piano';
-        this.instrumentManager.triggerAttackRelease(evt.channelId, isPiano, evt.note, evt.durationSeconds, time, evt.velocity);
+        const trackInstrument = channelConfig?.instrument || 'synth';
+        this.instrumentManager.triggerAttackRelease(evt.channelId, trackInstrument, evt.note, evt.durationSeconds, time, evt.velocity);
         this.scheduleVisualNote(evt.note, true, time, evt.durationSeconds);
       },
       onTriggerDrum: (evt, time) => {
@@ -182,6 +192,7 @@ class ToneEngine {
         let patternIndex = state.currentDrumPatternEdit;
         let localStepIndex = 0;
         let currentChainItemId: string | null = null;
+        const activeChainItemIds: string[] = [];
 
         if (!state.isPatternRepeatOn && state.patternChain && state.patternChain.length > 0) {
           if (state.patternChain !== this.cachedPatternChainRef) {
@@ -189,20 +200,33 @@ class ToneEngine {
             this.cachedLinearPatternChain = normalizePatternChainToLinear(state.patternChain);
           }
           const linearClips = this.cachedLinearPatternChain;
+          const laneMuted = state.drumLaneMuted || [];
           const loopBeats = Math.max(beatsPerMeasure, this.cachedMaxBeat || beatsPerMeasure);
           const wrappedBeat = ((beat % loopBeats) + loopBeats) % loopBeats;
           const currentMeasure = wrappedBeat / beatsPerMeasure;
-          let activeClip: typeof linearClips[number] | undefined;
+          let primaryActiveClip: typeof linearClips[number] | undefined;
+          let matchingEditClip: typeof linearClips[number] | undefined;
+
           for (let i = 0; i < linearClips.length; i++) {
             const c = linearClips[i];
-            if (currentMeasure >= c.startMeasure - 1e-6 && currentMeasure < c.startMeasure + c.durationMeasures - 1e-6) {
-              activeClip = c;
-              break;
+            if (
+              !c.isMuted &&
+              !laneMuted[c.laneIndex] &&
+              currentMeasure >= c.startMeasure - 1e-6 &&
+              currentMeasure < c.startMeasure + c.durationMeasures - 1e-6
+            ) {
+              activeChainItemIds.push(c.id);
+              if (!primaryActiveClip) primaryActiveClip = c;
+              if (!matchingEditClip && c.patternIndex === state.currentDrumPatternEdit) {
+                matchingEditClip = c;
+              }
             }
           }
-          if (activeClip) {
-            patternIndex = activeClip.patternIndex;
-            currentChainItemId = activeClip.id;
+
+          const stepClip = matchingEditClip || primaryActiveClip;
+          if (stepClip) {
+            patternIndex = stepClip.patternIndex;
+            currentChainItemId = primaryActiveClip ? primaryActiveClip.id : stepClip.id;
             const beatInMeasure = wrappedBeat - Math.floor(currentMeasure) * beatsPerMeasure;
             const patternLen = state.patternLengths?.[patternIndex] || 16;
             localStepIndex = Math.min(patternLen - 1, Math.max(0, Math.floor((beatInMeasure / beatsPerMeasure) * patternLen)));
@@ -226,7 +250,11 @@ class ToneEngine {
         const emittedStep = (state.currentDrumPatternEdit === patternIndex || state.activeView === 'visualizer')
           ? localStepIndex
           : -1;
-        liveTelemetryBus.emitDrumStep(emittedStep, state.isPatternRepeatOn ? null : currentChainItemId);
+        liveTelemetryBus.emitDrumStep(
+          emittedStep,
+          state.isPatternRepeatOn ? null : currentChainItemId,
+          state.isPatternRepeatOn ? [] : activeChainItemIds
+        );
       },
       onSongEnd: () => {
         const state = useSongStore.getState();
@@ -372,6 +400,7 @@ class ToneEngine {
     let prevChannels = initialState.channels;
     let prevDrumChannels = initialState.drumChannels;
     let prevPatternChain = initialState.patternChain;
+    let prevDrumLaneMuted = initialState.drumLaneMuted;
     let prevIsPatternRepeatOn = initialState.isPatternRepeatOn;
     let prevCurrentDrumPatternEdit = initialState.currentDrumPatternEdit;
     let prevChordBlocks = initialState.chordBlocks;
@@ -391,6 +420,7 @@ class ToneEngine {
     let prevTempoMarkers = initialState.tempoMarkers;
     let prevAudioTracks = initialState.audioTracks;
     let prevAudioClips = initialState.audioClips;
+    let prevPatternLengths = initialState.patternLengths;
 
     this.unsubscribeStore = useSongStore.subscribe((state) => {
       this.cachedIsKeyboardMelodyEnabled = state.isKeyboardMelodyEnabled;
@@ -437,6 +467,10 @@ class ToneEngine {
         prevPatternChain = state.patternChain;
         musicalContentChanged = true;
       }
+      if (state.drumLaneMuted !== prevDrumLaneMuted) {
+        prevDrumLaneMuted = state.drumLaneMuted;
+        musicalContentChanged = true;
+      }
       if (state.isPatternRepeatOn !== prevIsPatternRepeatOn) {
         prevIsPatternRepeatOn = state.isPatternRepeatOn;
         musicalContentChanged = true;
@@ -446,6 +480,10 @@ class ToneEngine {
         if (state.isPatternRepeatOn) {
           musicalContentChanged = true;
         }
+      }
+      if (state.patternLengths !== prevPatternLengths) {
+        prevPatternLengths = state.patternLengths;
+        musicalContentChanged = true;
       }
 
       // 4. Patrones rítmicos personalizados
@@ -625,6 +663,10 @@ class ToneEngine {
     this.instrumentManager.updateSynthSettings(settings, channelId);
   }
 
+  public updateSoundFontConfig(channelId: string, config?: ChannelSoundFontConfig) {
+    this.instrumentManager.updateSoundFontConfig(channelId, config);
+  }
+
   public getChannelWaveformData(channelId: string, target?: Float32Array): Float32Array {
     return this.instrumentManager.getChannelWaveform(channelId, target);
   }
@@ -686,18 +728,21 @@ class ToneEngine {
       return;
     }
 
-    // Si solo cambiaron faders/pan/knobs (o undo/redo de synthSettings), no recargar todos los instrumentos
+    // Si solo cambiaron faders/pan/knobs (o undo/redo de synthSettings / soundfontConfig), no recargar todos los instrumentos
     for (const [id, ch] of Object.entries(channels)) {
-      if (ch.synthSettings && prev[id]?.synthSettings !== ch.synthSettings && ch.instrument !== 'piano') {
+      if (ch.synthSettings && prev[id]?.synthSettings !== ch.synthSettings && ch.instrument === 'synth') {
         this.instrumentManager.updateSynthSettings(ch.synthSettings, id);
+      }
+      if (ch.soundfontConfig !== prev[id]?.soundfontConfig && ch.instrument === 'soundfont') {
+        this.instrumentManager.updateSoundFontConfig(id, ch.soundfontConfig);
       }
     }
   }
 
   public playNotePreview(note: string, channelId: string = 'melody', velocity = 0.8) {
     this.unlockIfSuspended();
-    const isPiano = useSongStore.getState().channels[channelId]?.instrument === 'piano';
-    this.previewManager.playNotePreview(note, channelId, isPiano, velocity);
+    const instrument = useSongStore.getState().channels[channelId]?.instrument || 'synth';
+    this.previewManager.playNotePreview(note, channelId, instrument, velocity);
   }
 
   public playChordPreview(chordName: string, chordOctaveShift = 0) {
@@ -730,13 +775,13 @@ class ToneEngine {
 
   public startNote(note: string, channelId = 'melody', velocity = 0.8) {
     this.unlockIfSuspended();
-    const isPiano = useSongStore.getState().channels[channelId]?.instrument === 'piano';
-    this.previewManager.startNote(note, channelId, isPiano, velocity);
+    const instrument = useSongStore.getState().channels[channelId]?.instrument || 'synth';
+    this.previewManager.startNote(note, channelId, instrument, velocity);
   }
 
   public stopNote(note: string, channelId = 'melody') {
-    const isPiano = useSongStore.getState().channels[channelId]?.instrument === 'piano';
-    this.previewManager.stopNote(note, channelId, isPiano);
+    const instrument = useSongStore.getState().channels[channelId]?.instrument || 'synth';
+    this.previewManager.stopNote(note, channelId, instrument);
   }
 
   public silence() {
@@ -888,6 +933,18 @@ class ToneEngine {
     this.drumManager.removeDrumPlayer(channelId);
   }
 
+  public registerCustomDrumSample(sampleUrl: string, audioBuffer: AudioBuffer) {
+    return this.drumManager.registerCustomSampleBuffer(sampleUrl, audioBuffer);
+  }
+
+  public removeCachedDrumSample(sampleUrl: string) {
+    this.drumManager.removeCachedSample(sampleUrl);
+  }
+
+  public preloadDrumSample(sampleUrl: string) {
+    return this.drumManager.preloadSample(sampleUrl);
+  }
+
   public playDrumPreview(channelId: string, customVelocity?: number) {
     this.unlockIfSuspended();
     const state = useSongStore.getState();
@@ -918,8 +975,7 @@ class ToneEngine {
     this.lookaheadScheduler.setEvents(scheduled, bpm, state.isLooping, state.tempoMarkers);
     this.mixerGraph.syncAudioTracks(state.audioTracks || []);
 
-    const loopEndSeconds = Math.max(0.1, scheduled.totalDurationSeconds - 2.0);
-    this.transportManager.setLoop(state.isLooping, 0, loopEndSeconds);
+    this.transportManager.setLoop(state.isLooping, 0, Math.max(0.1, scheduled.totalDurationSeconds - 2.0));
   }
 
   private updateSustain(sustain: boolean) {
@@ -1096,5 +1152,10 @@ if (typeof window !== 'undefined') {
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     toneEngine.dispose();
+  });
+  import.meta.hot.accept(() => {
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
   });
 }

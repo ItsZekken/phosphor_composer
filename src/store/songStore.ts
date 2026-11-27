@@ -1,6 +1,8 @@
 /**
  * songStore.ts
  * Root Store de Phosphor compuesto por Slices modulares e historial de deshacer/rehacer con Zundo.
+ * Arquitectura 1:1 Single Source of Truth: Chord Palette, Piano Roll, Drum Sequencer y Tracks
+ * editan exactamente los mismos datos canónicos (chordBlocks, tracks[].notes, patternChain, audioClips).
  */
 
 import { create } from 'zustand';
@@ -9,12 +11,26 @@ import type { SongStore } from './types';
 import { createTransportSlice, initialTransportState } from './slices/transportSlice';
 import { createHarmonySlice, initialHarmonyState } from './slices/harmonySlice';
 import { createTrackSlice, initialTrackState } from './slices/trackSlice';
-import { createDrumSlice, initialDrumState, DEFAULT_DRUM_CHANNELS } from './slices/drumSlice';
+import {
+  createDrumSlice,
+  initialDrumState,
+  DEFAULT_DRUM_CHANNELS,
+  normalizeCustomDrumSamples,
+  savePersistedCustomDrumSamples
+} from './slices/drumSlice';
+import { getCustomSampleBufferId } from '../constants/drumSamples';
 import { createMixerSlice, initialMixerState, DEFAULT_CHANNELS } from './slices/mixerSlice';
-import { createUISlice, initialUIState } from './slices/uiSlice';
+import {
+  createUISlice,
+  initialUIState,
+  normalizeSoundFontAssets,
+  savePersistedSoundFonts
+} from './slices/uiSlice';
 import { createAudioTrackSlice, initialAudioTrackState, DEFAULT_AUDIO_TRACKS } from './slices/audioTrackSlice';
+import { createPlaylistSlice, initialPlaylistState } from './slices/playlistSlice';
 import { NOTE_CLASSES, transposeNote, transposeChordName } from '../core/music';
 import { deserializeSession } from '../core/session';
+import { getEffectiveDrumLaneCount } from '../utils/typeDefinitions';
 
 export * from './types';
 export { DEFAULT_CHANNELS, DEFAULT_DRUM_CHANNELS, DEFAULT_AUDIO_TRACKS };
@@ -29,16 +45,20 @@ export const useSongStore = create<SongStore>()(
       ...createMixerSlice(set, get, api),
       ...createUISlice(set, get, api),
       ...createAudioTrackSlice(set, get, api),
+      ...createPlaylistSlice(set, get, api),
 
       transposeSong: (semitones: number) => {
         set((state) => {
-          const nextTracks = state.tracks.map((track) => ({
-            ...track,
-            notes: (track.notes || []).map((n) => ({
+          const transposeList = (notes: typeof state.melodyNotes) =>
+            (notes || []).map((n) => ({
               ...n,
               midi: n.midi + semitones,
               note: transposeNote(n.note, semitones)
-            }))
+            }));
+
+          const nextTracks = state.tracks.map((track) => ({
+            ...track,
+            notes: transposeList(track.notes)
           }));
 
           const activeTrack = nextTracks.find((t) => t.id === state.activeTrackId) || nextTracks[0];
@@ -74,16 +94,19 @@ export const useSongStore = create<SongStore>()(
           ...initialMixerState,
           ...initialUIState,
           ...initialAudioTrackState,
+          ...initialPlaylistState,
           projectTitle: 'Sin título',
           lastSavedAt: null,
           commandPaletteMode: 'closed',
           isCrtEnabled: get().isCrtEnabled,
+          customDrumSamples: get().customDrumSamples,
+          soundfonts: get().soundfonts,
           bpm: 100,
           isAutoKey: false,
           detectedKey: null,
           isPlaying: false,
           currentBeat: 0,
-          playbackStep: 0,
+          playbackStep: 0
         });
 
         get().updateSuggestions();
@@ -91,7 +114,11 @@ export const useSongStore = create<SongStore>()(
 
       importSong: (sessionInput: unknown, fallbackTitle?: string) => {
         const { session } = deserializeSession(sessionInput);
-        const activeTrack = session.tracks.find((t) => t.id === session.activeTrackId) || session.tracks[0];
+        const normalizedTracks = session.tracks.map((t) => ({
+          ...t,
+          notes: Array.isArray(t.notes) ? t.notes : []
+        }));
+        const activeTrack = normalizedTracks.find((t) => t.id === session.activeTrackId) || normalizedTracks[0];
         const activeMelodyNotes = activeTrack ? activeTrack.notes : [];
 
         const rawDrumChannels = session.drums.drumChannels;
@@ -100,6 +127,44 @@ export const useSongStore = create<SongStore>()(
           : (rawDrumChannels && typeof rawDrumChannels === 'object' && Object.values(rawDrumChannels).length > 0
             ? (Object.values(rawDrumChannels) as any)
             : DEFAULT_DRUM_CHANNELS);
+
+        const existingCustomSamples = get().customDrumSamples || [];
+        const sessionCustomSamples = normalizeCustomDrumSamples(session.drums.customSamples);
+        const mergedCustomSampleMap = new Map<string, typeof existingCustomSamples[number]>();
+        for (const s of existingCustomSamples) {
+          mergedCustomSampleMap.set(s.id, s);
+        }
+        for (const s of sessionCustomSamples) {
+          mergedCustomSampleMap.set(s.id, s);
+        }
+        for (const ch of normalizedDrumChannels) {
+          const customId = getCustomSampleBufferId(ch?.sampleUrl);
+          if (customId && !mergedCustomSampleMap.has(customId)) {
+            mergedCustomSampleMap.set(customId, {
+              id: customId,
+              name: ch?.name?.trim() || 'Sample importado',
+              sampleUrl: ch.sampleUrl
+            });
+          }
+        }
+        const mergedCustomSamples = Array.from(mergedCustomSampleMap.values());
+        if (mergedCustomSamples.length !== existingCustomSamples.length) {
+          savePersistedCustomDrumSamples(mergedCustomSamples);
+        }
+
+        const existingSoundFonts = get().soundfonts || [];
+        const sessionSoundFonts = normalizeSoundFontAssets(session.soundfonts?.assets);
+        const mergedSoundFontMap = new Map<string, typeof existingSoundFonts[number]>();
+        for (const sf of existingSoundFonts) {
+          mergedSoundFontMap.set(sf.id, sf);
+        }
+        for (const sf of sessionSoundFonts) {
+          mergedSoundFontMap.set(sf.id, sf);
+        }
+        const mergedSoundFonts = Array.from(mergedSoundFontMap.values());
+        if (mergedSoundFonts.length !== existingSoundFonts.length || sessionSoundFonts.length > 0) {
+          savePersistedSoundFonts(mergedSoundFonts);
+        }
 
         const rawTitle = session.metadata?.title?.trim();
         const isGenericTitle =
@@ -124,19 +189,32 @@ export const useSongStore = create<SongStore>()(
           chordOctaveShift: session.harmony.chordOctaveShift,
           chordGridSnap: session.harmony.chordGridSnap || '1',
           chordTimelineViewport: session.harmony.chordTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 },
-          tracks: session.tracks,
-          activeTrackId: session.activeTrackId,
+          tracks: normalizedTracks,
+          activeTrackId: activeTrack ? activeTrack.id : session.activeTrackId,
           melodyNotes: activeMelodyNotes,
           patternChain: session.drums.patternChain,
+          drumLaneCount: getEffectiveDrumLaneCount(
+            session.drums.patternChain,
+            session.drums.drumLaneCount
+          ),
+          drumLaneMuted: Array.isArray(session.drums.drumLaneMuted)
+            ? session.drums.drumLaneMuted.map(Boolean)
+            : [],
           isPatternRepeatOn: session.drums.isPatternRepeatOn,
           activeDrumKitId: session.drums.activeDrumKitId,
           drumChannels: normalizedDrumChannels,
+          customDrumSamples: mergedCustomSamples,
+          soundfonts: mergedSoundFonts,
           patternLengths: session.drums.patternLengths || Array.from({ length: normalizedDrumChannels[0]?.patterns?.length || 8 }).map(() => 16),
+          drumPatternNames: session.drums.drumPatternNames || [],
           drumTimelineViewport: session.drums.drumTimelineViewport || { scrollLeft: 0, zoomLevel: 1.0 },
           audioTracks: (session as any).audio?.tracks || DEFAULT_AUDIO_TRACKS,
           audioClips: (session as any).audio?.clips || [],
           audioLatencyCalibrationMs: (session as any).audio?.latencyMs ?? 20,
+          selectedPlaylistTrack: { kind: 'harmony' },
+          selectedMelodyRegionRefs: [],
           selectedChainIds: [],
+          selectedClipIds: [],
           channels: session.mixer.channels,
           channelOrder: session.mixer.channelOrder,
           selectedChordId: null,
@@ -174,9 +252,12 @@ export const useSongStore = create<SongStore>()(
         chordOctaveShift: state.chordOctaveShift,
         drumChannels: state.drumChannels,
         patternLengths: state.patternLengths,
+        drumPatternNames: state.drumPatternNames,
         patternChain: state.patternChain,
+        drumLaneCount: state.drumLaneCount,
+        drumLaneMuted: state.drumLaneMuted,
         audioTracks: state.audioTracks,
-        audioClips: state.audioClips,
+        audioClips: state.audioClips
       }),
       equality: (pastState, currentState) => {
         const keys = Object.keys(pastState) as Array<keyof typeof pastState>;
@@ -186,7 +267,14 @@ export const useSongStore = create<SongStore>()(
             for (let i = 0; i < pastState.tracks.length; i++) {
               const a = pastState.tracks[i];
               const b = currentState.tracks[i];
-              if (a.id !== b.id || a.name !== b.name || a.channelId !== b.channelId || a.color !== b.color || a.notes !== b.notes) {
+              if (
+                a.id !== b.id ||
+                a.name !== b.name ||
+                a.channelId !== b.channelId ||
+                a.color !== b.color ||
+                a.notes !== b.notes ||
+                a.regions !== b.regions
+              ) {
                 return false;
               }
             }
@@ -199,3 +287,15 @@ export const useSongStore = create<SongStore>()(
     }
   )
 );
+
+// Invariante 1:1 tras undo/redo de Zundo o actualizaciones externas de `tracks`:
+// garantizar que `melodyNotes` refleje siempre las notas exactas de la pista activa.
+useSongStore.subscribe((state, prevState) => {
+  if (state.tracks !== prevState.tracks || state.activeTrackId !== prevState.activeTrackId) {
+    const activeTrack = state.tracks.find((t) => t.id === state.activeTrackId) || state.tracks[0];
+    const expectedNotes = activeTrack ? activeTrack.notes : [];
+    if (state.melodyNotes !== expectedNotes) {
+      useSongStore.setState({ melodyNotes: expectedNotes });
+    }
+  }
+});

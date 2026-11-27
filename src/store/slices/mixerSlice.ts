@@ -72,6 +72,32 @@ export const createMixerSlice: SliceCreator<MixerState & MixerActions> = (set, g
   setChannelPan: (id, pan) => get().updateChannel(id, { pan }),
 
   setChannelInstrument: (id, instrument) => {
+    const state = get();
+    const existing = state.channels[id];
+    if (instrument === 'soundfont' && existing && !existing.soundfontConfig) {
+      const available = state.soundfonts || [];
+      if (available.length > 0) {
+        const firstSf = available[0];
+        const firstPatch =
+          firstSf.patches.find((p) => p.bank === 0 && p.program === 0) ||
+          firstSf.patches[0];
+        if (firstPatch) {
+          get().updateChannel(id, {
+            instrument,
+            soundfontConfig: {
+              soundfontId: firstSf.id,
+              bank: firstPatch.bank,
+              program: firstPatch.program,
+              patchName: firstPatch.name,
+              gain: 1.0,
+              releaseMultiplier: 1.0,
+              transpose: 0
+            }
+          });
+          return;
+        }
+      }
+    }
     get().updateChannel(id, { instrument });
     if (id === 'chords' && (instrument === 'piano' || instrument === 'synth')) {
       set({ instrumentType: instrument });

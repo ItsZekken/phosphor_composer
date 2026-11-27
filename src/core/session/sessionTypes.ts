@@ -11,6 +11,8 @@ import type {
   TempoMarker,
   ChannelConfig, 
   DrumChannel, 
+  CustomDrumSample,
+  SoundFontAsset,
   TimeSignature,
   SynthSettings,
   CRTParams,
@@ -48,10 +50,16 @@ export interface HarmonyState {
 
 export interface DrumSessionState {
   patternChain: PatternChainItem[];
+  drumLaneCount?: number;
+  drumLaneMuted?: boolean[];
   isPatternRepeatOn: boolean;
   activeDrumKitId: string;
   drumChannels: DrumChannel[];
+  customSamples?: CustomDrumSample[];
   patternLengths?: number[];
+  drumPatternNames?: string[];
+  /** Campo legado conservado solo para migración retrocompatible */
+  drumArrangementMode?: 'sequencer' | 'playlist';
   currentDrumPatternEdit?: number;
   drumTimelineViewport?: { scrollLeft: number; zoomLevel: number };
 }
@@ -76,6 +84,15 @@ export interface AudioSessionState {
   latencyMs?: number;
 }
 
+export interface MidiPlaylistSessionState {
+  tracks: import('../../utils/typeDefinitions').MidiTrack[];
+  clips: import('../../utils/typeDefinitions').MidiPatternClip[];
+}
+
+export interface SoundFontSessionState {
+  assets: SoundFontAsset[];
+}
+
 /**
  * Esquema de Proyecto / Sesión Canónico v2 (Phosphor Composer)
  */
@@ -90,6 +107,8 @@ export interface SessionV2 {
   mixer: MixerState;
   ui?: UIPreferenceState;
   audio?: AudioSessionState;
+  midi?: MidiPlaylistSessionState;
+  soundfonts?: SoundFontSessionState;
   customSynthSettings?: Record<string, SynthSettings>;
 }
 

@@ -23,6 +23,7 @@ const AudioTracksView = React.lazy(() => import('./components/audio-tracks/Audio
 const StageVisualizerView = React.lazy(() => import('./components/visualizer/StageVisualizerView').then(m => ({ default: m.StageVisualizerView })));
 const SettingsPanel = React.lazy(() => import('./components/ui/SettingsPanel').then(m => ({ default: m.SettingsPanel })));
 const SynthConfigModal = React.lazy(() => import('./components/ui/SynthConfigModal').then(m => ({ default: m.SynthConfigModal })));
+const SoundFontConfigModal = React.lazy(() => import('./components/ui/SoundFontConfigModal').then(m => ({ default: m.SoundFontConfigModal })));
 const MixerDrawer = React.lazy(() => import('./components/ui/MixerDrawer').then(m => ({ default: m.MixerDrawer })));
 
 export default function App() {
@@ -91,12 +92,17 @@ export default function App() {
       activeTrackId: state.activeTrackId,
       melodyNotes: state.melodyNotes,
       drumChannels: state.drumChannels,
+      customDrumSamples: state.customDrumSamples,
       patternLengths: state.patternLengths,
+      drumPatternNames: state.drumPatternNames,
       patternChain: state.patternChain,
+      drumLaneCount: state.drumLaneCount,
+      drumLaneMuted: state.drumLaneMuted,
       isPatternRepeatOn: state.isPatternRepeatOn,
       activeDrumKitId: state.activeDrumKitId,
       channels: state.channels,
       channelOrder: state.channelOrder,
+      soundfonts: state.soundfonts,
       audioTracks: state.audioTracks,
       audioClips: state.audioClips,
       audioLatencyCalibrationMs: state.audioLatencyCalibrationMs,
@@ -183,6 +189,11 @@ export default function App() {
         if (store.isSynthModalOpen) {
           e.preventDefault();
           store.setSynthModalOpen(false);
+          return;
+        }
+        if (store.isSoundFontModalOpen) {
+          e.preventDefault();
+          store.setSoundFontModalOpen(false);
           return;
         }
         if (store.isSettingsOpen) {
@@ -464,6 +475,7 @@ export default function App() {
           <Suspense fallback={null}>
             <SettingsPanel />
             <SynthConfigModal />
+            <SoundFontConfigModal />
           </Suspense>
         </div>
       </div>

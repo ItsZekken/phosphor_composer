@@ -332,7 +332,10 @@ export const Header = () => {
 
   const isSongEmpty = (state: ReturnType<typeof useSongStore.getState>, includeAudio = true): boolean => {
     const hasChords = Boolean(state.chordBlocks && state.chordBlocks.length > 0);
-    const hasTracks = Boolean(state.tracks && state.tracks.some((t) => t.notes && t.notes.length > 0));
+    const hasTracks = Boolean(
+      state.tracks &&
+      state.tracks.some((t) => t.notes && t.notes.length > 0)
+    );
     const hasMelody = Boolean(state.melodyNotes && state.melodyNotes.length > 0);
     const hasDrums =
       Boolean(state.drumChannels && state.drumChannels.some((ch) => ch.patterns && ch.patterns.some((p) => p.some((s) => s?.isActive)))) ||
@@ -375,6 +378,7 @@ export const Header = () => {
         melodyNotes: state.melodyNotes,
         drumChannels: state.drumChannels,
         patternChain: state.patternChain,
+        drumLaneMuted: state.drumLaneMuted,
         isPatternRepeatOn: state.isPatternRepeatOn,
         patternLengths: state.patternLengths,
         currentDrumPatternEdit: state.currentDrumPatternEdit,
@@ -412,7 +416,15 @@ export const Header = () => {
       link.click();
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-      notify.success('Paquete .phos exportado', result.filename);
+      const bundleNotes: string[] = [];
+      if (result.audioCount > 0) {
+        bundleNotes.push(`${result.audioCount} audio`);
+      }
+      if (result.soundfontCount > 0) {
+        bundleNotes.push(`${result.soundfontCount} SoundFont${result.soundfontCount === 1 ? '' : 's'}`);
+      }
+      const detail = bundleNotes.length > 0 ? `${result.filename} (${bundleNotes.join(' · ')})` : result.filename;
+      notify.success('Paquete .phos exportado', detail);
     } catch (err) {
       notify.error('Error al exportar paquete .phos', (err as Error).message);
     }
@@ -797,7 +809,7 @@ export const Header = () => {
             ref={fileInputRef}
             type="file"
             id="import-midi"
-            accept=".phos,.zip,.json,.mid,.midi,.wav,.mp3,.ogg,.flac"
+            accept=".phos,.zip,.json,.mid,.midi,.sf2,.sf3,.wav,.mp3,.ogg,.flac"
             style={{ display: 'none' }}
             onChange={handleImportFile}
           />

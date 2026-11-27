@@ -8,6 +8,7 @@ import {
   Trash2,
   Copy,
   Scissors,
+  Pencil,
   Search,
   ChevronRight,
   Layers,
@@ -46,7 +47,8 @@ import {
   getSnapStepBeats,
   midiToNoteName,
   applyFlipTransform,
-  type EphemeralDragState
+  type EphemeralDragState,
+  type PianoRollTool
 } from './utils/pianoRollUtils';
 
 export const PianoRollView: React.FC = () => {
@@ -124,7 +126,7 @@ export const PianoRollView: React.FC = () => {
   const [isScaleHighlightActive, setIsScaleHighlightActive] = useState(true);
   const [isGhostNotesActive, setIsGhostNotesActive] = useState(true);
   const [isChordHighlightActive, setIsChordHighlightActive] = useState(true);
-  const [isSliceToolActive, setIsSliceToolActive] = useState(false);
+  const [activeTool, setActiveTool] = useState<PianoRollTool>('pencil');
 
   // Velocity Lane & Transformaciones
   const [isVelocityCollapsed, setIsVelocityCollapsed] = useState(false);
@@ -201,6 +203,7 @@ export const PianoRollView: React.FC = () => {
   useEffect(() => {
     if (prevActiveTrackIdRef.current === activeTrackId) return;
     prevActiveTrackIdRef.current = activeTrackId;
+    setSelectedNoteIds([]);
 
     const activeTrack = (tracks || []).find(t => t.id === activeTrackId);
     if (activeTrack && activeTrack.viewport) {
@@ -295,12 +298,14 @@ export const PianoRollView: React.FC = () => {
   const handleEscape = useCallback(() => {
     if (isTransformsOpen) {
       setIsTransformsOpen(false);
-    } else if (isSliceToolActive) {
-      setIsSliceToolActive(false);
+    } else if (activeTool === 'slice') {
+      setActiveTool('pencil');
     } else if (selectedNoteIds.length > 0) {
       setSelectedNoteIds([]);
+    } else if (activeTool !== 'pencil') {
+      setActiveTool('pencil');
     }
-  }, [isTransformsOpen, isSliceToolActive, selectedNoteIds.length]);
+  }, [isTransformsOpen, activeTool, selectedNoteIds.length]);
 
   const handleToggleVelocityLane = useCallback(() => {
     setIsVelocityCollapsed(prev => !prev);
@@ -310,8 +315,8 @@ export const PianoRollView: React.FC = () => {
     setIsGhostNotesActive(prev => !prev);
   }, []);
 
-  const handleToggleSliceTool = useCallback(() => {
-    setIsSliceToolActive(prev => !prev);
+  const handleSelectToolShortcut = useCallback((tool: PianoRollTool) => {
+    setActiveTool(prev => (tool !== 'pencil' && prev === tool ? 'pencil' : tool));
   }, []);
 
   // Hook de atajos de teclado DAW profesionales
@@ -330,13 +335,13 @@ export const PianoRollView: React.FC = () => {
     gridSnap: pianoRollGridSnap,
     onToggleVelocityLane: handleToggleVelocityLane,
     onToggleGhostNotes: handleToggleGhostNotes,
-    onToggleSliceTool: handleToggleSliceTool,
+    onSelectTool: handleSelectToolShortcut,
     onOpenTransforms: handleOpenTransforms,
     onZoomToFit: handleZoomToFit,
     onEscape: handleEscape
   });
 
-  // Hook de interacción con ratón y lienzo (0ms latency, clonado Shift+Drag, slice y auto-scroll)
+  // Hook de interacción con ratón y lienzo (0ms latency, clonado Shift+Drag, slice, selección y auto-scroll)
   const {
     lassoRect,
     tempNote,
@@ -367,7 +372,7 @@ export const PianoRollView: React.FC = () => {
     gridSnap: pianoRollGridSnap,
     ephemeralDragRef,
     triggerNotesRedraw,
-    isSliceToolActive,
+    activeTool,
     isGhostNotesActive
   });
 
@@ -549,6 +554,52 @@ export const PianoRollView: React.FC = () => {
         }
         center={
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {/* Bandeja de Herramientas estilo FL Studio (Lápiz · Navaja · Seleccionar) */}
+            <div className="physical-segment-tray" role="group" aria-label="Herramientas del Piano Roll">
+              <button
+                type="button"
+                className={`physical-segment-btn ${activeTool === 'pencil' ? 'active' : ''}`}
+                onClick={() => setActiveTool('pencil')}
+                title="Lápiz / Dibujar notas (P · Ctrl+Arrastrar selecciona área)"
+                aria-label="Lápiz (P)"
+                aria-pressed={activeTool === 'pencil'}
+              >
+                <Pencil size={13} />
+              </button>
+              <button
+                type="button"
+                className={`physical-segment-btn ${activeTool === 'slice' ? 'active tool-slice-active' : ''}`}
+                onClick={() => setActiveTool('slice')}
+                title="Navaja / Cortar notas (C · Shift+Arrastrar corte vertical · también Shift+Click derecho)"
+                aria-label="Navaja (C)"
+                aria-pressed={activeTool === 'slice'}
+              >
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2.2 2.8 L8.2 2.8 L8.2 9.4 Z" fill="currentColor" fillOpacity="0.22" />
+                  <path d="M9.6 2.8 L11.8 2.8 Q13.6 2.8 13.6 4.6 L13.6 11.8 Q13.6 13.6 11.8 13.6 L11.2 13.6 Q9.6 13.6 9.6 11.8 Z" />
+                  <circle cx="11.6" cy="7.6" r="0.95" fill="currentColor" stroke="none" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={`physical-segment-btn ${activeTool === 'select' ? 'active' : ''}`}
+                onClick={() => setActiveTool('select')}
+                title="Seleccionar notas por área (E · Arrastrar caja · Shift/Ctrl suma a la selección)"
+                aria-label="Seleccionar (E)"
+                aria-pressed={activeTool === 'select'}
+              >
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5.5 2.5 H3.8 A1.3 1.3 0 0 0 2.5 3.8 V5.5" />
+                  <path d="M10.5 2.5 H12.2 A1.3 1.3 0 0 1 13.5 3.8 V5.5" />
+                  <path d="M2.5 10.5 V12.2 A1.3 1.3 0 0 0 3.8 13.5 H5.5" />
+                  <path d="M13.5 10.5 V12.2 A1.3 1.3 0 0 1 12.2 13.5 H10.5" />
+                  <rect x="5.2" y="5.2" width="5.6" height="5.6" rx="1" fill="currentColor" fillOpacity="0.2" stroke="none" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="toolbar-divider-vertical" style={{ width: '1px', height: '16px', backgroundColor: 'var(--border-color, rgba(255,255,255,0.12))', margin: '0 2px' }} />
+
             {/* Segmento de Duración de Nota por Defecto */}
             <div className="physical-segment-tray">
               <button
@@ -648,17 +699,6 @@ export const PianoRollView: React.FC = () => {
         }
         right={
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            {/* Herramienta Slice / Corte (C o Shift+RightDrag) */}
-            <button
-              type="button"
-              className={`physical-btn ${isSliceToolActive ? 'active' : ''}`}
-              onClick={handleToggleSliceTool}
-              title="Herramienta Corte / Slice (C · también Shift+Click derecho)"
-              style={isSliceToolActive ? { borderColor: 'rgba(255, 107, 107, 0.55)', boxShadow: 'inset 0 0 8px rgba(255, 107, 107, 0.2)' } : undefined}
-            >
-              <Scissors size={13} style={{ color: isSliceToolActive ? '#ff6b6b' : 'var(--text-secondary)' }} />
-            </button>
-
             {/* Transformaciones Musicales (Strum / Humanize / Chop) */}
             <button
               type="button"
@@ -727,6 +767,8 @@ export const PianoRollView: React.FC = () => {
         onRequestDeleteTrack={(trackId, trackName) => {
           setConfirmModalConfig({ isOpen: true, trackId, trackName, type: 'track' });
         }}
+        selectedNoteCount={selectedNoteIds.length}
+        onClearSelection={() => setSelectedNoteIds([])}
       />
 
       {/* Workspace */}
@@ -802,6 +844,8 @@ export const PianoRollView: React.FC = () => {
             beatsPerMeasure={beatsPerMeasure}
             chordBlocks={chordBlocks}
             selectedNoteIds={selectedNoteIds}
+            setSelectedNoteIds={setSelectedNoteIds}
+            activeTool={activeTool}
             lassoRect={lassoRect}
             tempNote={tempNote}
             scalePitchClasses={scalePitchClasses}

@@ -15,6 +15,7 @@ export interface ActiveNotesSnapshot {
 export interface DrumStepSnapshot {
   step: number;
   chainItemId: string | null;
+  activeChainItemIds: string[];
 }
 
 interface ScheduledVisualNote {
@@ -40,6 +41,7 @@ class LiveTelemetryBus {
 
   private currentStep = -1;
   private currentChainItemId: string | null = null;
+  private currentActiveChainItemIds: string[] = [];
   private drumStepListeners = new Set<DrumStepListener>();
 
   private rafId: number | null = null;
@@ -132,24 +134,43 @@ class LiveTelemetryBus {
     };
   }
 
-  public emitDrumStep(step: number, chainItemId: string | null): void {
-    if (this.currentStep === step && this.currentChainItemId === chainItemId) {
+  public emitDrumStep(
+    step: number,
+    chainItemId: string | null,
+    activeChainItemIds?: string[]
+  ): void {
+    const nextIds = activeChainItemIds
+      ? activeChainItemIds
+      : chainItemId
+      ? [chainItemId]
+      : [];
+    if (
+      this.currentStep === step &&
+      this.currentChainItemId === chainItemId &&
+      this.arraysEqual(this.currentActiveChainItemIds, nextIds)
+    ) {
       return;
     }
     this.currentStep = step;
     this.currentChainItemId = chainItemId;
-    const snap: DrumStepSnapshot = { step, chainItemId };
+    this.currentActiveChainItemIds = nextIds.slice();
+    const snap: DrumStepSnapshot = {
+      step,
+      chainItemId,
+      activeChainItemIds: this.currentActiveChainItemIds
+    };
     this.drumStepListeners.forEach((listener) => {
       try {
         listener(snap);
-      } catch (_) {}
+      } catch {}
     });
   }
 
   public getDrumStepSnapshot(): DrumStepSnapshot {
     return {
       step: this.currentStep,
-      chainItemId: this.currentChainItemId
+      chainItemId: this.currentChainItemId,
+      activeChainItemIds: this.currentActiveChainItemIds
     };
   }
 

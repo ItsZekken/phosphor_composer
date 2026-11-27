@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSongStore } from '../../store/songStore';
 import { UnifiedToolbar } from '../shared/UnifiedToolbar';
 import { ChannelQuickControl } from '../ui/ChannelQuickControl';
@@ -8,8 +8,18 @@ import { PatternChainArranger } from './PatternChainArranger';
 import { ContextMenuContainer } from '../ui/ContextMenuContainer';
 
 import { CustomSelect } from '../ui/CustomSelect';
-import { Copy, ClipboardPaste, Repeat, Plus, Trash2, Eraser, Layers } from 'lucide-react';
+import { Copy, ClipboardPaste, Repeat, Plus, Trash2, Eraser, Layers, Upload } from 'lucide-react';
 import { type DrumChannel } from '../../utils/typeDefinitions';
+import {
+  hasExternalFilesPayload,
+  isExplicitProjectOnlyDrag,
+  isSupportedAudioFile,
+  isSupportedProjectFile,
+  importProjectFile,
+  importCustomDrumSamples,
+  importCustomDrumSamplesAsNewChannels
+} from '../../core/session/projectFileImport';
+import { notify } from '../../core/ui/toastBus';
 
 import { useShallow } from 'zustand/react/shallow';
 import { DEFAULT_DRUM_CHANNELS } from '../../store/slices/drumSlice';
@@ -58,6 +68,79 @@ export const DrumSequencerView: React.FC = () => {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [patternContextMenu, setPatternContextMenu] = useState<{ x: number; y: number; index: number } | null>(null);
+  const [isExternalFileDragging, setIsExternalFileDragging] = useState(false);
+  const [fileDropTargetChannelId, setFileDropTargetChannelId] = useState<string | null>(null);
+  const [isNewChannelZoneOver, setIsNewChannelZoneOver] = useState(false);
+  const fileDragDepthRef = useRef(0);
+
+  const resetFileDragState = useCallback(() => {
+    fileDragDepthRef.current = 0;
+    setIsExternalFileDragging(false);
+    setFileDropTargetChannelId(null);
+    setIsNewChannelZoneOver(false);
+  }, []);
+
+  useEffect(() => {
+    const handleWindowDragEnter = (e: DragEvent) => {
+      if (!hasExternalFilesPayload(e) || isExplicitProjectOnlyDrag(e)) return;
+      fileDragDepthRef.current += 1;
+      setIsExternalFileDragging(true);
+    };
+
+    const handleWindowDragLeave = (e: DragEvent) => {
+      if (!hasExternalFilesPayload(e)) return;
+      fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1);
+      if (fileDragDepthRef.current === 0) {
+        resetFileDragState();
+      }
+    };
+
+    window.addEventListener('dragenter', handleWindowDragEnter);
+    window.addEventListener('dragleave', handleWindowDragLeave);
+    window.addEventListener('drop', resetFileDragState);
+    window.addEventListener('dragend', resetFileDragState);
+    window.addEventListener('blur', resetFileDragState);
+
+    return () => {
+      window.removeEventListener('dragenter', handleWindowDragEnter);
+      window.removeEventListener('dragleave', handleWindowDragLeave);
+      window.removeEventListener('drop', resetFileDragState);
+      window.removeEventListener('dragend', resetFileDragState);
+      window.removeEventListener('blur', resetFileDragState);
+    };
+  }, [resetFileDragState]);
+
+  const handleFileDragOverChannel = useCallback((channelId: string) => {
+    setIsExternalFileDragging(true);
+    setIsNewChannelZoneOver(false);
+    setFileDropTargetChannelId(prev => (prev === channelId ? prev : channelId));
+  }, []);
+
+  const handleRackFilesDrop = useCallback(async (targetChannelId: string | null, files: File[]) => {
+    resetFileDragState();
+    if (!files || files.length === 0) return;
+
+    const projectFile = files.find(isSupportedProjectFile);
+    if (projectFile) {
+      await importProjectFile(projectFile);
+      return;
+    }
+
+    const audioFiles = files.filter(isSupportedAudioFile);
+    if (audioFiles.length === 0) {
+      notify.warning(
+        `Archivo no reconocido: ${files[0].name}`,
+        'Formatos soportados: .wav, .mp3, .ogg, .flac, .m4a, .phos, .json, .mid'
+      );
+      return;
+    }
+
+    if (targetChannelId) {
+      await importCustomDrumSamples(audioFiles, targetChannelId);
+    } else {
+      await importCustomDrumSamplesAsNewChannels(audioFiles);
+    }
+  }, [resetFileDragState]);
 
   const rawChannels = drumChannels;
   const channelList: DrumChannel[] = (Array.isArray(rawChannels) && rawChannels.length > 0)
@@ -129,7 +212,7 @@ export const DrumSequencerView: React.FC = () => {
     const newChannel: DrumChannel = {
       id: newId,
       name: `Custom ${drumChannels.length + 1}`,
-      sampleUrl: PRESET_DRUM_KITS[0].samples['kick'] || '',
+      sampleUrl: PRESET_DRUM_KITS[0].samples['kick_1'] || '/drums/kicks/kick1.wav',
       patterns: Array(totalPatterns).fill(null).map(() => Array(16).fill({ isActive: false, velocity: 0.8 })),
       volume: 80,
       pan: 0,
@@ -140,7 +223,25 @@ export const DrumSequencerView: React.FC = () => {
   };
 
   return (
-    <div className="sequencer-container" onClick={() => { if (patternContextMenu) setPatternContextMenu(null); }}>
+    <div
+      className="sequencer-container"
+      onClick={() => { if (patternContextMenu) setPatternContextMenu(null); }}
+      onDragOver={(e) => {
+        if (!hasExternalFilesPayload(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        if (fileDropTargetChannelId !== null) setFileDropTargetChannelId(null);
+        if (isNewChannelZoneOver) setIsNewChannelZoneOver(false);
+      }}
+      onDrop={(e) => {
+        if (!hasExternalFilesPayload(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        (e.nativeEvent as unknown as { __phosphorDropHandled?: boolean }).__phosphorDropHandled = true;
+        const files = Array.from(e.dataTransfer.files || []);
+        handleRackFilesDrop(null, files);
+      }}
+    >
       <UnifiedToolbar
         left={
           <>
@@ -329,8 +430,37 @@ export const DrumSequencerView: React.FC = () => {
               onDragEndRow={handleDragEndRow}
               isDragging={draggedIndex === idx}
               isDragOver={dragOverIndex === idx && draggedIndex !== idx}
+              isFileDragOver={fileDropTargetChannelId === channel.id}
+              onFileDragOverChannel={handleFileDragOverChannel}
+              onFileDropChannel={handleRackFilesDrop}
             />
           ))}
+
+          {isExternalFileDragging && (
+            <div
+              className={`drum-new-channel-dropzone ${isNewChannelZoneOver ? 'active' : ''}`}
+              style={{ width: `${362 + currentPatternLength * 30}px`, maxWidth: 'none' }}
+              onDragOver={(e) => {
+                if (!hasExternalFilesPayload(e)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = 'copy';
+                if (fileDropTargetChannelId !== null) setFileDropTargetChannelId(null);
+                if (!isNewChannelZoneOver) setIsNewChannelZoneOver(true);
+              }}
+              onDrop={(e) => {
+                if (!hasExternalFilesPayload(e)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                (e.nativeEvent as unknown as { __phosphorDropHandled?: boolean }).__phosphorDropHandled = true;
+                const files = Array.from(e.dataTransfer.files || []);
+                handleRackFilesDrop(null, files);
+              }}
+            >
+              <Upload size={14} />
+              <span>Soltar sobre un canal para asignarlo o aquí para añadir nuevo canal</span>
+            </div>
+          )}
         </div>
 
         {/* Cadena Visual de Patrones (Arranger) */}

@@ -84,7 +84,10 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     title: 'Piano Roll',
     accent: '#a855f7',
     items: [
-      { keys: ['C'], desc: 'Herramienta Corte (Slice)' },
+      { keys: ['P'], desc: 'Herramienta Lápiz (dibujar / editar notas)' },
+      { keys: ['C'], desc: 'Herramienta Navaja / Corte (Shift+Arrastrar vertical)' },
+      { keys: ['E'], desc: 'Herramienta Seleccionar (caja de selección múltiple)' },
+      { keys: ['Ctrl', 'Arrastrar'], desc: 'Selección rápida por área desde modo Lápiz' },
       { keys: ['V'], desc: 'Mostrar / ocultar panel de Velocidad' },
       { keys: ['Alt', 'Arrastrar'], desc: 'Mover / estirar notas sin snap a la grilla' },
       { keys: ['Shift', 'Arrastrar'], desc: 'Clonar notas seleccionadas' },
@@ -106,12 +109,14 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     ]
   },
   {
-    title: 'Drum Sequencer y Tracks',
+    title: 'Drum Sequencer y Tracks (Vista 1:1)',
     accent: '#e5a93c',
     items: [
-      { keys: ['S / C'], desc: 'Cortar clip de audio / patrón en el cabezal' },
+      { keys: ['P / C / E'], desc: 'Herramientas Tracks: Pincel · Navaja · Seleccionar' },
+      { keys: ['S'], desc: 'Dividir bloque de acorde, melodía, batería o audio en el cabezal' },
+      { keys: ['Shift', 'Arrastrar'], desc: 'Clonar bloques/regiones seleccionados (incluso en grupo)' },
       { keys: ['R'], desc: 'Iniciar / detener grabación en pista armada (Tracks)' },
-      { keys: ['Ctrl', 'D'], desc: 'Duplicar clips seleccionados' },
+      { keys: ['Ctrl', 'C / V / D'], desc: 'Copiar / Pegar / Duplicar clips seleccionados' },
       { keys: ['Supr'], desc: 'Eliminar selección activa' }
     ]
   },
@@ -214,9 +219,9 @@ export const CommandPaletteModal: React.FC = () => {
       },
       {
         id: 'view-tracks',
-        label: 'Ir a Audio Tracks',
+        label: 'Ir a Tracks (Armonía, Piano Roll, Batería y Audio 1:1)',
         category: 'Navegación',
-        keywords: 'audio pistas grabar wav multitrack',
+        keywords: 'audio pistas tracks armonia acordes melodia piano roll bateria grabar wav multitrack',
         shortcut: 'Alt+4',
         icon: <AudioWaveform size={14} />,
         run: () => store().setActiveView('audio-tracks')

@@ -107,6 +107,7 @@ export function extractStageTimelineNotes(params: ExtractStageTimelineNotesParam
     const trackColor = track.color || channel?.color || PIANO_ROLL_COLOR_PALETTE[trackIdx % PIANO_ROLL_COLOR_PALETTE.length];
 
     (track.notes || []).forEach((n: any) => {
+      if (n.muted) return;
       list.push({
         id: `track-${track.id}-${n.id}`,
         midi: n.midi || noteToMidi(n.note),

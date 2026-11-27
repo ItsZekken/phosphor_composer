@@ -6,6 +6,9 @@
 
 import * as Tone from 'tone';
 import type { MixerGraph } from './MixerGraph';
+import { audioBufferRegistry } from '../audioBufferRegistry';
+import { getNativeAudioContext } from '../worklet/PhosphorWorkletNode';
+import { getCustomSampleBufferId, isCustomSampleUrl } from '../../../constants/drumSamples';
 
 interface DrumChannelNodeEntry {
   volumeNode: Tone.Volume;
@@ -91,16 +94,91 @@ export class DrumSoundManager {
   }
 
   /**
-   * Pre-carga un archivo de audio y lo almacena decodificado en la caché de buffers.
+   * Registra directamente un AudioBuffer decodificado para un sample de batería importado.
    */
-  public async preloadSample(sampleUrl: string): Promise<Tone.ToneAudioBuffer | null> {
-    if (!sampleUrl || (!sampleUrl.startsWith('/') && !sampleUrl.endsWith('.wav') && !sampleUrl.endsWith('.mp3'))) {
+  public registerCustomSampleBuffer(sampleUrl: string, audioBuffer: AudioBuffer): Tone.ToneAudioBuffer | null {
+    if (!sampleUrl || !audioBuffer || audioBuffer.length === 0) return null;
+    try {
+      const toneBuffer = new Tone.ToneAudioBuffer(audioBuffer);
+      this.bufferCache.set(sampleUrl, toneBuffer);
+      this.nativeBufferCache.set(sampleUrl, audioBuffer);
+      this.loadingPromises.delete(sampleUrl);
+      return toneBuffer;
+    } catch (err) {
+      console.warn(`[DrumSoundManager] Error registrando buffer personalizado ${sampleUrl}:`, err);
       return null;
     }
+  }
+
+  /**
+   * Elimina un sample de las cachés internas de audio.
+   */
+  public removeCachedSample(sampleUrl: string): void {
+    const cached = this.bufferCache.get(sampleUrl);
+    if (cached) {
+      try { cached.dispose(); } catch {}
+      this.bufferCache.delete(sampleUrl);
+    }
+    this.nativeBufferCache.delete(sampleUrl);
+    this.loadingPromises.delete(sampleUrl);
+  }
+
+  /**
+   * Pre-carga un archivo de audio (URL o sample importado en IndexedDB) y lo almacena en caché.
+   */
+  public async preloadSample(sampleUrl: string): Promise<Tone.ToneAudioBuffer | null> {
+    if (!sampleUrl) return null;
+
     const cached = this.bufferCache.get(sampleUrl);
     if (cached && (cached as any).loaded) {
       return cached;
     }
+
+    if (isCustomSampleUrl(sampleUrl)) {
+      const bufferId = getCustomSampleBufferId(sampleUrl);
+      if (!bufferId) return null;
+
+      const memBuf = audioBufferRegistry.getBuffer(bufferId);
+      if (memBuf && memBuf.length > 0) {
+        return this.registerCustomSampleBuffer(sampleUrl, memBuf);
+      }
+
+      if (this.loadingPromises.has(sampleUrl)) {
+        return this.loadingPromises.get(sampleUrl)!;
+      }
+
+      const promise = (async (): Promise<Tone.ToneAudioBuffer | null> => {
+        try {
+          const audioCtx =
+            getNativeAudioContext() ||
+            (Tone.getContext().rawContext as AudioContext);
+          if (!audioCtx) return null;
+          const loaded = await audioBufferRegistry.loadBufferFromIndexedDB(bufferId, audioCtx);
+          if (loaded && loaded.length > 0) {
+            return this.registerCustomSampleBuffer(sampleUrl, loaded);
+          }
+          return null;
+        } catch (err) {
+          console.warn(`[DrumSoundManager] Error restaurando sample importado ${sampleUrl}:`, err);
+          return null;
+        } finally {
+          this.loadingPromises.delete(sampleUrl);
+        }
+      })();
+
+      this.loadingPromises.set(sampleUrl, promise);
+      return promise;
+    }
+
+    if (
+      !sampleUrl.startsWith('/') &&
+      !sampleUrl.startsWith('blob:') &&
+      !sampleUrl.startsWith('data:') &&
+      !/\.(wav|mp3|ogg|flac|m4a|aac|webm)$/i.test(sampleUrl)
+    ) {
+      return null;
+    }
+
     if (this.loadingPromises.has(sampleUrl)) {
       return this.loadingPromises.get(sampleUrl)!;
     }
@@ -180,7 +258,15 @@ export class DrumSoundManager {
     // 1. Obtener buffer pre-cargado desde caché
     let cachedBuffer = this.bufferCache.get(sampleUrl);
 
-    if (!cachedBuffer && (sampleUrl.startsWith('/') || sampleUrl.endsWith('.wav') || sampleUrl.endsWith('.mp3'))) {
+    if (!cachedBuffer && isCustomSampleUrl(sampleUrl)) {
+      const bufferId = getCustomSampleBufferId(sampleUrl);
+      const memBuf = bufferId ? audioBufferRegistry.getBuffer(bufferId) : undefined;
+      if (memBuf && memBuf.length > 0) {
+        cachedBuffer = this.registerCustomSampleBuffer(sampleUrl, memBuf) || undefined;
+      } else {
+        this.preloadSample(sampleUrl);
+      }
+    } else if (!cachedBuffer && (sampleUrl.startsWith('/') || /\.(wav|mp3|ogg|flac|m4a|aac|webm)$/i.test(sampleUrl))) {
       this.preloadSample(sampleUrl);
     }
 
@@ -203,20 +289,24 @@ export class DrumSoundManager {
           typeof audioCtx.createBufferSource === 'function' &&
           typeof audioCtx.createGain === 'function'
         ) {
-          const src = audioCtx.createBufferSource();
-          src.buffer = nativeBuf;
-          const gainNode = audioCtx.createGain();
-          gainNode.gain.value = gainFactor;
-          src.connect(gainNode);
-          Tone.connect(gainNode, channelNode.volumeNode);
-          const startAt = time !== undefined ? Math.max(audioCtx.currentTime, time) : audioCtx.currentTime;
-          src.start(startAt);
-          this.activeNativeSources.add(src);
-          src.onended = () => {
-            this.activeNativeSources.delete(src);
-            try { src.disconnect(); gainNode.disconnect(); } catch (_) {}
-          };
-          return;
+          try {
+            const src = audioCtx.createBufferSource();
+            src.buffer = nativeBuf;
+            const gainNode = audioCtx.createGain();
+            gainNode.gain.value = gainFactor;
+            src.connect(gainNode);
+            Tone.connect(gainNode, channelNode.volumeNode);
+            const startAt = time !== undefined ? Math.max(audioCtx.currentTime, time) : audioCtx.currentTime;
+            src.start(startAt);
+            this.activeNativeSources.add(src);
+            src.onended = () => {
+              this.activeNativeSources.delete(src);
+              try { src.disconnect(); gainNode.disconnect(); } catch (_) {}
+            };
+            return;
+          } catch {
+            // Continuar con ToneBufferSource si hay incompatibilidad de contexto
+          }
         }
 
         const source = new Tone.ToneBufferSource(cachedBuffer);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Settings, Copy, ClipboardPaste, Music } from 'lucide-react';
+import { Plus, Settings, Copy, ClipboardPaste, Music, HardDrive } from 'lucide-react';
 import type { PianoRollTrack } from '../../../utils/typeDefinitions';
 import { ContextMenuContainer } from '../../ui/ContextMenuContainer';
 import { PIANO_ROLL_COLOR_PALETTE } from '../../visualizer/hooks/useStageTimelineNotes';
@@ -14,6 +14,8 @@ interface PianoRollTrackHeaderProps {
   renamePianoRollTrack: (id: string, name: string) => void;
   setTrackColor: (id: string, color: string) => void;
   onRequestDeleteTrack: (trackId: string, trackName: string) => void;
+  selectedNoteCount?: number;
+  onClearSelection?: () => void;
 }
 
 export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.memo(({
@@ -24,13 +26,16 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
   removePianoRollTrack,
   renamePianoRollTrack,
   setTrackColor,
-  onRequestDeleteTrack
+  onRequestDeleteTrack,
+  selectedNoteCount = 0,
+  onClearSelection
 }) => {
   const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
   const [editingTrackName, setEditingTrackName] = useState<string>('');
   const [colorPickerTarget, setColorPickerTarget] = useState<{ trackId: string; x: number; y: number } | null>(null);
 
   const openSynthConfigForChannel = useSongStore((state) => state.openSynthConfigForChannel);
+  const openSoundFontConfigForChannel = useSongStore((state) => state.openSoundFontConfigForChannel);
   const copySynthSettings = useSongStore((state) => state.copySynthSettings);
   const pasteSynthSettings = useSongStore((state) => state.pasteSynthSettings);
   const synthClipboard = useSongStore((state) => state.synthClipboard);
@@ -46,7 +51,9 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
       }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setColorPickerTarget(null);
+      if (e.key === 'Escape') {
+        setColorPickerTarget(null);
+      }
     };
     window.addEventListener('mousedown', handleDown);
     window.addEventListener('keydown', handleKeyDown);
@@ -82,9 +89,9 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
               }}
               title="Click para seleccionar | Doble click para renombrar | Click derecho para cambiar color"
             >
-              <span 
-                className="track-dot" 
-                style={{ backgroundColor: dotColor, color: dotColor }} 
+              <span
+                className="track-dot"
+                style={{ backgroundColor: dotColor, color: dotColor }}
               />
               {isEditing ? (
                 <input
@@ -126,7 +133,7 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
                   onClick={(e) => {
                     e.stopPropagation();
                     if ((track.notes || []).length === 0) {
-                      const trackIndex = tracks.findIndex(t => t.id === track.id);
+                      const trackIndex = tracks.findIndex((t) => t.id === track.id);
                       if (isActive) {
                         const newActiveTrack = tracks[trackIndex - 1] || tracks[trackIndex + 1];
                         if (newActiveTrack) setActiveTrackId(newActiveTrack.id);
@@ -155,6 +162,24 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
         </button>
       </div>
 
+      {selectedNoteCount > 0 && (
+        <div className="piano-selection-pill" title="Notas seleccionadas actualmente (Esc para limpiar)">
+          <span className="piano-selection-dot" />
+          <span>{selectedNoteCount === 1 ? '1 nota seleccionada' : `${selectedNoteCount} notas seleccionadas`}</span>
+          {onClearSelection && (
+            <button
+              type="button"
+              className="piano-selection-clear"
+              onClick={onClearSelection}
+              title="Limpiar selección (Esc)"
+              aria-label="Limpiar selección"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      )}
+
       {colorPickerTarget && (
         <ContextMenuContainer
           x={colorPickerTarget.x}
@@ -174,7 +199,7 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
           </div>
           <div className="track-color-picker-grid">
             {PIANO_ROLL_COLOR_PALETTE.map((c) => {
-              const currentTrack = tracks.find(t => t.id === colorPickerTarget.trackId);
+              const currentTrack = tracks.find((t) => t.id === colorPickerTarget.trackId);
               const isSelected = currentTrack?.color?.toLowerCase() === c.toLowerCase();
               return (
                 <button
@@ -197,7 +222,7 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
             <label className="track-color-picker-custom-label">
               <input
                 type="color"
-                value={tracks.find(t => t.id === colorPickerTarget.trackId)?.color || '#6880ad'}
+                value={tracks.find((t) => t.id === colorPickerTarget.trackId)?.color || '#6880ad'}
                 onChange={(e) => {
                   setTrackColor(colorPickerTarget.trackId, e.target.value);
                 }}
@@ -209,7 +234,7 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
 
           {/* Opciones de Instrumento y Sintetizador de la Pista */}
           {(() => {
-            const currentTrack = tracks.find(t => t.id === colorPickerTarget.trackId);
+            const currentTrack = tracks.find((t) => t.id === colorPickerTarget.trackId);
             const currentInst = currentTrack ? channels[currentTrack.channelId]?.instrument : 'piano';
             return (
               <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '6px', marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
@@ -240,6 +265,20 @@ export const PianoRollTrackHeader: React.FC<PianoRollTrackHeaderProps> = React.m
                 >
                   <Settings size={12} />
                   <span>Sintetizador {currentInst === 'synth' ? '✓' : ''}</span>
+                </button>
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={() => {
+                    if (currentTrack) {
+                      setChannelInstrument(currentTrack.channelId, 'soundfont');
+                      openSoundFontConfigForChannel(currentTrack.channelId);
+                    }
+                    setColorPickerTarget(null);
+                  }}
+                >
+                  <HardDrive size={12} />
+                  <span>SoundFont {currentInst === 'soundfont' ? '✓' : ''}</span>
                 </button>
                 <button
                   type="button"

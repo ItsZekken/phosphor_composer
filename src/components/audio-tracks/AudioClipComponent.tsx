@@ -10,6 +10,8 @@ import type { AudioClip, AudioTrack, AudioSnapGrid } from '../../utils/typeDefin
 import { useSongStore } from '../../store/songStore';
 import { audioBufferRegistry } from '../../core/audio/audioBufferRegistry';
 import { waveformService } from '../../core/audio/waveformService';
+import { getBeatsPerMeasure } from '../../core/audio/arrangementResolver';
+import { startPlaylistGroupDrag } from './playlistGroupDrag';
 
 interface AudioClipComponentProps {
   clip: AudioClip;
@@ -28,8 +30,11 @@ export const AudioClipComponent: React.FC<AudioClipComponentProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const bpm = useSongStore((state) => state.bpm);
+  const timeSignature = useSongStore((state) => state.timeSignature);
   const snapGrid = useSongStore((state) => state.audioSnapGrid);
+  const playlistTool = useSongStore((state) => state.playlistTool);
   const currentBeat = useSongStore((state) => state.currentBeat);
+  const beatsPerMeasure = getBeatsPerMeasure(timeSignature);
   const updateAudioClip = useSongStore((state) => state.updateAudioClip);
   const splitAudioClip = useSongStore((state) => state.splitAudioClip);
   const duplicateAudioClip = useSongStore((state) => state.duplicateAudioClip);
@@ -160,7 +165,7 @@ export const AudioClipComponent: React.FC<AudioClipComponentProps> = ({
   const snapBeat = (beat: number, grid: AudioSnapGrid): number => {
     if (grid === 'off') return Math.max(0, beat);
     let step = 1;
-    if (grid === 'bar') step = 4;
+    if (grid === 'bar') step = beatsPerMeasure;
     else if (grid === 'beat') step = 1;
     else if (grid === '1/2') step = 0.5;
     else if (grid === '1/4') step = 0.25;
@@ -169,53 +174,32 @@ export const AudioClipComponent: React.FC<AudioClipComponentProps> = ({
     return Math.max(0, Math.round(beat / step) * step);
   };
 
-  // 4. Arrastre del cuerpo del clip (Move horizontal + Cross-track vertical)
+  // 4. Arrastre del cuerpo del clip (Move grupal multi-clip + Cross-track vertical + Shift+Drag Clone + Slice tool)
   const handleBodyPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).classList.contains('audio-clip-trim-handle')) return;
     if (e.button !== 0) return;
-    onSelect(e);
+    e.stopPropagation();
 
-    const startX = e.clientX;
-    const initialStartBeat = clip.startBeat;
-    const initialTrackId = clip.trackId;
-    const el = e.currentTarget;
-    el.setPointerCapture(e.pointerId);
-
-    // Pausar Zundo durante arrastre continuo
-    useSongStore.temporal.getState().pause();
-    let lastUpdates: Partial<AudioClip> | null = null;
-
-    const onPointerMove = (moveEvent: PointerEvent) => {
-      const deltaX = moveEvent.clientX - startX;
-      const deltaBeat = deltaX / zoomLevel;
-      const rawBeat = initialStartBeat + deltaBeat;
-      const newBeat = moveEvent.altKey ? Math.max(0, rawBeat) : snapBeat(rawBeat, snapGrid);
-
-      // Detectar carril de destino bajo el cursor
-      const elements = document.elementsFromPoint(moveEvent.clientX, moveEvent.clientY);
-      const laneEl = elements.find((node) => (node as HTMLElement).dataset?.trackId) as HTMLElement | undefined;
-      const targetTrackId = laneEl?.dataset?.trackId || initialTrackId;
-
-      lastUpdates = { startBeat: newBeat, trackId: targetTrackId };
-      updateAudioClip(clip.id, lastUpdates);
-    };
-
-    const onPointerUp = (upEvent: PointerEvent) => {
-      el.removeEventListener('pointermove', onPointerMove);
-      el.removeEventListener('pointerup', onPointerUp);
-      try {
-        el.releasePointerCapture(upEvent.pointerId);
-      } catch (_) {}
-
-      // Reanudar Zundo y registrar un único estado final
-      useSongStore.temporal.getState().resume();
-      if (lastUpdates) {
-        updateAudioClip(clip.id, lastUpdates);
+    if (playlistTool === 'slice') {
+      e.preventDefault();
+      const laneEl = e.currentTarget.parentElement;
+      if (laneEl) {
+        const laneRect = laneEl.getBoundingClientRect();
+        const rawBeat = (e.clientX - laneRect.left) / zoomLevel;
+        const cutBeat = e.altKey ? Math.max(0, rawBeat) : snapBeat(rawBeat, snapGrid);
+        splitAudioClip(clip.id, cutBeat);
       }
-    };
+      return;
+    }
 
-    el.addEventListener('pointermove', onPointerMove);
-    el.addEventListener('pointerup', onPointerUp);
+    startPlaylistGroupDrag({
+      e,
+      anchorKind: 'audio',
+      anchorClipId: clip.id,
+      zoomLevel,
+      beatsPerMeasure,
+      snapGrid
+    });
   };
 
   // 5. Tirador de recorte izquierdo (Trim Start) con Snap magnético
@@ -319,7 +303,9 @@ export const AudioClipComponent: React.FC<AudioClipComponentProps> = ({
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    onSelect(e);
+    if (!isSelected) {
+      onSelect(e);
+    }
     setContextMenu({ x: e.clientX, y: e.clientY });
   };
 
@@ -344,6 +330,7 @@ export const AudioClipComponent: React.FC<AudioClipComponentProps> = ({
           borderColor: isSelected ? 'var(--accent)' : `${track.color}66`
         }}
         onPointerDown={handleBodyPointerDown}
+        onClick={(e) => e.stopPropagation()}
         onContextMenu={handleContextMenu}
       >
         {/* Tirador Izquierdo de Recorte */}

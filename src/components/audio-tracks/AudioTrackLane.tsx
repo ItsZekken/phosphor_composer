@@ -15,6 +15,9 @@ import { useSongStore } from '../../store/songStore';
 import { AudioClipComponent } from './AudioClipComponent';
 import { Knob } from '../ui/Knob';
 import { toneEngine } from '../../audio/toneEngine';
+import { AUDIO_CLIP_DRAG_MIME } from './PatternPickerSidebar';
+import { generateId } from '../../utils/idGenerator';
+import { getBeatsPerMeasure } from '../../core/audio/arrangementResolver';
 import {
   faderPosToDb,
   dbToFaderPos,
@@ -32,6 +35,7 @@ export const AudioTrackHeader: React.FC<AudioTrackHeaderProps> = ({
   liveRms = 0
 }) => {
   const selectedTrackId = useSongStore((state) => state.selectedTrackId);
+  const selectedPlaylistTrack = useSongStore((state) => state.selectedPlaylistTrack);
   const setSelectedTrackId = useSongStore((state) => state.setSelectedTrackId);
   const updateAudioTrack = useSongStore((state) => state.updateAudioTrack);
   const removeAudioTrack = useSongStore((state) => state.removeAudioTrack);
@@ -40,7 +44,7 @@ export const AudioTrackHeader: React.FC<AudioTrackHeaderProps> = ({
 
   const [trackName, setTrackName] = useState(track.name);
   const [playbackRms, setPlaybackRms] = useState(0);
-  const isSelected = selectedTrackId === track.id;
+  const isSelected = selectedPlaylistTrack.kind === 'audio' && selectedTrackId === track.id;
 
   const trackDb = normalizeTrackDb(track.volume);
   const faderPos = dbToFaderPos(trackDb);
@@ -253,35 +257,88 @@ export const AudioTrackLane: React.FC<AudioTrackLaneProps> = ({
   const selectedClipIds = useSongStore((state) => state.selectedClipIds);
   const selectClip = useSongStore((state) => state.selectClip);
   const setSelectedTrackId = useSongStore((state) => state.setSelectedTrackId);
+  const addAudioClip = useSongStore((state) => state.addAudioClip);
   const snapGrid = useSongStore((state) => state.audioSnapGrid);
+  const playlistTool = useSongStore((state) => state.playlistTool);
+  const timeSignature = useSongStore((state) => state.timeSignature);
+  const beatsPerMeasure = getBeatsPerMeasure(timeSignature);
+
+  const snapRawBeat = (rawBeat: number, bypassSnap = false) => {
+    if (bypassSnap || snapGrid === 'off') return Math.max(0, rawBeat);
+    let step = 1;
+    if (snapGrid === 'bar') step = beatsPerMeasure;
+    else if (snapGrid === 'beat') step = 1;
+    else if (snapGrid === '1/2') step = 0.5;
+    else if (snapGrid === '1/4') step = 0.25;
+    else if (snapGrid === '1/8') step = 0.125;
+    else if (snapGrid === '1/16') step = 0.0625;
+    return Math.max(0, Math.round(rawBeat / step) * step);
+  };
 
   const handleLaneClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
       setSelectedTrackId(track.id);
+      if (playlistTool === 'select' || e.ctrlKey || e.metaKey) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const clickX = e.clientX - rect.left;
-      const rawBeat = clickX / zoomLevel;
-
-      let step = 1;
-      if (snapGrid === 'bar') step = 4;
-      else if (snapGrid === 'beat') step = 1;
-      else if (snapGrid === '1/2') step = 0.5;
-      else if (snapGrid === '1/4') step = 0.25;
-      else if (snapGrid === '1/8') step = 0.125;
-      else if (snapGrid === '1/16') step = 0.0625;
-      else if (snapGrid === 'off') step = 0;
-
-      const targetBeat = step > 0 ? Math.max(0, Math.round(rawBeat / step) * step) : Math.max(0, rawBeat);
+      const targetBeat = snapRawBeat(clickX / zoomLevel, e.altKey);
       toneEngine.seekToBeat(targetBeat);
     }
   };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!e.dataTransfer.types.includes(AUDIO_CLIP_DRAG_MIME)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    const raw = e.dataTransfer.getData(AUDIO_CLIP_DRAG_MIME);
+    if (!raw) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      const src = JSON.parse(raw) as { bufferId: string; name: string; durationSeconds: number };
+      const rect = e.currentTarget.getBoundingClientRect();
+      const targetBeat = snapRawBeat((e.clientX - rect.left) / zoomLevel, e.altKey);
+      const newClip: AudioClip = {
+        id: `clip_${generateId()}`,
+        trackId: track.id,
+        bufferId: src.bufferId,
+        name: src.name,
+        startBeat: targetBeat,
+        sourceOffsetSeconds: 0,
+        durationSeconds: src.durationSeconds,
+        gain: 1.0,
+        fadeInSeconds: 0.005,
+        fadeOutSeconds: 0.005,
+        isMuted: false
+      };
+      addAudioClip(newClip);
+      setSelectedTrackId(track.id);
+      selectClip(newClip.id);
+    } catch (err) {
+      console.warn('[AudioTrackLane] Error al soltar fuente de audio:', err);
+    }
+  };
+
+  const barPx = zoomLevel * beatsPerMeasure;
 
   return (
     <div
       className="audio-track-lane"
       data-track-id={track.id}
-      style={{ width: totalWidth, minWidth: totalWidth }}
+      style={{
+        width: totalWidth,
+        minWidth: totalWidth,
+        backgroundSize: `${barPx}px 100%, ${zoomLevel}px 100%`,
+        backgroundImage:
+          'linear-gradient(to right, rgba(229, 169, 60, 0.14) 1px, transparent 1px), linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px)'
+      }}
       onClick={handleLaneClick}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
     >
       {clips.map((clip) => (
         <AudioClipComponent

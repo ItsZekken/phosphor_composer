@@ -86,6 +86,20 @@ export const AVAILABLE_DRUM_SAMPLES: DrumSampleDefinition[] = [
   }))
 ];
 
+export const CUSTOM_DRUM_SAMPLE_PREFIX = 'custom-sample://';
+
+export const buildCustomSampleUrl = (bufferId: string): string =>
+  `${CUSTOM_DRUM_SAMPLE_PREFIX}${bufferId}`;
+
+export const isCustomSampleUrl = (url?: string | null): boolean =>
+  Boolean(url && url.startsWith(CUSTOM_DRUM_SAMPLE_PREFIX));
+
+export const getCustomSampleBufferId = (url?: string | null): string | null => {
+  if (!url || !url.startsWith(CUSTOM_DRUM_SAMPLE_PREFIX)) return null;
+  const id = url.slice(CUSTOM_DRUM_SAMPLE_PREFIX.length).trim();
+  return id || null;
+};
+
 export const getSamplesByCategory = (category: DrumCategoryKey): DrumSampleDefinition[] => {
   return AVAILABLE_DRUM_SAMPLES.filter(s => s.category === category);
 };

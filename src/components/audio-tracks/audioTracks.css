@@ -123,11 +123,11 @@
   position: relative;
 }
 
-/* Columna de Cabeceras de Pista (Izquierda) */
+/* Columna de Cabeceras de Pista (Centro-Izquierda) */
 .audio-headers-column {
-  width: 340px;
-  min-width: 340px;
-  max-width: 340px;
+  width: 300px;
+  min-width: 300px;
+  max-width: 300px;
   display: flex;
   flex-direction: column;
   background: #1e1a27;
@@ -142,11 +142,21 @@
   background: #252030;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 0.75rem;
   font-family: 'Share Tech Mono', monospace;
   font-size: 0.65rem;
   color: var(--text-secondary);
   letter-spacing: 0.05em;
+}
+
+.headers-count-badge {
+  font-size: 0.6rem;
+  color: #a89fc0;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
 }
 
 .audio-headers-list {
@@ -758,4 +768,979 @@
   0% { opacity: 0.6; transform: scale(1); }
   50% { opacity: 1; transform: scale(1.08); }
   100% { opacity: 0.6; transform: scale(1); }
+}
+
+/* ============================================================================
+   FL-STYLE PATTERN PICKER SIDEBAR & MIDI PATTERN TRACKS (PLAYLIST)
+   ============================================================================ */
+
+.pattern-picker-sidebar {
+  width: 224px;
+  min-width: 224px;
+  max-width: 224px;
+  display: flex;
+  flex-direction: column;
+  background: #16131e;
+  border-right: 2px solid var(--border-color);
+  z-index: 12;
+  overflow: hidden;
+  user-select: none;
+}
+
+.pattern-picker-collapsed-rail {
+  width: 24px;
+  min-width: 24px;
+  background: #181421;
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 6px;
+  z-index: 12;
+}
+
+.pattern-picker-expand-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 6px 2px;
+  transition: color 0.15s ease;
+}
+
+.pattern-picker-expand-btn:hover {
+  color: #ffd875;
+}
+
+.pattern-picker-vertical-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+}
+
+.pattern-picker-tabs {
+  height: 28px;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  background: #211c2b;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.pattern-picker-tab {
+  flex: 1;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.pattern-picker-tab:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.pattern-picker-tab.active {
+  color: #ffd875;
+  background: rgba(255, 216, 117, 0.08);
+  border-bottom-color: #ffd875;
+}
+
+.pattern-picker-collapse-btn {
+  width: 24px;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.pattern-picker-collapse-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.pattern-picker-filters {
+  display: flex;
+  gap: 3px;
+  padding: 5px 6px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: #1a1624;
+}
+
+.picker-filter-pill {
+  flex: 1;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.picker-filter-pill:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.picker-filter-pill.active {
+  background: rgba(167, 139, 250, 0.18);
+  border-color: rgba(167, 139, 250, 0.55);
+  color: #f3f1f9;
+}
+
+.pattern-picker-hint {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.62rem;
+  color: rgba(168, 159, 192, 0.72);
+  padding: 4px 8px;
+  line-height: 1.25;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.pattern-picker-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.picker-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.picker-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 3px;
+}
+
+.picker-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #c7bfd8;
+  letter-spacing: 0.05em;
+}
+
+.picker-section-badge {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.56rem;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(45, 212, 191, 0.15);
+  border: 1px solid rgba(45, 212, 191, 0.35);
+  color: #5eead4;
+}
+
+.picker-section-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.picker-icon-btn {
+  width: 19px;
+  height: 19px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.picker-icon-btn:hover {
+  color: #ffd875;
+  border-color: rgba(255, 216, 117, 0.5);
+  background: rgba(255, 216, 117, 0.12);
+}
+
+.picker-mini-text-btn {
+  height: 19px;
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: #d6cee8;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.58rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.picker-mini-text-btn:hover {
+  color: #ffd875;
+  border-color: rgba(255, 216, 117, 0.5);
+  background: rgba(255, 216, 117, 0.12);
+}
+
+.picker-melody-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.045);
+}
+
+.picker-melody-group-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 2px;
+}
+
+.picker-melody-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.picker-melody-name {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #e4dff0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.picker-melody-inst {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.54rem;
+  color: var(--text-secondary);
+  opacity: 0.75;
+}
+
+.picker-cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Tarjeta de Patrón estilo FL Studio */
+.picker-pattern-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: #201c2a;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 3px;
+  padding: 4px 6px 3px 8px;
+  cursor: grab;
+  transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.picker-pattern-card:hover {
+  background: #272235;
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.picker-pattern-card:active {
+  cursor: grabbing;
+}
+
+.picker-pattern-card.selected {
+  background: #262234;
+  border-color: var(--pattern-accent, #a3e635);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--pattern-accent, #a3e635) 35%, transparent),
+              inset 0 0 12px color-mix(in srgb, var(--pattern-accent, #a3e635) 12%, transparent);
+}
+
+/* Flecha roja/ámbar indicadora en el borde izquierdo (estilo FL Studio Picker) */
+.picker-selected-arrow {
+  position: absolute;
+  left: -1px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 6px solid #f43f5e;
+  filter: drop-shadow(0 0 4px rgba(244, 63, 94, 0.85));
+}
+
+.picker-card-top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 16px;
+}
+
+.picker-card-name {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #f1eef9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.picker-card-meta {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.58rem;
+  color: #9b92b2;
+  flex-shrink: 0;
+}
+
+.picker-card-edit-btn {
+  opacity: 0;
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  border-radius: 2px;
+  color: #ffd875;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+.picker-pattern-card:hover .picker-card-edit-btn,
+.picker-pattern-card.selected .picker-card-edit-btn {
+  opacity: 0.9;
+}
+
+.picker-card-edit-btn:hover {
+  background: rgba(255, 216, 117, 0.22);
+}
+
+.picker-card-preview {
+  margin-top: 2px;
+  height: 18px;
+  border-radius: 2px;
+  background: rgba(8, 6, 14, 0.55);
+  overflow: hidden;
+}
+
+.picker-rename-input {
+  flex: 1;
+  min-width: 0;
+  height: 16px;
+  background: #0d0b14;
+  border: 1px solid #ffd875;
+  border-radius: 2px;
+  color: #fff;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.7rem;
+  padding: 0 3px;
+  outline: none;
+}
+
+.picker-show-more-btn {
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.6rem;
+  padding: 4px 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.picker-show-more-btn:hover {
+  color: #ffd875;
+  border-color: rgba(255, 216, 117, 0.4);
+}
+
+.picker-empty-audio {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  padding: 8px 6px;
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 4px;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+/* --- SEPARADORES DE SECCIÓN 1:1 (ARMONÍA / PIANO ROLL / BATERÍA / AUDIO — 22px sincronizados) --- */
+.tracks-section-bar {
+  height: 22px;
+  min-height: 22px;
+  max-height: 22px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid #2e283d;
+}
+
+.tracks-section-bar.harmony-section-bar {
+  background: linear-gradient(90deg, rgba(96, 165, 250, 0.14) 0%, rgba(28, 24, 38, 0.95) 100%);
+  color: #93c5fd;
+}
+
+.tracks-section-bar.melody-section-bar {
+  background: linear-gradient(90deg, rgba(167, 139, 250, 0.14) 0%, rgba(28, 24, 38, 0.95) 100%);
+  color: #c4b5fd;
+  border-top: 1px solid #3c3450;
+}
+
+.tracks-section-bar.drum-section-bar {
+  background: linear-gradient(90deg, rgba(45, 212, 191, 0.14) 0%, rgba(28, 24, 38, 0.95) 100%);
+  color: #5eead4;
+  border-top: 1px solid #3c3450;
+}
+
+.tracks-section-bar.audio-section-bar {
+  background: linear-gradient(90deg, rgba(229, 169, 60, 0.12) 0%, rgba(28, 24, 38, 0.95) 100%);
+  color: #e5a93c;
+  border-top: 1px solid #3c3450;
+}
+
+.tracks-section-add-btn {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.tracks-section-add-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.tracks-section-add-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.tracks-lane-section-spacer {
+  height: 22px;
+  min-height: 22px;
+  max-height: 22px;
+  box-sizing: border-box;
+  border-bottom: 1px solid #2e283d;
+}
+
+.tracks-lane-section-spacer.harmony-spacer {
+  background: rgba(96, 165, 250, 0.04);
+}
+
+.tracks-lane-section-spacer.melody-spacer {
+  background: rgba(167, 139, 250, 0.04);
+  border-top: 1px solid #3c3450;
+}
+
+.tracks-lane-section-spacer.drum-spacer {
+  background: rgba(45, 212, 191, 0.04);
+  border-top: 1px solid #3c3450;
+}
+
+.tracks-lane-section-spacer.audio-spacer {
+  background: rgba(229, 169, 60, 0.035);
+  border-top: 1px solid #3c3450;
+}
+
+/* --- CABECERA Y CARRIL DE MIDI TRACK --- */
+.midi-track-header.is-muted {
+  opacity: 0.62;
+}
+
+.midi-title-strip {
+  max-width: 175px;
+}
+
+.midi-track-type-pill {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.56rem;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid;
+  background: rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
+  letter-spacing: 0.03em;
+}
+
+.midi-track-name-input {
+  width: 98px;
+}
+
+.midi-track-right-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.midi-track-clip-count {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.6rem;
+  color: #a89fc0;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* LED Verde circular estilo FL Studio Playlist Track */
+.fl-enable-led-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: #14111c;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.14s ease;
+}
+
+.fl-enable-led-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3b354a;
+  transition: all 0.14s ease;
+}
+
+.fl-enable-led-btn.enabled {
+  border-color: rgba(132, 204, 22, 0.55);
+  background: rgba(132, 204, 22, 0.14);
+}
+
+.fl-enable-led-btn.enabled .fl-enable-led-dot {
+  background: #a3e635;
+  box-shadow: 0 0 7px rgba(163, 230, 53, 0.9), inset 0 1px 2px rgba(255, 255, 255, 0.6);
+}
+
+.midi-track-lane.lane-muted {
+  opacity: 0.48;
+}
+
+.midi-track-lane.paint-cursor {
+  cursor: crosshair;
+}
+
+.midi-track-lane.slice-cursor,
+.midi-pattern-clip.slice-cursor {
+  cursor: col-resize;
+}
+
+/* --- CLIPS DE PATRÓN MIDI (FL STUDIO PLAYLIST BLOCKS) --- */
+.midi-pattern-clip {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  background: rgba(26, 22, 36, 0.94);
+  border: 1px solid rgba(167, 139, 250, 0.55);
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: grab;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  transition: border-color 0.1s ease, box-shadow 0.1s ease;
+  z-index: 3;
+}
+
+.midi-pattern-clip:hover {
+  z-index: 4;
+  border-color: var(--clip-accent, #a78bfa);
+}
+
+.midi-pattern-clip.selected {
+  z-index: 5;
+  border-color: #ffd875 !important;
+  box-shadow: 0 0 0 1px rgba(255, 216, 117, 0.55), 0 0 12px rgba(255, 216, 117, 0.35);
+}
+
+.midi-pattern-clip.muted {
+  opacity: 0.42;
+  filter: saturate(0.3);
+}
+
+.midi-pattern-clip:active {
+  cursor: grabbing;
+}
+
+.midi-pattern-clip.paint-ghost,
+.midi-pattern-clip.clone-ghost {
+  pointer-events: none;
+  opacity: 0.68;
+  border-style: dashed;
+  z-index: 8;
+}
+
+.midi-clip-header {
+  height: 18px;
+  min-height: 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 0 5px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.61rem;
+  color: #f3f1f9;
+  pointer-events: none;
+}
+
+.midi-clip-header-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.midi-clip-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.midi-clip-bars {
+  font-size: 0.56rem;
+  color: rgba(255, 255, 255, 0.68);
+  flex-shrink: 0;
+}
+
+.midi-clip-body {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: rgba(10, 8, 16, 0.55);
+  pointer-events: none;
+}
+
+/* Marquee / Lasso selection rect */
+.playlist-marquee-rect {
+  position: absolute;
+  pointer-events: none;
+  z-index: 20;
+  background: rgba(255, 216, 117, 0.14);
+  border: 1.5px solid #ffd875;
+  border-radius: 3px;
+}
+
+/* Watermark compacto debajo de los carriles */
+.audio-tracks-empty-watermark.compact-playlist-hint {
+  margin: 1.25rem auto 1.5rem;
+  padding: 0.85rem 1.25rem;
+  max-width: 560px;
+}
+
+/* ============================================================================
+   PHOSPHOR 1:1 TRACKS (ARMONÍA / PIANO ROLL / BATERÍA / PALETA LATERAL)
+   ============================================================================ */
+
+.tracks-fixed-name {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.tracks-open-editor-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #8c82a5;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.65;
+  transition: all 0.14s ease;
+}
+
+.audio-track-header:hover .tracks-open-editor-btn {
+  opacity: 1;
+}
+
+.tracks-open-editor-btn:hover {
+  color: #ffd875;
+  border-color: rgba(255, 216, 117, 0.4);
+  background: rgba(255, 216, 117, 0.12);
+}
+
+.midi-track-type-pill.clickable-pill {
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.midi-track-type-pill.clickable-pill:hover {
+  background: rgba(255, 255, 255, 0.1);
+  filter: brightness(1.2);
+}
+
+.drum-loop-mode-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 216, 117, 0.55);
+  background: rgba(245, 158, 11, 0.18);
+  color: #ffd875;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.56rem;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.14s ease;
+}
+
+.drum-loop-mode-pill:hover {
+  background: rgba(245, 158, 11, 0.32);
+  color: #ffffff;
+}
+
+/* Bloques de Acorde 1:1 en el carril de Armonía */
+.chord-track-clip-body {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px 5px;
+  background: linear-gradient(180deg, rgba(18, 16, 28, 0.65) 0%, rgba(12, 10, 20, 0.88) 100%);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.chord-track-clip-symbol {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #f3f1f9;
+  line-height: 1.05;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  letter-spacing: 0.01em;
+}
+
+.chord-track-clip-sub {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.55rem;
+  color: rgba(186, 178, 210, 0.78);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  line-height: 1.1;
+}
+
+.chord-track-role-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  pointer-events: none;
+}
+
+/* Estados en vivo y bypass del carril de Batería */
+.drum-track-clip.playing-live {
+  box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.75), 0 0 12px rgba(45, 212, 191, 0.45);
+  border-color: #2dd4bf !important;
+}
+
+.drum-track-lane.lane-bypassed {
+  opacity: 0.52;
+  background-blend-mode: overlay;
+}
+
+.drum-track-lane.lane-bypassed::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(245, 158, 11, 0.04) 0px,
+    rgba(245, 158, 11, 0.04) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+}
+
+/* Hint inline para carriles vacíos */
+.tracks-empty-lane-hint {
+  position: sticky;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  padding-left: 12px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.72rem;
+  color: rgba(168, 159, 192, 0.45);
+  pointer-events: none;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* Paleta de acordes diatónicos en PatternPickerSidebar */
+.picker-chord-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.picker-chord-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 5px 7px 7px;
+  border-radius: 4px;
+  background: #201c2a;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: #f1eef9;
+  cursor: grab;
+  overflow: hidden;
+  transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.picker-chord-chip:hover {
+  background: #282338;
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.picker-chord-chip:active {
+  cursor: grabbing;
+}
+
+.picker-chord-chip.selected {
+  background: #262238;
+  border-color: var(--chord-role-color, #60a5fa);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--chord-role-color, #60a5fa) 35%, transparent),
+    inset 0 0 10px color-mix(in srgb, var(--chord-role-color, #60a5fa) 14%, transparent);
+}
+
+.picker-chord-name {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #f6f4fc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.picker-chord-deg {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.58rem;
+  color: #a89fc0;
+  flex-shrink: 0;
+}
+
+.picker-chord-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2.5px;
+  background: var(--chord-role-color, #60a5fa);
+  opacity: 0.85;
+}
+
+/* Acceso rápido a canales de Piano Roll en PatternPickerSidebar */
+.picker-melody-quick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.picker-melody-quick-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  border-radius: 4px;
+  background: #1f1b29;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: #e4dff0;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.12s ease;
+}
+
+.picker-melody-quick-row:hover {
+  background: #292338;
+  border-color: rgba(167, 139, 250, 0.45);
+  color: #ffffff;
 }

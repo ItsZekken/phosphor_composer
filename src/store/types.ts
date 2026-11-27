@@ -10,10 +10,13 @@ import type {
   ActiveView,
   ChannelConfig,
   ChannelInstrument,
+  ChannelSoundFontConfig,
+  SoundFontAsset,
   SynthSettings,
   CRTParams,
   DrumChannel,
   DrumStep,
+  CustomDrumSample,
   PatternChainItem,
   PianoRollTrack,
   StyleMarker,
@@ -164,14 +167,18 @@ export interface TrackActions {
 
 export interface DrumState {
   drumChannels: DrumChannel[];
+  customDrumSamples: CustomDrumSample[];
   activeDrumKitId: string;
   patternLengths: number[];
+  drumPatternNames: string[];
   userDrumPatternEdit: number;
   currentDrumPatternEdit: number;
   isLiveFollowLocked: boolean;
   clipboardPattern: DrumStep[][] | null;
   clipboardPatternLength?: number | null;
   patternChain: PatternChainItem[];
+  drumLaneCount: number;
+  drumLaneMuted: boolean[];
   selectedChainIds: string[];
   chainClipboard: PatternChainItem[];
   drumTimelineViewport: { scrollLeft: number; zoomLevel: number };
@@ -184,9 +191,13 @@ export interface DrumActions {
   setCurrentDrumPatternEdit: (pattern: number) => void;
   setCurrentDrumPatternEditLive: (pattern: number) => void;
   setDrumPatternLength: (patternIndex: number, length: number) => void;
+  renameDrumPattern: (patternIndex: number, name: string) => void;
   addDrumChannel: (channel: DrumChannel) => void;
   updateDrumChannel: (id: string, updates: Partial<DrumChannel>) => void;
   removeDrumChannel: (id: string) => void;
+  addCustomDrumSample: (sample: CustomDrumSample) => void;
+  removeCustomDrumSample: (sampleId: string) => void;
+  setCustomDrumSamples: (samples: CustomDrumSample[]) => void;
   reorderDrumChannels: (fromIndex: number, toIndex: number) => void;
   toggleDrumStep: (channelId: string, stepIndex: number, patternIndex: number, forceState?: boolean) => void;
   setDrumStepVelocity: (channelId: string, stepIndex: number, patternIndex: number, velocity: number) => void;
@@ -203,20 +214,24 @@ export interface DrumActions {
   selectAllChainItems: () => void;
   copySelectedChainItems: () => void;
   cutSelectedChainItems: () => void;
-  pasteChainItems: (targetId?: string) => void;
+  pasteChainItems: (targetId?: string, targetMeasure?: number) => void;
   duplicateSelectedChainItems: () => void;
   deleteSelectedChainItems: () => void;
+  toggleMuteChainItem: (id: string) => void;
   groupSelectedChainItems: () => void;
   ungroupSelectedChainItems: () => void;
   setDrumTimelineViewport: (viewport: Partial<{ scrollLeft: number; zoomLevel: number }>) => void;
   resetDrumTimelineScroll: () => void;
-  addChainItem: (patternIndex: number, repeatCount?: number, startMeasure?: number) => void;
-  addChainItemsBatch: (clips: Array<{ patternIndex: number; startMeasure: number; durationMeasures: number }>) => string[];
+  addDrumLane: () => number;
+  removeDrumLane: (laneIndex: number) => void;
+  toggleMuteDrumLane: (laneIndex: number) => void;
+  addChainItem: (patternIndex: number, repeatCount?: number, startMeasure?: number, laneIndex?: number) => void;
+  addChainItemsBatch: (clips: Array<{ patternIndex: number; startMeasure: number; durationMeasures: number; laneIndex?: number }>) => string[];
   updateChainItem: (id: string, updates: Partial<PatternChainItem>) => void;
   updateChainItemsBatch: (updates: Array<{ id: string; changes: Partial<PatternChainItem> }>) => void;
   splitChainItem: (id: string, splitMeasure: number) => void;
   makeChainItemUnique: (id: string) => number | null;
-  fillChainToSong: (patternIndex: number, targetMeasures: number) => void;
+  fillChainToSong: (patternIndex: number, targetMeasures: number, laneIndex?: number) => void;
   clearPatternChain: () => void;
   removeChainItem: (id: string) => void;
   moveChainItem: (fromIndex: number, toIndex: number) => void;
@@ -257,6 +272,10 @@ export interface UIState {
   editingChannelId: string | null;
   synthSettings: SynthSettings;
   synthClipboard: SynthSettings | null;
+  isSoundFontModalOpen: boolean;
+  soundfontModalChannelId: string | null;
+  soundfonts: SoundFontAsset[];
+  soundfontClipboard: ChannelSoundFontConfig | null;
   isCrtEnabled: boolean;
   isSettingsOpen: boolean;
   crtParams: CRTParams;
@@ -279,6 +298,14 @@ export interface UIActions {
   setSynthSettings: (settings: Partial<SynthSettings>) => void;
   copySynthSettings: (channelId?: string) => void;
   pasteSynthSettings: (channelId?: string) => boolean;
+  setSoundFontModalOpen: (open: boolean) => void;
+  openSoundFontConfigForChannel: (channelId: string) => void;
+  setChannelSoundFontConfig: (channelId: string, config: ChannelSoundFontConfig | undefined) => void;
+  addSoundFontAsset: (asset: SoundFontAsset) => void;
+  removeSoundFontAsset: (soundfontId: string) => void;
+  setSoundFontAssets: (assets: SoundFontAsset[]) => void;
+  copySoundFontConfig: (channelId?: string) => void;
+  pasteSoundFontConfig: (channelId?: string) => boolean;
   setCrtEnabled: (enabled: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   setCrtParams: (params: Partial<CRTParams>) => void;
@@ -304,6 +331,8 @@ export type SongStore = TransportState &
   UIActions &
   import('./slices/audioTrackSlice').AudioTrackState &
   import('./slices/audioTrackSlice').AudioTrackActions &
+  import('./slices/playlistSlice').PlaylistState &
+  import('./slices/playlistSlice').PlaylistActions &
   ProjectActions;
 
 export type SliceCreator<T> = StateCreator<SongStore, [], [], T>;

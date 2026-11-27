@@ -5,15 +5,22 @@
  */
 
 import * as Tone from 'tone';
-import type { ChannelConfig, SynthSettings } from '../../../utils/typeDefinitions';
+import type {
+  ChannelConfig,
+  ChannelInstrument,
+  ChannelSoundFontConfig,
+  SynthSettings
+} from '../../../utils/typeDefinitions';
 import type { MixerGraph } from './MixerGraph';
 import { PhosphorAnalogSynth } from './PhosphorAnalogSynth';
 import { normalizeSynthSettings } from './synthPresets';
 import { PianoSampler, preloadPianoBuffers } from '../pianoSampler';
+import { SoundFontSampler } from '../soundfont/WebAudioFontEngine';
 
 export class ChannelInstrumentManager {
   private synths = new Map<string, PhosphorAnalogSynth>();
   private pianos = new Map<string, PianoSampler>();
+  private soundfonts = new Map<string, SoundFontSampler>();
   private mixerGraph: MixerGraph;
   private isSustainActive = false;
   private currentBpm = 120;
@@ -82,6 +89,27 @@ export class ChannelInstrumentManager {
     return piano;
   }
 
+  /**
+   * Obtiene o instancia el sampler SoundFont conectado al canal del mezclador.
+   */
+  public getChannelSoundFont(channelId: string): SoundFontSampler {
+    let sf = this.soundfonts.get(channelId);
+    if (!sf) {
+      const channelNode = this.mixerGraph.getChannelNode(channelId);
+      sf = new SoundFontSampler(channelNode.volumeNode);
+      if (this.isSustainActive) {
+        sf.pedalDown();
+      }
+      this.soundfonts.set(channelId, sf);
+    }
+    return sf;
+  }
+
+  public updateSoundFontConfig(channelId: string, config?: ChannelSoundFontConfig): void {
+    const sf = this.getChannelSoundFont(channelId);
+    sf.setConfig(config);
+  }
+
   public isPianoLoaded(channelId: string): boolean {
     const piano = this.pianos.get(channelId);
     return piano ? piano.loaded : false;
@@ -93,7 +121,7 @@ export class ChannelInstrumentManager {
   }
 
   /**
-   * Precarga de forma asíncrona todos los samplers de piano y sintetizadores para los canales activos.
+   * Precarga de forma asíncrona todos los samplers de piano, soundfonts y sintetizadores para los canales activos.
    */
   public async preloadChannelInstruments(channels: Record<string, ChannelConfig>): Promise<void> {
     if (!channels) return;
@@ -106,12 +134,18 @@ export class ChannelInstrumentManager {
 
     const loadPromises: Promise<unknown>[] = [];
 
-    // 2. Instanciar y precargar samplers y sintes para cada canal
+    // 2. Instanciar y precargar samplers, soundfonts y sintes para cada canal
     Object.entries(channels).forEach(([channelId, config]) => {
       if (config.instrument === 'piano') {
         const piano = this.getChannelPiano(channelId);
         if (!piano.loaded && !piano.isLoading) {
           loadPromises.push(piano.load());
+        }
+      } else if (config.instrument === 'soundfont') {
+        const sf = this.getChannelSoundFont(channelId);
+        sf.setConfig(config.soundfontConfig);
+        if (config.soundfontConfig?.soundfontId) {
+          loadPromises.push(sf.load());
         }
       } else {
         const synth = this.getChannelSynth(channelId);
@@ -131,13 +165,25 @@ export class ChannelInstrumentManager {
    */
   public triggerAttackRelease(
     channelId: string,
-    isPiano: boolean,
+    instrument: ChannelInstrument,
     notes: string | string[],
     duration: number | string,
     time?: number,
     velocity = 0.8
   ) {
-    if (isPiano) {
+    if (instrument === 'soundfont') {
+      const sf = this.getChannelSoundFont(channelId);
+      if (sf.loaded) {
+        sf.triggerAttackRelease(notes, duration, time, velocity);
+        return;
+      }
+      if (sf.getConfig()?.soundfontId && !sf.isLoading) {
+        sf.load().catch(() => {});
+      }
+      return;
+    }
+
+    if (instrument === 'piano') {
       const piano = this.getChannelPiano(channelId);
       if (piano.loaded) {
         piano.triggerAttackRelease(notes, duration, time, velocity);
@@ -156,12 +202,24 @@ export class ChannelInstrumentManager {
    */
   public keyDown(
     channelId: string,
-    isPiano: boolean,
+    instrument: ChannelInstrument,
     note: string,
     time?: number,
     velocity = 0.8
   ) {
-    if (isPiano) {
+    if (instrument === 'soundfont') {
+      const sf = this.getChannelSoundFont(channelId);
+      if (sf.loaded) {
+        sf.keyDown({ note, time, velocity });
+        return;
+      }
+      if (sf.getConfig()?.soundfontId && !sf.isLoading) {
+        sf.load().catch(() => {});
+      }
+      return;
+    }
+
+    if (instrument === 'piano') {
       const piano = this.getChannelPiano(channelId);
       if (piano.loaded) {
         piano.keyDown({ note, time, velocity });
@@ -180,11 +238,17 @@ export class ChannelInstrumentManager {
    */
   public keyUp(
     channelId: string,
-    isPiano: boolean,
+    instrument: ChannelInstrument,
     note: string,
     time?: number
   ) {
-    if (isPiano) {
+    if (instrument === 'soundfont') {
+      const sf = this.getChannelSoundFont(channelId);
+      sf.keyUp({ note, time });
+      return;
+    }
+
+    if (instrument === 'piano') {
       const piano = this.getChannelPiano(channelId);
       if (piano.loaded) {
         piano.keyUp({ note, time });
@@ -223,6 +287,15 @@ export class ChannelInstrumentManager {
         console.warn('Error al aplicar sustain en el piano:', e);
       }
     });
+
+    this.soundfonts.forEach((sf) => {
+      try {
+        if (sustain) sf.pedalDown();
+        else sf.pedalUp();
+      } catch (e) {
+        console.warn('Error al aplicar sustain en soundfont:', e);
+      }
+    });
   }
 
   public getChannelWaveform(channelId: string, target?: Float32Array): Float32Array {
@@ -249,6 +322,9 @@ export class ChannelInstrumentManager {
     this.pianos.forEach((piano) => {
       try { piano.stopAll(); } catch (_) {}
     });
+    this.soundfonts.forEach((sf) => {
+      try { sf.stopAll(); } catch (_) {}
+    });
   }
 
   public stopAll() {
@@ -273,6 +349,14 @@ export class ChannelInstrumentManager {
         this.pianos.delete(chId);
       }
     }
+
+    // Limpiar samplers SoundFont de canales eliminados
+    for (const [chId, sf] of this.soundfonts.entries()) {
+      if (!activeSet.has(chId) && chId !== 'chords' && chId !== 'melody') {
+        try { sf.dispose(); } catch (_) {}
+        this.soundfonts.delete(chId);
+      }
+    }
   }
 
   public dispose() {
@@ -286,5 +370,10 @@ export class ChannelInstrumentManager {
       try { piano.dispose(); } catch (_) {}
     });
     this.pianos.clear();
+
+    this.soundfonts.forEach((sf) => {
+      try { sf.dispose(); } catch (_) {}
+    });
+    this.soundfonts.clear();
   }
 }

@@ -41,6 +41,7 @@ export interface MelodyNote {
   startBeat: number;
   durationBeats: number;
   velocity: number;
+  muted?: boolean;
 }
 
 export interface GhostNote {
@@ -162,7 +163,83 @@ export interface SynthSettings {
   presetName?: string;
 }
 
-export type ChannelInstrument = 'synth' | 'piano' | 'sampler';
+export type ChannelInstrument = 'synth' | 'piano' | 'soundfont' | 'sampler';
+
+export type SoundFontFormat = 'sf2' | 'sf3' | 'webaudiofont';
+
+export interface SoundFontPatchInfo {
+  bank: number;
+  program: number;
+  name: string;
+  zoneCount?: number;
+}
+
+export interface SoundFontAsset {
+  id: string;
+  name: string;
+  fileName: string;
+  format: SoundFontFormat;
+  sizeBytes: number;
+  patches: SoundFontPatchInfo[];
+  createdAt?: number;
+}
+
+export interface SoundFontChorusConfig {
+  enabled: boolean;
+  /** Frecuencia LFO en Hz (0.1 a 8.0, default 1.5) */
+  rate: number;
+  /** Profundidad de modulación (0.0 a 1.0, default 0.45) */
+  depth: number;
+  /** Mezcla wet/dry (0.0 a 1.0, default 0.35) */
+  mix: number;
+}
+
+export interface SoundFontReverbConfig {
+  enabled: boolean;
+  /** Tiempo de decaimiento RT60 en segundos (0.3 a 6.0, default 2.2) */
+  decay: number;
+  /** Mezcla wet/dry (0.0 a 1.0, default 0.30) */
+  mix: number;
+}
+
+export interface ChannelSoundFontConfig {
+  soundfontId: string;
+  bank: number;
+  program: number;
+  patchName?: string;
+  /** Multiplicador de ganancia de ajuste por canal (0.0 a 2.0, default 1.0) */
+  gain?: number;
+  /** Multiplicador de release para la envolvente AHDSR (0.1 a 4.0, default 1.0) */
+  releaseMultiplier?: number;
+  /** Transposición en semitonos (-24 a +24, default 0) */
+  transpose?: number;
+  /** Efecto Chorus estéreo integrado por canal */
+  chorus?: SoundFontChorusConfig;
+  /** Efecto Reverb de convolución estéreo integrado por canal */
+  reverb?: SoundFontReverbConfig;
+}
+
+export interface MelodyPattern {
+  id: string;
+  name: string;
+  notes: MelodyNote[];
+  /** Duración explícita en beats (solo para migración de sesiones previas) */
+  lengthBeats?: number;
+}
+
+/**
+ * Región / clip visual 1:1 sobre las notas reales de un PianoRollTrack.
+ * Las notas siempre viven en `PianoRollTrack.notes`; las regiones son ventanas
+ * estructurales sincronizadas 1:1 con el Piano Roll para editar frases en Tracks.
+ */
+export interface MelodyRegion {
+  id: string;
+  name?: string;
+  startBeat: number;
+  durationBeats: number;
+  /** Duración base del motivo cuando la región se estira/repite en Tracks */
+  loopLengthBeats?: number;
+}
 
 export interface PianoRollTrack {
   id: string;
@@ -170,6 +247,11 @@ export interface PianoRollTrack {
   color: string;
   channelId: string;
   notes: MelodyNote[];
+  regions?: MelodyRegion[];
+  /** Campos legados solo para migración retrocompatible de sesiones anteriores */
+  patterns?: MelodyPattern[];
+  activePatternId?: string;
+  arrangementMode?: 'direct' | 'playlist';
   synthSettings?: SynthSettings;
   viewport?: {
     scrollLeft?: number;
@@ -204,6 +286,7 @@ export interface ChannelConfig {
   solo: boolean;
   color: string;
   synthSettings?: SynthSettings;
+  soundfontConfig?: ChannelSoundFontConfig;
 }
 
 export interface DrumStep {
@@ -222,6 +305,15 @@ export interface DrumChannel {
   solo: boolean;
 }
 
+export interface CustomDrumSample {
+  id: string;        // bufferId en AudioBufferRegistry / IndexedDB (ej: 'ds_...')
+  name: string;      // Nombre visible del sample (sin extensión)
+  sampleUrl: string; // URL canónica 'custom-sample://<id>'
+  createdAt?: number;
+}
+
+export const MAX_DRUM_LANES = 6;
+
 export interface PatternChainItem {
   id: string;
   type: 'pattern' | 'group' | 'rest';
@@ -229,6 +321,8 @@ export interface PatternChainItem {
   patternIndex?: number;      // 0 a N, o -1 para silencio legado
   startMeasure?: number;      // Posición lineal absoluta en compases (base 0, soporta decimales ej: 3.5)
   durationMeasures?: number;  // Duración lineal exacta en compases (ej: 1, 2, 4, 0.5)
+  laneIndex?: number;         // Capa/carril de batería (0..5, default 0) sincronizado 1:1 entre Drum Sequencer y Tracks
+  isMuted?: boolean;          // Silencio individual sincronizado entre Drum Sequencer y Tracks
   items?: PatternChainItem[]; // Legado (se aplana automáticamente a clips lineales)
 }
 
@@ -237,12 +331,19 @@ export interface LinearDrumClip {
   patternIndex: number;
   startMeasure: number;
   durationMeasures: number;
+  laneIndex: number;
+  isMuted?: boolean;
 }
 
 export interface FlatChainStep {
   patternIndex: number;
   originalItemId: string; // ID for UI highlighting
 }
+
+const sanitizeDrumLaneIndex = (raw: unknown): number => {
+  if (typeof raw !== 'number' || Number.isNaN(raw)) return 0;
+  return Math.max(0, Math.min(MAX_DRUM_LANES - 1, Math.floor(raw)));
+};
 
 /**
  * Convierte cualquier cadena de patrones (legada secuencial/grupos o lineal moderna)
@@ -256,6 +357,7 @@ export const normalizePatternChainToLinear = (chain: PatternChainItem[]): Linear
   for (const item of chain) {
     if (!item) continue;
     const isLinear = typeof item.startMeasure === 'number' && !Number.isNaN(item.startMeasure);
+    const laneIndex = sanitizeDrumLaneIndex(item.laneIndex);
 
     if (item.type === 'group' && item.items && item.items.length > 0 && !isLinear) {
       const repeats = Math.max(1, item.repeatCount || 1);
@@ -268,7 +370,8 @@ export const normalizePatternChainToLinear = (chain: PatternChainItem[]): Linear
               id: r === 0 ? sub.id : `${sub.id}_r${r}`,
               patternIndex: Math.max(0, sub.patternIndex ?? 0),
               startMeasure: sequentialCursor,
-              durationMeasures: subDur
+              durationMeasures: subDur,
+              laneIndex: sanitizeDrumLaneIndex(sub.laneIndex ?? laneIndex)
             });
           }
           sequentialCursor += subDur;
@@ -287,7 +390,9 @@ export const normalizePatternChainToLinear = (chain: PatternChainItem[]): Linear
           id: item.id,
           patternIndex: Math.max(0, item.patternIndex ?? 0),
           startMeasure: start,
-          durationMeasures: dur
+          durationMeasures: dur,
+          laneIndex,
+          ...(item.isMuted ? { isMuted: true } : {})
         });
       }
       sequentialCursor = Math.max(sequentialCursor, start + dur);
@@ -297,14 +402,16 @@ export const normalizePatternChainToLinear = (chain: PatternChainItem[]): Linear
           id: item.id || `clip_${sequentialCursor}`,
           patternIndex: Math.max(0, item.patternIndex ?? 0),
           startMeasure: sequentialCursor,
-          durationMeasures: dur
+          durationMeasures: dur,
+          laneIndex,
+          ...(item.isMuted ? { isMuted: true } : {})
         });
       }
       sequentialCursor += dur;
     }
   }
 
-  return clips.sort((a, b) => a.startMeasure - b.startMeasure);
+  return clips.sort((a, b) => a.startMeasure - b.startMeasure || a.laneIndex - b.laneIndex);
 };
 
 /**
@@ -317,8 +424,31 @@ export const normalizePatternChainItems = (chain: PatternChainItem[]): PatternCh
     patternIndex: clip.patternIndex,
     startMeasure: clip.startMeasure,
     durationMeasures: clip.durationMeasures,
-    repeatCount: Math.max(1, Math.round(clip.durationMeasures))
+    repeatCount: Math.max(1, Math.round(clip.durationMeasures)),
+    ...(clip.laneIndex > 0 ? { laneIndex: clip.laneIndex } : {}),
+    ...(clip.isMuted ? { isMuted: true } : {})
   }));
+};
+
+/**
+ * Calcula la cantidad efectiva de carriles (capas) de batería, garantizando que
+ * todo clip existente tenga su carril visible en Drum Sequencer y en Tracks.
+ */
+export const getEffectiveDrumLaneCount = (
+  chain: PatternChainItem[] | undefined,
+  declaredCount?: number
+): number => {
+  let maxLane = 0;
+  if (Array.isArray(chain)) {
+    for (let i = 0; i < chain.length; i++) {
+      const idx = sanitizeDrumLaneIndex(chain[i]?.laneIndex);
+      if (idx > maxLane) maxLane = idx;
+    }
+  }
+  const base = typeof declaredCount === 'number' && !Number.isNaN(declaredCount)
+    ? Math.floor(declaredCount)
+    : 1;
+  return Math.max(1, Math.min(MAX_DRUM_LANES, Math.max(base, maxLane + 1)));
 };
 
 export const flattenPatternChain = (chain: PatternChainItem[]): FlatChainStep[] => {
@@ -333,6 +463,7 @@ export const flattenPatternChain = (chain: PatternChainItem[]): FlatChainStep[] 
   }));
 
   for (const clip of clips) {
+    if (clip.isMuted) continue;
     const startM = Math.max(0, Math.floor(clip.startMeasure));
     const endM = Math.min(totalMeasures, Math.ceil(clip.startMeasure + clip.durationMeasures));
     for (let m = startM; m < endM; m++) {
@@ -377,4 +508,50 @@ export interface AudioTrack {
 export interface AudioTracksTimelineViewport {
   scrollLeft: number;
   zoomLevel: number; // Píxeles por beat (default 60)
+}
+
+export type PlaylistTool = 'paint' | 'slice' | 'select';
+
+export type PlaylistTrackSelection =
+  | { kind: 'harmony' }
+  | { kind: 'melody'; trackId: string }
+  | { kind: 'drums'; laneIndex?: number }
+  | { kind: 'audio'; trackId: string };
+
+export interface SelectedMelodyRegionRef {
+  trackId: string;
+  regionId: string;
+}
+
+export interface MelodyRegionClipboardItem {
+  trackId: string;
+  relativeStartBeat: number;
+  originalStartBeat?: number;
+  durationBeats: number;
+  loopLengthBeats?: number;
+  name?: string;
+  /** Notas normalizadas relativas al inicio (0..durationBeats) de la región copiada */
+  notes: MelodyNote[];
+}
+
+/** Tipos legados conservados solo para migración retrocompatible de sesiones anteriores */
+export interface MidiTrack {
+  id: string;
+  name: string;
+  color: string;
+  muted: boolean;
+  solo: boolean;
+}
+
+export interface MidiPatternClip {
+  id: string;
+  midiTrackId: string;
+  sourceType: 'drums' | 'melody';
+  drumPatternIndex?: number;
+  melodyTrackId?: string;
+  melodyPatternId?: string;
+  startBeat: number;
+  durationBeats: number;
+  offsetBeats: number;
+  isMuted: boolean;
 }

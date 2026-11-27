@@ -12,6 +12,8 @@ export const MIN_MIDI = 21; // A0 (piano de concierto 88 teclas)
 export const MAX_MIDI = 108; // C8
 export const NOTE_COUNT = MAX_MIDI - MIN_MIDI + 1;
 
+export type PianoRollTool = 'pencil' | 'slice' | 'select';
+
 export interface LassoRect {
   x1: number;
   y1: number;

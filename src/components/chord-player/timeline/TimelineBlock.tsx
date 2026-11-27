@@ -49,6 +49,8 @@ export const TimelineBlock: React.FC<TimelineBlockProps> = React.memo(({
   const isMicro = blockWidth < 28;
   const fontSize = isMicro ? '0.65rem' : isCompact ? '0.78rem' : '0.95rem';
 
+  const isMuted = block.type === 'silence' || block.type === 'break';
+
   return (
     <div
       className={`chord-block ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''}`}
@@ -61,7 +63,9 @@ export const TimelineBlock: React.FC<TimelineBlockProps> = React.memo(({
         zIndex: isSelected || isDragging ? 10 : 3,
         cursor: isSliceToolActive ? 'crosshair' : isDragging ? 'grabbing' : 'grab',
         padding: isMicro ? '0.2rem 2px' : isCompact ? '0.25rem 4px' : '0.4rem 0.6rem',
-        overflow: 'hidden'
+        overflow: 'hidden',
+        opacity: isMuted ? 0.45 : 1,
+        borderStyle: isMuted ? 'dashed' : undefined
       }}
       onMouseDown={(e) => onMouseDown(e, block)}
       onMouseMove={(e) => onMouseMove?.(e, block)}
@@ -123,7 +127,7 @@ export const TimelineBlock: React.FC<TimelineBlockProps> = React.memo(({
               whiteSpace: 'nowrap'
             }}
           >
-            {romanDegree ? romanDegree : `${durationBeats} ${durationBeats === 1 ? 'beat' : 'beats'}`}
+            {isMuted ? 'SILENCIO' : romanDegree ? romanDegree : `${durationBeats} ${durationBeats === 1 ? 'beat' : 'beats'}`}
           </span>
         )}
       </div>
